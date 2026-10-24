@@ -1,8 +1,20 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ClipboardList, Plus, Search } from 'lucide-react'
+import {
+  ClipboardList,
+  Download,
+  Plus,
+  Search,
+  Upload,
+} from 'lucide-react'
 import { useWorkspace } from '../app/WorkspaceContext'
 import { SeverityBadge, StatusBadge } from '../components/Badges'
+import { ImportBugDialog } from '../components/ImportBugDialog'
+import {
+  getExportFileName,
+  serializeBugExport,
+  type ApplyBugImportSuccess,
+} from '../features/bugs/exportImport'
 import { bugCode, formatDate } from '../features/bugs/format'
 import {
   BUG_SORTS,
@@ -28,8 +40,62 @@ const SORT_LABELS: Record<BugSort, string> = {
 }
 
 export function BugListPage() {
-  const { bugs } = useWorkspace()
+  const { bugs, importReports, notify } = useWorkspace()
   const [query, setQuery] = useState<BugQuery>(DEFAULT_BUG_QUERY)
+  const [importOpen, setImportOpen] = useState(false)
+  const importButtonRef = useRef<HTMLButtonElement>(null)
+
+  const closeImportDialog = useCallback(() => {
+    setImportOpen(false)
+    importButtonRef.current?.focus()
+  }, [])
+
+  const handleImported = useCallback(
+    (result: ApplyBugImportSuccess) => {
+      setImportOpen(false)
+      importButtonRef.current?.focus()
+      notify(
+        `Import complete. Added ${result.added}, skipped ${result.skipped}, replaced ${result.replaced}.`,
+      )
+    },
+    [notify],
+  )
+
+  const handleImportFailed = useCallback(
+    (message: string) => {
+      notify(message, { tone: 'error' })
+    },
+    [notify],
+  )
+
+  function handleExport() {
+    if (bugs.length === 0) {
+      notify('There are no reports to export yet.')
+      return
+    }
+
+    const exportedAt = new Date()
+    let objectUrl: string | null = null
+
+    try {
+      const blob = new Blob([serializeBugExport(bugs, exportedAt)], {
+        type: 'application/json',
+      })
+      objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = getExportFileName(exportedAt)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } catch {
+      notify('The export could not be created in this browser.', {
+        tone: 'error',
+      })
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }
 
   const projects = getProjectOptions(bugs)
   const visibleBugs = filterAndSortBugs(bugs, query)
@@ -61,6 +127,23 @@ export function BugListPage() {
           </p>
         </div>
         <div className="page-actions">
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={handleExport}
+          >
+            <Download size={16} aria-hidden="true" />
+            Export reports
+          </button>
+          <button
+            type="button"
+            className="button button--secondary"
+            ref={importButtonRef}
+            onClick={() => setImportOpen(true)}
+          >
+            <Upload size={16} aria-hidden="true" />
+            Import reports
+          </button>
           <Link to="/bugs/new" className="button button--primary">
             <Plus size={17} aria-hidden="true" />
             Report a bug
@@ -240,6 +323,16 @@ export function BugListPage() {
           )}
         </>
       )}
+
+      <ImportBugDialog
+        open={importOpen}
+        currentBugs={bugs}
+        onClose={closeImportDialog}
+        onExport={handleExport}
+        onApply={importReports}
+        onImported={handleImported}
+        onFailed={handleImportFailed}
+      />
     </>
   )
 }

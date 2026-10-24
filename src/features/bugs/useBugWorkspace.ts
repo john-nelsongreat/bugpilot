@@ -7,6 +7,11 @@ import {
   validateBugDraft,
 } from './validation'
 import { loadBugState, saveBugs } from './storage'
+import {
+  applyBugImport,
+  type ApplyBugImportResult,
+  type ImportMode,
+} from './exportImport'
 
 export type SaveActionResult =
   | { ok: true }
@@ -23,6 +28,8 @@ export type UpdateBugResult =
 export function useBugWorkspace() {
   const [initial] = useState(() => loadBugState())
   const [bugs, setBugs] = useState<Bug[]>(initial.bugs)
+  const [seeded, setSeeded] = useState(initial.seeded)
+  const [issue, setIssue] = useState(initial.issue)
 
   function commit(next: Bug[]): SaveActionResult {
     const result = saveBugs(next)
@@ -78,13 +85,33 @@ export function useBugWorkspace() {
     return { ok: true, bug: updated }
   }
 
+  function importReports(
+    importedBugs: Bug[],
+    invalidCount: number,
+    mode: ImportMode,
+  ): ApplyBugImportResult {
+    const result = applyBugImport({
+      currentBugs: bugs,
+      importedBugs,
+      invalidCount,
+      mode,
+    })
+    if (!result.ok) return result
+
+    setBugs(result.bugs)
+    setSeeded(false)
+    setIssue(null)
+    return result
+  }
+
   return {
     bugs,
-    seeded: initial.seeded,
-    issue: initial.issue,
+    seeded,
+    issue,
     createReport,
     updateReport,
     deleteReport,
     changeStatus,
+    importReports,
   }
 }

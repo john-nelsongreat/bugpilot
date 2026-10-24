@@ -9,12 +9,13 @@ This repository contains a working MVP, not a hosted product. See [Limitations](
 - **Overview dashboard** with live counts for total reports, open reports, in-progress reports, resolved reports, and high/critical reports, plus the five most recent reports.
 - **Bug log** with full-text search, severity/status/project filters, five sort orders, a live result count, and a clear-filters control.
 - **Report workflow**: create, view, edit, and delete reports, with a permanent-delete confirmation dialog.
+- **JSON export and validated import** for bug reports, with a preview, merge or replace modes, and a backup of the previous raw log before any import write.
 - **Validation**: title, project, language, and description are required; each field has a length limit; a fix status requires a proposed fix; `Verified` additionally requires verification notes.
 - **Fix tracking**: `Proposed`, `Accepted`, `Rejected`, and `Verified` are manual states. BugPilot never verifies a fix automatically. A bug's workflow status (`Open`, `In Progress`, `Resolved`, `Closed`) is separate from its fix status.
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
 - **Debug Assistant** at `/assistant`, backed by a local rule engine with 11 Python rules and 3 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives.
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
-- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete dialog, status announcements, auto-dismissing toast, and a WCAG contrast test for the theme tokens.
+- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete and import dialogs with focus return to their triggers, status announcements, auto-dismissing toast, and a WCAG contrast test for the theme tokens.
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
 
 ## Screenshots
@@ -126,6 +127,62 @@ Open `http://localhost:4173`. A preview server is a separate browser origin from
 
 Routes are declared in `src/App.tsx`.
 
+## Export and import
+
+The **Bug log** header has **Export reports** and **Import reports** actions. Both work entirely in the browser and handle bug reports only.
+
+### Export
+
+**Export reports** downloads a file named `bugpilot-export-YYYY-MM-DD.json`. The date is taken from `exportedAt` in UTC, so it always matches the date in the envelope. The file is pretty-printed JSON:
+
+```json
+{
+  "app": "bugpilot",
+  "schemaVersion": 1,
+  "exportedAt": "2026-10-24T20:40:31.220Z",
+  "bugs": [
+    {
+      "id": "sample-checkout-nan",
+      "title": "Checkout total shows NaN after a promo code",
+      "description": "…",
+      "projectName": "Northstar Checkout",
+      "language": "TypeScript",
+      "errorMessage": "…",
+      "stepsToReproduce": "…",
+      "expectedBehavior": "…",
+      "actualBehavior": "…",
+      "severity": "Critical",
+      "status": "Open",
+      "notes": "…",
+      "proposedFix": "",
+      "fixStatus": null,
+      "verificationNotes": "",
+      "createdAt": "2026-10-24T18:35:07.721Z",
+      "updatedAt": "2026-10-24T18:35:07.721Z"
+    }
+  ]
+}
+```
+
+The array contains every saved report with all of its fields, including fix state, verification notes, and original timestamps. Theme preference, assistant input or results, footer joke indices, and every other storage key are never exported. With an empty log, the app says there is nothing to export and does not download a file. The download is built with a `Blob` and an object URL, which is revoked after the click; nothing is uploaded.
+
+### Import
+
+The import dialog accepts a `.json` file up to **5 MB** and **5,000 reports**. It validates the envelope (`app` must be `bugpilot`; `schemaVersion` must be `1`) and every report with the same rules as the form:
+
+- required id, title, description, project, language, severity, status, and valid `createdAt`/`updatedAt` timestamps;
+- valid severity, status, and fix-status values;
+- unique ids within the file and the same per-field length limits as the form;
+- a proposed fix whenever a fix status is set, and verification notes when the fix status is `Verified`.
+
+A newer `schemaVersion` is rejected with an explanation, as are a different `app`, a missing `bugs` array, and malformed JSON. Unknown fields are dropped. Invalid reports are listed with their positions and reasons; they are never repaired or silently accepted, and only the valid records in a mixed file can be imported. Prototype-related keys such as `__proto__`, `constructor`, and `prototype` are ignored. Import never uses `eval` or dynamic code, and imported text is rendered only as plain text.
+
+Before writing, the dialog shows the filename; valid, invalid, and already-existing counts; and a preview of what will happen. The default **Add new reports only** mode keeps the current log and skips imported reports whose ids already exist. **Replace all reports** deletes the whole current log and becomes available only after a second, explicit acknowledgement; the confirm button is disabled when the file contains zero valid reports.
+
+Immediately before any import write, the current raw stored value is copied to `bugpilot.bugs.preimport.v1`. If the backup write or the main write fails, the existing log is left unchanged and a persistent error toast explains the failure. This is a single recovery slot, not a version history: every import overwrites it, so export a file before a replace if you may need an independent copy.
+
+A successful import preserves the imported timestamps, updates the dashboard and log immediately, reports added/skipped/replaced counts in a toast, and does not bring back the first-run sample notice. Cancel, Escape, the close button, or a backdrop click change nothing. The dialog traps focus while open and returns focus to **Import reports** when it closes.
+
 ## Architecture
 
 ### Source tree
@@ -133,12 +190,12 @@ Routes are declared in `src/App.tsx`.
 ```text
 src/
 ├─ app/            Workspace context: loads state, exposes bug actions, and owns toast notifications
-├─ components/     Shared layout, badges, delete dialog, toast, and rotating footer joke
+├─ components/     Shared layout, badges, delete and import dialogs, toast, and footer joke
 ├─ content/        Static joke sets for each page key
 ├─ diagnostics/    Diagnostic types, matching engine, rule tests
 │  └─ rules/       Python and JavaScript diagnostic rules
 ├─ features/
-│  ├─ bugs/        Bug types, samples, validation, storage, querying, and the workspace hook
+│  ├─ bugs/        Bug types, samples, validation, storage, querying, export/import, and the workspace hook
 │  ├─ footer/      Joke selection, 60-second rotation, and sessionStorage handling
 │  └─ theme/       Theme resolution, persistence, and the WCAG contrast test
 ├─ pages/          Route-level pages for the dashboard, log, form, detail, assistant, and 404
@@ -156,6 +213,8 @@ Test files live beside the module they test. For example, the Python rules live 
 **Bug storage.** `src/features/bugs/storage.ts` owns the `bugpilot.bugs.v1` key. The stored value is a JSON object with a `schemaVersion` and a `bugs` array. On load, every record is validated again; invalid records are skipped. If the whole value is unreadable JSON or has the wrong shape, the app shows a "Saved data needs attention" notice, leaves the original key untouched, and writes a best-effort copy to `bugpilot.bugs.recovery.v1`. When the key is absent, five fictional sample reports are created and saved. Saves write the complete array; there is no server copy.
 
 **Validation.** `src/features/bugs/validation.ts` is the single source of truth for field rules. It checks the four required fields, enforces per-field character limits, requires a proposed fix whenever a fix status is set, and requires verification notes for `Verified`. The form uses these errors for inline messages and a summary; storage parsing also calls the same validation so malformed saved records are not displayed.
+
+**Export and import.** `src/features/bugs/exportImport.ts` is a pure module with no React imports. It builds and serialises the export envelope, parses and validates an import file, counts existing ids, and applies a merge or replace while writing the backup key. It maps each allowed report field explicitly, so unknown or prototype-related keys cannot reach the log. `src/components/ImportBugDialog.tsx` owns only the dialog interaction and file reading; `src/pages/BugListPage.tsx` triggers the download and reports the result.
 
 **Fix states.** Fix status is an optional field on a bug, not a derived value. `src/pages/BugFormPage.tsx` edits it; `src/pages/BugDetailPage.tsx` displays it and allows quick changes to the separate workflow status. Marking a fix `Verified` is always a manual action, and the selected fix status is never inferred from the fix text or from the assistant. `Accepted` means the proposed fix was accepted; `Verified` means the user also recorded how it was checked.
 
@@ -304,13 +363,15 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 - **Saved browser data.** `localStorage` uses these keys:
   - `bugpilot.bugs.v1` — the saved bug reports.
   - `bugpilot.bugs.recovery.v1` — a best-effort copy of raw stored text when the app cannot read it. It is not an automatic backup of healthy data.
+  - `bugpilot.bugs.preimport.v1` — the complete raw bug value captured immediately before the most recent successful import write. It is overwritten by the next import and can contain the same report text as the main key.
   - `bugpilot.theme.v1` — the selected light or dark theme.
 - **Session-only data.** Footer joke indices use `sessionStorage` keys named `bugpilot.footerJoke.<pageKey>`. They store an index, not page content.
 - **Assistant text is not saved.** Pasted error text, code snippets, reproduction details, and results are held in React component state for the current tab session. They are never written to localStorage, sessionStorage, a bug report, or any server. Refreshing or closing the tab discards them.
 - **No code execution.** BugPilot never executes submitted code, runs shell commands, installs packages, or modifies files on the user's computer. The diagnostic engine only pattern-matches text.
 - **Suggestions are not proof.** Possible fixes, debugging steps, and verification checklists are displayed text. The app does not apply a suggested change or mark a fix as verified. The user must make and verify changes outside BugPilot and record the result manually.
 - **Local does not mean encrypted.** Anyone with access to the browser profile can read the saved reports. Use a device and browser profile you trust, and do not treat this as secure storage for secrets.
-- **Deletion is permanent.** Deleting a report removes it from the browser's stored array immediately; there is no undo. Export/backup is not implemented.
+- **Deletion is permanent.** Deleting a report removes it from the browser's stored array immediately; there is no undo. Export a JSON file first if you may need a copy. An import copies the previous raw log to `bugpilot.bugs.preimport.v1`, but that single slot is overwritten by the next import.
+- **Imported text is treated as text.** Import never executes code, fetches URLs, or interprets markup. Every imported field is validated and displayed through the same React text rendering as a manually entered report.
 
 ## Limitations
 
@@ -319,7 +380,9 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 - There are no Node.js or `PATH`-specific diagnostic rules. JavaScript runtime errors can still match the three JavaScript rules.
 - Unrecognised input is reported plainly with general steps; no cause or fix is guessed.
 - Error text is capped at 20,000 characters.
-- Reports live in one browser origin. Clearing site data, using a different browser profile, or switching between the dev and preview ports hides the reports saved under the other origin. There is no export, import, backup, sync, or multi-user support.
+- Reports live in one browser origin. Clearing site data, using a different browser profile, or switching between the dev and preview ports hides the reports saved under the other origin. JSON export and import move reports between origins, but there is no automatic backup, sync, or multi-user support.
+- Import accepts only BugPilot schema version 1 exports, up to 5 MB and 5,000 reports. It imports reports only; theme, assistant text, and footer state are not transferable. A file with newer schema version is rejected rather than guessed at.
+- The pre-import backup is a single key overwritten by each import. It is a safety copy for the immediately preceding log, not a version history.
 - Fixes are never verified automatically, and the app does not run the user's code to verify anything.
 - No backend, authentication, cloud storage, external AI provider, deployment, or hosting is included.
 - Browser testing has been done on Chromium on Windows only. Firefox, Safari, and physical mobile devices are not covered.
@@ -348,7 +411,7 @@ To revert to Vitest's defaults, remove `fileParallelism: false`, `pool: 'threads
 
 None of the following exists in the current app:
 
-- JSON import/export, backup/restore, or any sync between browsers.
+- Automatic backup/restore, version history, or sync between browsers. The current app exports and imports reports manually only.
 - Additional diagnostic rules, including Node.js and `PATH`-specific cases.
 - Integration with test-runner or CI output.
 - An optional external AI provider. Any such provider would need to be opt-in, clearly disclosed, and reviewed for the project's no-transmission constraint; no provider is configured now.
@@ -357,4 +420,4 @@ None of the following exists in the current app:
 
 ## Manual test checklist
 
-Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the joke footer, toast behavior, keyboard navigation, responsive layouts, corrupted storage, and the production preview.
+Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, export and import, the joke footer, toast behavior, keyboard navigation, responsive layouts, corrupted storage, and the production preview.

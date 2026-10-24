@@ -271,7 +271,7 @@ Perform these checks on a fresh assistant form unless a step says otherwise.
   ```
   - Expected: `0`. The pasted error text is not stored.
 - [ ] Run `Object.keys(localStorage)`.
-  - Expected: only BugPilot's keys appear: `bugpilot.bugs.v1`, possibly `bugpilot.theme.v1`, and `bugpilot.bugs.recovery.v1` only if a storage problem occurred. No assistant text appears in any key.
+  - Expected: only BugPilot's keys appear: `bugpilot.bugs.v1`, possibly `bugpilot.theme.v1`, and `bugpilot.bugs.recovery.v1` only if a storage problem occurred. After an import, `bugpilot.bugs.preimport.v1` may also appear. No assistant text appears in any key.
 - [ ] Run `Object.keys(sessionStorage).filter((key) => key.startsWith('bugpilot.footerJoke.'))`.
   - Expected: only footer joke index keys are present; no assistant text or result.
 - [ ] Reload the Assistant page. Expected: the form is empty and no previous pasted text or result is restored.
@@ -384,7 +384,96 @@ Do this in the disposable profile. If the profile contains reports you care abou
 - [ ] Reload and expected: your reports return (six reports if you followed sections 1–7 in order on a fresh profile: the five seeded reports plus **Manual check report (edited)**), and the alert is gone.
 - [ ] Optional partial-record check: instead of invalid JSON, remove one field from one record in the saved array and reload. Expected: the readable reports are shown, the skipped count is reported, and the original raw value is copied to the recovery key.
 
-## 13. Production preview
+## 13. Export and import
+
+Use a disposable profile with the five sample reports. Do not run the replace or empty-log steps in a profile that contains reports you want to keep. Export a copy first if you are unsure.
+
+### Export
+
+- [ ] Open **Bug log**. Expected: **Export reports** and **Import reports** are visible in the page actions on desktop and at 390px.
+- [ ] Click **Export reports**.
+  - Expected: a file named `bugpilot-export-YYYY-MM-DD.json` downloads, where the date matches the UTC date in the file's `exportedAt` value. The page does not change and no toast appears.
+  - Expected: in DevTools, no network request is made for the export.
+- [ ] Open the downloaded file in a text editor.
+  - Expected: it is pretty-printed JSON with `app` set to `bugpilot`, `schemaVersion` set to `1`, an ISO `exportedAt`, and a `bugs` array of five reports.
+  - Expected: each report has `id`, `title`, `description`, `projectName`, `language`, `errorMessage`, `stepsToReproduce`, `expectedBehavior`, `actualBehavior`, `severity`, `status`, `notes`, `proposedFix`, `fixStatus`, `verificationNotes`, `createdAt`, and `updatedAt`.
+  - Expected: there are no theme, assistant, or footer keys and no other storage data.
+- [ ] Note one report's `createdAt` and `updatedAt` values for the import round-trip check below.
+- [ ] In the Console, set an empty log and reload:
+  ```js
+  localStorage.setItem('bugpilot.bugs.v1', JSON.stringify({ schemaVersion: 1, bugs: [] }))
+  location.reload()
+  ```
+- [ ] On the now-empty **Bug log**, click **Export reports**.
+  - Expected: a toast says **There are no reports to export yet.** and no file downloads.
+
+### Import preview, merge, and backup
+
+- [ ] With the log still empty, click **Import reports**.
+  - Expected: the dialog heading is **Import bug reports** and explains that nothing is saved until confirmation.
+  - Expected: focus starts in the file input; the hint says JSON only, up to 5 MB and 5,000 reports.
+  - Expected: **Export current reports first** is disabled because the log is empty.
+- [ ] Press `Escape`.
+  - Expected: the dialog closes, focus returns to **Import reports**, and the log is still empty.
+- [ ] Reopen the dialog and choose the exported file.
+  - Expected: **Preview** shows the filename, **Valid reports: 5**, **Invalid reports: 0**, and **Already in your log: 0**.
+  - Expected: the default mode is **Add new reports only**, with the outcome **5 new reports will be added. 0 matching existing reports and 0 invalid reports will be skipped.**
+- [ ] Click **Add reports**.
+  - Expected: a toast says **Import complete. Added 5, skipped 0, replaced 0.** The dialog closes, focus returns to **Import reports**, and the log shows five rows.
+  - Expected: the **Sample workspace loaded.** notice does not appear, including after a reload.
+  - Expected: the noted `createdAt`/`updatedAt` values are unchanged.
+  - Expected: in the Console, `localStorage.getItem('bugpilot.bugs.preimport.v1')` is exactly `{"schemaVersion":1,"bugs":[]}`.
+  - Expected: the theme and footer behave as before, and `bugpilot.theme.v1` is unchanged.
+- [ ] Import the same file again.
+  - Expected: the preview shows **Already in your log: 5** and **0 new reports will be added. 5 matching existing reports and 0 invalid reports will be skipped.**
+  - Expected: **Add reports** produces **Import complete. Added 0, skipped 5, replaced 0.** and the log still has five reports.
+
+### Replace mode and invalid files
+
+- [ ] Create one extra report so the log has six reports, then open **Import reports** and choose the five-report export again.
+- [ ] Select **Replace all reports**.
+  - Expected: a warning says **All 6 current reports will be deleted and replaced by 5 imported reports.**
+  - Expected: **Replace all reports** is disabled until **I understand this replaces all 6 current reports.** is checked.
+- [ ] Check the acknowledgement and click **Replace all reports**.
+  - Expected: **Import complete. Added 5, skipped 0, replaced 6.** The log has exactly the five imported reports, and the extra report is gone.
+- [ ] In the Console, copy the current log to a test backup, then empty the log for the invalid-file checks:
+  ```js
+  sessionStorage.setItem('bugpilot.testImportBackup', localStorage.getItem('bugpilot.bugs.v1'))
+  localStorage.setItem('bugpilot.bugs.v1', JSON.stringify({ schemaVersion: 1, bugs: [] }))
+  location.reload()
+  ```
+- [ ] On the empty **Bug log**, create `bad.json` in a text editor containing `{bad json`, then import it.
+  - Expected: **This file is not valid JSON. Choose a BugPilot JSON export.** is announced as an alert, and **Add reports** is disabled.
+- [ ] Import a file containing:
+  ```json
+  { "app": "another-app", "schemaVersion": 1, "bugs": [] }
+  ```
+  - Expected: **This file is not a BugPilot export.** and no report is changed.
+- [ ] Make a copy of the valid export, empty the `title` of the second report, and also clear the `verificationNotes` of the report whose `fixStatus` is `Verified`.
+  - Expected: the preview reports **Valid reports: 3** and **Invalid reports: 2**, lists **Report 2: Enter a title.** and **Report 3: Record how the fix was verified before marking it verified.** (positions follow the array order), and **Add reports** imports only the three valid reports.
+  - Expected: **Import complete. Added 3, skipped 2, replaced 0.**, the failed records are not repaired, and the log shows only the three valid reports.
+- [ ] In the Console, restore the saved log:
+  ```js
+  localStorage.setItem('bugpilot.bugs.v1', sessionStorage.getItem('bugpilot.testImportBackup'))
+  sessionStorage.removeItem('bugpilot.testImportBackup')
+  location.reload()
+  ```
+  - Expected: the five imported reports return.
+
+### Dialog focus, access, and responsive behavior
+
+- [ ] With at least one report present, open **Import reports** and press `Tab` and `Shift+Tab` repeatedly.
+  - Expected: focus stays inside the dialog and cycles through its controls; the file input receives focus first.
+- [ ] Trigger an invalid-file error, then move through the dialog with the keyboard.
+  - Expected: the error is exposed as an alert; **Cancel** closes the dialog without changing storage.
+- [ ] With no file selected, click outside the dialog or the close button.
+  - Expected: the dialog closes, focus returns to **Import reports**, and no storage key changes.
+- [ ] At 390 × 844 in both themes, open the dialog.
+  - Expected: it fits the viewport, its actions are visible, the page does not scroll sideways, and the file picker, mode radios, preview, and acknowledgement can be operated without clipping.
+- [ ] At 1440 × 900 in both themes, repeat the preview and confirm the dialog is centered and readable.
+- [ ] Confirm the 5 MB, 5,000-report, newer-schema, and zero-valid-report paths in the automated tests; do not create multi-megabyte fixtures by hand.
+
+## 14. Production preview
 
 - [ ] Stop the development server with `Ctrl+C`.
 - [ ] Build the production bundle:
@@ -410,6 +499,7 @@ Do this in the disposable profile. If the profile contains reports you care abou
   Expected: every route loads; `/missing-page` shows **Page not found**, and reloading a client-side route does not return a server error.
 - [ ] Toggle the theme, navigate away and back, and reload. Expected: the theme persists for `localhost:4173`.
 - [ ] Analyze the Python `ModuleNotFoundError` example and the JavaScript `ReferenceError: userCount is not defined` example. Expected: both results render, with the same categories and confidence as in development.
+- [ ] On **Bug log**, click **Export reports** and confirm the production build downloads a valid `bugpilot-export-YYYY-MM-DD.json` file. Open **Import reports**, choose that file, and expected: the preview matches the five sample reports and **Already in your log: 5**. Click **Add reports** and expected: **Import complete. Added 0, skipped 5, replaced 0.**, with no sample notice and no external request.
 - [ ] Scroll to the footer and expected: a page-specific joke is present.
 - [ ] Check the Console. Expected: no errors during load or navigation.
 - [ ] In the Network tab, reload with **All** selected. Expected: requests go only to `localhost:4173` (HTML, JS, CSS, fonts, favicon). There are no requests to font CDNs, analytics, APIs, or other external hosts.
