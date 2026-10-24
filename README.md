@@ -113,6 +113,12 @@ npm run preview -- --port 4173 --strictPort
 
 Open `http://localhost:4173`. A preview server is a separate browser origin from the development server, so `localhost:4173` and `localhost:5180` have separate `localStorage` data and separate sample reports. Refresh a deep route such as `/bugs` to confirm the preview server serves the single-page app for client-side routes.
 
+## Deployment
+
+BugPilot is a static single-page app. A Vercel deployment uses `npm run build` as the build command and `dist` as the output directory. The committed `vercel.json` rewrites requests that do not match an existing file to `/index.html`, so direct visits to client-side routes such as `/bugs` and `/assistant` load the app instead of a server 404.
+
+No environment variables or backend are required. Bug reports are stored in each visitor's own browser, so a deployed copy does not share data between visitors. No live deployment URL is included yet.
+
 ## Routes
 
 | Route | Page |
@@ -421,3 +427,7 @@ None of the following exists in the current app:
 ## Manual test checklist
 
 Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, export and import, the joke footer, toast behavior, keyboard navigation, responsive layouts, corrupted storage, and the production preview.
+
+## License
+
+BugPilot is released under the MIT License. See [LICENSE](LICENSE) for the full text.
