@@ -1,0 +1,95 @@
+export type DiagnosticLanguage = 'auto' | 'python' | 'javascript'
+
+export type ResolvedLanguage = Exclude<DiagnosticLanguage, 'auto'>
+
+export type SupportedDiagnosticCategory =
+  | 'missing-module'
+  | 'import-failure'
+  | 'undefined-name'
+  | 'type-mismatch'
+  | 'missing-attribute'
+  | 'missing-key'
+  | 'index-out-of-range'
+  | 'missing-file'
+  | 'permission-denied'
+  | 'syntax-error'
+  | 'indentation-error'
+
+export type DiagnosticCategory =
+  | SupportedDiagnosticCategory
+  | 'unrecognized'
+
+export type ConfidenceLevel = 'low' | 'medium' | 'high'
+
+export interface DiagnosticInput {
+  language: DiagnosticLanguage
+  errorText: string
+  codeSnippet?: string
+  reproductionDetails?: string
+}
+
+export type EvidenceSource =
+  | 'error text'
+  | 'code snippet'
+  | 'reproduction details'
+
+export interface DiagnosticEvidence {
+  source: EvidenceSource
+  label: string
+  quote: string
+  lineNumber?: number
+}
+
+export interface DiagnosticConfidence {
+  level: ConfidenceLevel
+  reason: string
+}
+
+export interface PossibleFix {
+  explanation: string
+  whereItMayApply: string
+  exampleCode: string
+}
+
+export interface DiagnosticResult {
+  category: DiagnosticCategory
+  matchedSignature: string | null
+  likelyCause: string
+  evidence: DiagnosticEvidence[]
+  debuggingSteps: string[]
+  possibleFix: PossibleFix | null
+  verificationSteps: string[]
+  confidence: DiagnosticConfidence
+  limitations: string[]
+  alternativeExplanations: string[]
+}
+
+export interface RuleContext {
+  primaryLine: string
+  errorText: string
+  codeSnippet: string
+  reproductionDetails: string
+}
+
+export interface RuleMatch {
+  signature: string
+  specificity: 'specific' | 'generic'
+  captures: Readonly<Record<string, string>>
+}
+
+export interface RuleNarrative {
+  likelyCause: string
+  debuggingSteps: string[]
+  possibleFix: PossibleFix
+  verificationSteps: string[]
+  limitations: string[]
+  alternativeExplanations: string[]
+}
+
+export interface DiagnosticRule {
+  id: string
+  language: ResolvedLanguage
+  category: SupportedDiagnosticCategory
+  match(line: string): RuleMatch | null
+  explain(match: RuleMatch, context: RuleContext): RuleNarrative
+}
