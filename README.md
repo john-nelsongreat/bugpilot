@@ -1,5 +1,7 @@
 # BugPilot
 
+**Live demo:** [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app)
+
 BugPilot is a local-first bug tracker and debugging assistant that runs entirely in the browser. It is built for capturing a reproducible bug report, keeping a searchable triage log, recording a fix through manual states, and getting rule-based hints from pasted Python or JavaScript error text. There is no account, backend, cloud database, telemetry, or AI API: saved reports and the theme preference stay in this browser, and the assistant analyses pasted text in the page without sending or storing it.
 
 This repository contains a working MVP, not a hosted product. See [Limitations](#limitations) for what is intentionally out of scope.
@@ -117,7 +119,7 @@ Open `http://localhost:4173`. A preview server is a separate browser origin from
 
 BugPilot is a static single-page app. A Vercel deployment uses `npm run build` as the build command and `dist` as the output directory. The committed `vercel.json` rewrites requests that do not match an existing file to `/index.html`, so direct visits to client-side routes such as `/bugs` and `/assistant` load the app instead of a server 404.
 
-No environment variables or backend are required. Bug reports are stored in each visitor's own browser, so a deployed copy does not share data between visitors. No live deployment URL is included yet.
+No environment variables or backend are required. Bug reports are stored in each visitor's own browser, so a deployed copy does not share data between visitors. The app is deployed on Vercel at [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
 
 ## Routes
 
