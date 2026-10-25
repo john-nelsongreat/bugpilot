@@ -276,4 +276,18 @@ describe('SaveDiagnosisDialog', () => {
     fireEvent.keyDown(document, { key: 'Tab' })
     expect(close).toHaveFocus()
   })
+
+  it('makes the scrollable proposed-fix preview keyboard-focusable', () => {
+    renderDialog()
+
+    const dialog = screen.getByRole('dialog', {
+      name: 'Save diagnosis to this bug?',
+    })
+    const preview = dialog.querySelector<HTMLElement>('pre.code-block')
+    if (!preview) throw new Error('Proposed fix preview not found')
+
+    expect(preview).toHaveAttribute('tabindex', '0')
+    preview.focus()
+    expect(preview).toHaveFocus()
+  })
 })

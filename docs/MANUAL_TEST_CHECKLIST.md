@@ -337,7 +337,7 @@ Run this on a fresh profile with the five sample reports. *Checkout total shows 
   - Expected: the dialog **Save diagnosis to this bug?** shows Category `Type mismatch`, the matched signature, **High confidence**, the evidence item checked, and a **Proposed fix** preview containing the explanation, a blank line, `Example code:`, and the example code.
   - Expected: it says this bug has no proposed fix, so saving stores one and sets the fix state to **Proposed**.
   - Expected: it says nothing is marked as verified, and focus starts on **Cancel**.
-- [ ] Press `Tab` and `Shift+Tab` repeatedly. Expected: focus cycles through the dialog's close button, **Cancel**, the evidence checkbox, and **Save diagnosis** only. Press `Escape`.
+- [ ] Press `Tab` and `Shift+Tab` repeatedly. Expected: focus cycles through the dialog's close button, the evidence checkbox, the keyboard-focusable **Proposed fix** preview, **Cancel**, and **Save diagnosis** only. Focus the preview and use the arrow keys to scroll it. Press `Escape`.
   - Expected: the dialog closes, focus returns to **Save diagnosis to this bug**, and no report changes.
 - [ ] Reopen the preview, untick the evidence checkbox, and click **Cancel**.
   - Expected: no diagnosis is saved, and focus returns to the trigger. In the Console, this returns `undefined`:

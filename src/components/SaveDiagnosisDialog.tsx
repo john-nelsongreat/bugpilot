@@ -189,7 +189,7 @@ export function SaveDiagnosisDialog({
           aria-labelledby="save-fix-preview-heading"
         >
           <h3 id="save-fix-preview-heading">Proposed fix</h3>
-          <pre className="code-block">
+          <pre className="code-block" tabIndex={0}>
             <code>{composition.text}</code>
           </pre>
           {composition.droppedExampleCode && !composition.exceedsLimit ? (
