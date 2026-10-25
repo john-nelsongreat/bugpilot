@@ -141,14 +141,12 @@
 }
 
 html {
-  min-width: 320px;
   background: var(--bg);
   scrollbar-gutter: stable;
 }
 
 body {
   margin: 0;
-  min-width: 320px;
   min-height: 100svh;
   color: var(--ink);
   background-color: var(--bg);
