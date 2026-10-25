@@ -14,8 +14,10 @@ import {
 } from './exportImport'
 import {
   attachDiagnosisToBug,
+  removeDiagnosisFromBug,
   type AttachDiagnosisInput,
   type AttachDiagnosisResult,
+  type RemoveDiagnosisResult,
 } from './diagnosis'
 
 export type SaveActionResult =
@@ -119,6 +121,32 @@ export function useBugWorkspace() {
     return { ok: true, bug: attached.bug }
   }
 
+  function removeDiagnosis(id: string): RemoveDiagnosisResult {
+    const existing = bugs.find((bug) => bug.id === id)
+    if (!existing) {
+      return {
+        ok: false,
+        code: 'bug-not-found',
+        message: 'This bug report no longer exists.',
+      }
+    }
+
+    const removed = removeDiagnosisFromBug(existing)
+    if (!removed.ok) return removed
+
+    const next = bugs.map((bug) => (bug.id === id ? removed.bug : bug))
+    const result = commit(next)
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: 'storage-write-failed',
+        message: result.message,
+      }
+    }
+
+    return { ok: true, bug: removed.bug }
+  }
+
   function importReports(
     importedBugs: Bug[],
     invalidCount: number,
@@ -147,6 +175,7 @@ export function useBugWorkspace() {
     deleteReport,
     changeStatus,
     attachDiagnosis,
+    removeDiagnosis,
     importReports,
   }
 }

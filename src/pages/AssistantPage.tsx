@@ -10,33 +10,12 @@ import {
   MAX_ERROR_TEXT_LENGTH,
   diagnose,
 } from '../diagnostics/engine'
+import { CONFIDENCE_LABELS, diagnosticCategoryLabel } from '../diagnostics/labels'
 import { copyTextToClipboard } from '../lib/clipboard'
 import type {
-  DiagnosticCategory,
   DiagnosticLanguage,
   DiagnosticResult,
 } from '../diagnostics/types'
-
-const CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
-  'missing-module': 'Missing module',
-  'import-failure': 'Import failure',
-  'undefined-name': 'Undefined name',
-  'type-mismatch': 'Type mismatch',
-  'missing-attribute': 'Missing attribute',
-  'missing-key': 'Missing key',
-  'index-out-of-range': 'Index out of range',
-  'missing-file': 'Missing file',
-  'permission-denied': 'Permission denied',
-  'syntax-error': 'Syntax error',
-  'indentation-error': 'Indentation error',
-  unrecognized: 'Unrecognised',
-}
-
-const CONFIDENCE_LABELS = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-} as const
 
 const EMPTY_VALUE_NOTE =
   'No specific line was matched. The general steps below still apply.'
@@ -150,7 +129,7 @@ export function AssistantPage() {
   }
 
   const announcement = result
-    ? `Analysis complete. ${CATEGORY_LABELS[result.category]}. ${
+    ? `Analysis complete. ${diagnosticCategoryLabel(result.category)}. ${
         CONFIDENCE_LABELS[result.confidence.level]
       } confidence.`
     : ''
@@ -332,7 +311,7 @@ export function AssistantPage() {
                   ref={resultHeadingRef}
                   tabIndex={-1}
                 >
-                  {CATEGORY_LABELS[result.category]}
+                  {diagnosticCategoryLabel(result.category)}
                 </h2>
                 <div className="assistant-result-meta">
                   <span

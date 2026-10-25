@@ -20,6 +20,15 @@ export type AttachDiagnosisResult =
   | { ok: true; bug: Bug }
   | { ok: false; code: AttachDiagnosisErrorCode; message: string }
 
+export type RemoveDiagnosisErrorCode =
+  | 'bug-not-found'
+  | 'no-diagnosis'
+  | 'storage-write-failed'
+
+export type RemoveDiagnosisResult =
+  | { ok: true; bug: Bug }
+  | { ok: false; code: RemoveDiagnosisErrorCode; message: string }
+
 export function attachDiagnosisToBug(
   existing: Bug,
   input: AttachDiagnosisInput,
@@ -66,6 +75,30 @@ export function attachDiagnosisToBug(
       proposedFix,
       fixStatus: existing.fixStatus ?? 'Proposed',
       diagnosis: parsed.diagnosis,
+      updatedAt: now,
+    },
+  }
+}
+
+export function removeDiagnosisFromBug(
+  existing: Bug,
+  now: string = new Date().toISOString(),
+): RemoveDiagnosisResult {
+  if (existing.diagnosis === undefined) {
+    return {
+      ok: false,
+      code: 'no-diagnosis',
+      message: 'This bug has no saved diagnosis to remove.',
+    }
+  }
+
+  const bug = { ...existing }
+  delete bug.diagnosis
+
+  return {
+    ok: true,
+    bug: {
+      ...bug,
       updatedAt: now,
     },
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeBug, makeBugDraft } from '../../test/factories'
+import { makeBug, makeBugDraft, makeSavedDiagnosis } from '../../test/factories'
 import {
   DIAGNOSIS_LIMITS,
   toBugDraft,
@@ -8,6 +8,7 @@ import {
 } from './validation'
 import {
   attachDiagnosisToBug,
+  removeDiagnosisFromBug,
   type AttachDiagnosisInput,
 } from './diagnosis'
 import type { SavedDiagnosis } from './types'
@@ -517,5 +518,65 @@ describe('attachDiagnosisToBug', () => {
     })
     expect(Object.keys(result.bug)).toContain('diagnosis')
     expect(bug.diagnosis).toEqual(oldDiagnosis)
+  })
+})
+
+describe('removeDiagnosisFromBug', () => {
+  it('removes only the diagnosis, keeps every other field, and updates updatedAt', () => {
+    const diagnosis = makeSavedDiagnosis()
+    const bug = makeBug({
+      id: 'remove-diagnosis',
+      proposedFix: 'Keep this proposed fix.',
+      fixStatus: 'Verified',
+      verificationNotes: 'Verified by hand on staging.',
+      status: 'Resolved',
+      diagnosis,
+      updatedAt: '2026-10-20T08:00:00.000Z',
+    })
+    const original = structuredClone(bug)
+    const removalAt = '2026-10-25T14:00:00.000Z'
+
+    const result = removeDiagnosisFromBug(bug, removalAt)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.bug).not.toHaveProperty('diagnosis')
+    expect(result.bug).toMatchObject({
+      id: bug.id,
+      title: bug.title,
+      description: bug.description,
+      projectName: bug.projectName,
+      language: bug.language,
+      errorMessage: bug.errorMessage,
+      stepsToReproduce: bug.stepsToReproduce,
+      expectedBehavior: bug.expectedBehavior,
+      actualBehavior: bug.actualBehavior,
+      severity: bug.severity,
+      status: 'Resolved',
+      notes: bug.notes,
+      proposedFix: 'Keep this proposed fix.',
+      fixStatus: 'Verified',
+      verificationNotes: 'Verified by hand on staging.',
+      createdAt: bug.createdAt,
+    })
+    expect(result.bug.updatedAt).toBe(removalAt)
+    expect(result.bug.updatedAt).not.toBe(bug.updatedAt)
+    expect(JSON.stringify(result.bug)).not.toContain('"diagnosis"')
+    expect(bug).toEqual(original)
+  })
+
+  it('returns no-diagnosis for a report without one and does not change it', () => {
+    const bug = makeBug({ id: 'remove-nothing' })
+    const original = structuredClone(bug)
+
+    const result = removeDiagnosisFromBug(bug, '2026-10-25T14:00:00.000Z')
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'no-diagnosis',
+    })
+    if (result.ok) return
+    expect(result.message).toMatch(/no saved diagnosis/i)
+    expect(bug).toEqual(original)
   })
 })

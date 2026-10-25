@@ -8,6 +8,8 @@ import {
   StatusBadge,
 } from '../components/Badges'
 import { DeleteBugDialog } from '../components/DeleteBugDialog'
+import { RemoveDiagnosisDialog } from '../components/RemoveDiagnosisDialog'
+import { CONFIDENCE_LABELS, diagnosticCategoryLabel } from '../diagnostics/labels'
 import { bugCode, formatDateTime } from '../features/bugs/format'
 import { BUG_STATUSES, type BugStatus } from '../features/bugs/types'
 import { copyTextToClipboard } from '../lib/clipboard'
@@ -33,19 +35,30 @@ function CopyStatusMessage({ status }: { status: CopyStatus }) {
 
 export function BugDetailPage() {
   const { bugId } = useParams()
-  const { bugs, changeStatus, deleteReport, notify } = useWorkspace()
+  const { bugs, changeStatus, deleteReport, removeDiagnosis, notify } =
+    useWorkspace()
   const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [errorCopyStatus, setErrorCopyStatus] = useState<CopyStatus | null>(null)
   const [fixCopyStatus, setFixCopyStatus] = useState<CopyStatus | null>(null)
   const deleteButtonRef = useRef<HTMLButtonElement>(null)
+  const removeButtonRef = useRef<HTMLButtonElement>(null)
+  const fixHeadingRef = useRef<HTMLHeadingElement>(null)
 
   const closeDialog = useCallback(() => {
     setDialogOpen(false)
     setDialogError(null)
     deleteButtonRef.current?.focus()
+  }, [])
+
+  const closeRemoveDialog = useCallback(() => {
+    setRemoveOpen(false)
+    setRemoveError(null)
+    removeButtonRef.current?.focus()
   }, [])
 
   const bug = bugs.find((item) => item.id === bugId)
@@ -103,6 +116,20 @@ export function BugDetailPage() {
     setDialogOpen(false)
     notify('Bug deleted.')
     navigate('/bugs')
+  }
+
+  function handleRemoveDiagnosis() {
+    if (!bug) return
+    const result = removeDiagnosis(bug.id)
+    if (!result.ok) {
+      setRemoveError(result.message)
+      notify(result.message, { tone: 'error' })
+      return
+    }
+    setRemoveOpen(false)
+    setRemoveError(null)
+    notify('Saved diagnosis removed.')
+    fixHeadingRef.current?.focus()
   }
 
   return (
@@ -240,10 +267,93 @@ export function BugDetailPage() {
             </p>
           </section>
 
+          {bug.diagnosis ? (
+            <section
+              className="panel detail-section"
+              aria-labelledby="saved-diagnosis-heading"
+            >
+              <div className="section-head section-head--inline diagnosis-head">
+                <div>
+                  <h2 id="saved-diagnosis-heading">Saved diagnosis</h2>
+                  <p>
+                    This is a suggestion from the assistant, not a verified fix.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button button--danger-ghost"
+                  ref={removeButtonRef}
+                  onClick={() => {
+                    setRemoveError(null)
+                    setRemoveOpen(true)
+                  }}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                  Remove saved diagnosis
+                </button>
+              </div>
+
+              <dl className="fact-list">
+                <div>
+                  <dt>Category</dt>
+                  <dd>{diagnosticCategoryLabel(bug.diagnosis.category)}</dd>
+                </div>
+                <div>
+                  <dt>Confidence</dt>
+                  <dd>
+                    {CONFIDENCE_LABELS[bug.diagnosis.confidence]} confidence
+                  </dd>
+                </div>
+                <div>
+                  <dt>Signature</dt>
+                  <dd>
+                    <code className="assistant-signature">
+                      {bug.diagnosis.matchedSignature ??
+                        'No specific signature'}
+                    </code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Saved</dt>
+                  <dd>
+                    <time dateTime={bug.diagnosis.savedAt}>
+                      {formatDateTime(bug.diagnosis.savedAt)}
+                    </time>
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="diagnosis-evidence">
+                <h3>Saved evidence</h3>
+                {bug.diagnosis.evidence.length > 0 ? (
+                  <ul className="assistant-evidence-list">
+                    {bug.diagnosis.evidence.map((item, index) => (
+                      <li
+                        key={`${item.label}-${index}`}
+                        className="assistant-evidence"
+                      >
+                        <div className="assistant-evidence-meta">
+                          <span>{item.label}</span>
+                        </div>
+                        <code className="assistant-quote">{item.quote}</code>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="field-hint">
+                    No evidence was saved with this diagnosis.
+                  </p>
+                )}
+              </div>
+            </section>
+          ) : null}
+
           <section className="panel detail-section" aria-labelledby="fix-heading">
             <div className="section-head section-head--inline">
               <div>
-                <h2 id="fix-heading">Fix tracking</h2>
+                <h2 id="fix-heading" ref={fixHeadingRef} tabIndex={-1}>
+                  Fix tracking
+                </h2>
                 <p>
                   Fix states are recorded manually. BugPilot never marks a fix
                   as verified.
@@ -364,6 +474,13 @@ export function BugDetailPage() {
         error={dialogError}
         onCancel={closeDialog}
         onConfirm={handleDelete}
+      />
+
+      <RemoveDiagnosisDialog
+        open={removeOpen}
+        error={removeError}
+        onCancel={closeRemoveDialog}
+        onConfirm={handleRemoveDiagnosis}
       />
     </>
   )

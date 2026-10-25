@@ -1459,6 +1459,18 @@ textarea[aria-invalid='true'] {
   font-size: 0.68rem;
 }
 
+.diagnosis-head {
+  flex-wrap: wrap;
+}
+
+.diagnosis-head .button {
+  flex-shrink: 0;
+}
+
+.diagnosis-evidence {
+  margin-top: 1.15rem;
+}
+
 /* --------------------------------------------------------------------------
    Delete dialog
    -------------------------------------------------------------------------- */

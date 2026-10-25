@@ -9,7 +9,7 @@ import { saveBugs } from './features/bugs/storage'
 import { createSampleBugs } from './features/bugs/samples'
 import type { Bug } from './features/bugs/types'
 import { getAxeViolations } from './test/axe'
-import { makeBug } from './test/factories'
+import { makeBug, makeSavedDiagnosis } from './test/factories'
 
 const SAMPLE_NOW = new Date('2026-10-24T12:00:00.000Z')
 
@@ -214,6 +214,46 @@ describe('axe-core accessibility checks', () => {
 
     const dialog = await screen.findByRole('dialog', {
       name: 'Delete bug report?',
+    })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    await expectNoViolations(container)
+  })
+
+  it('passes on a bug detail page with a saved diagnosis', async () => {
+    storeBugs(
+      makeBug({
+        id: 'diagnosis-detail',
+        title: 'A report with a saved diagnosis',
+        diagnosis: makeSavedDiagnosis(),
+      }),
+    )
+    const { container } = renderAt('/bugs/diagnosis-detail')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Saved diagnosis' }),
+    ).toBeVisible()
+
+    await expectNoViolations(container)
+  })
+
+  it('passes with the remove-diagnosis dialog open', async () => {
+    const user = userEvent.setup()
+    storeBugs(
+      makeBug({
+        id: 'diagnosis-remove',
+        title: 'A report with a saved diagnosis',
+        diagnosis: makeSavedDiagnosis(),
+      }),
+    )
+    const { container } = renderAt('/bugs/diagnosis-remove')
+
+    await user.click(
+      screen.getByRole('button', { name: 'Remove saved diagnosis' }),
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Remove saved diagnosis?',
     })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
 
