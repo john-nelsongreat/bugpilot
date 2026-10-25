@@ -536,7 +536,13 @@ Resize the window to 320 CSS px wide (Device Toolbar is acceptable; a narrow rea
   ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth })
   ```
   - Expected: `scrollWidth <= clientWidth`, and no horizontal page scrollbar. Compare against `clientWidth`, not `window.innerWidth`: `innerWidth` includes the vertical scrollbar, so it can hide the problem this check exists to find.
-  - **Known issue:** the current build reports `scrollWidth` 320 against a `clientWidth` of 305 at a 320 CSS px viewport, because `html` and `body` carry `min-width: 320px` (`src/index.css`) while the 15 px classic scrollbar reduces the usable width. The page therefore scrolls sideways by 15 px on every route — re-measured this way after the title change on `/`, `/bugs`, `/bugs/new`, a detail page, `/assistant`, and a missing path at 320 × 568 (light theme; the `min-width` floor is theme-independent). This is recorded, not fixed; if it is corrected, re-run this box and delete the note. The bug-log table is allowed to scroll **inside** its own container — the page itself must not move.
+  - Then prove the page cannot actually be dragged sideways:
+    ```js
+    (window.scrollTo(9999, 0), window.scrollX)
+    ```
+    Expected: `0`.
+  - Measured on the 2026-10-25 production build over 14 states × 2 themes × 6 widths (320 × 568, 360 × 640, 390 × 844, 768 × 1024, 1024 × 768, 1440 × 900): `scrollWidth` equalled or undershot `clientWidth` in every one of the 168 rows, and `scrollX` stayed `0`. Earlier builds carried `min-width: 320px` on `html` and `body`, which pinned the layout box at 320 px against a `clientWidth` of 305 px once the 15 px classic scrollbar was subtracted, so every route scrolled sideways by 15 px. The floors are removed. If this box reports `scrollWidth > clientWidth` again, something has taken on a fixed width — track that element down instead of re-adding a `min-width` to `html` or `body`.
+- [ ] The bug-log table is still expected to scroll **inside** its own container: at 320 × 568 `.table-wrap` measures `scrollWidth` 720 against a `clientWidth` of 271. Wide content scrolling in a container is fine; the page itself must not move.
 - [ ] Confirm nothing is clipped at 320 px: the sidebar/header, stat cards, table, form fields and their error text, the Assistant panels, both dialogs, and the footer joke.
 
 ### 200% zoom
@@ -564,9 +570,14 @@ Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a devic
   - Expected: each control speaks its own label and any hint, invalid fields are announced as invalid, and the error summary is read with working links.
 - [ ] Open the delete dialog and the import dialog.
   - Expected: the dialog is announced as a dialog, its description is read, and returning focus to the trigger is audible.
+- [ ] Listen for the route announcement. The layout carries one visually hidden `role="status"` `aria-live="polite"` region (`src/components/AppLayout.tsx`) that receives the same text as the tab title, `<page label> · BugPilot`.
+  - Expected: clicking **Overview**, **Bug log**, **Assistant**, the brand, or a report row announces the new page name once, without moving focus; the browser **Back** and **Forward** buttons announce the same way.
+  - Expected: nothing is announced when the page first loads, when a filter or the theme toggle re-renders the page you are already on, or when a dialog opens and closes.
+  - Expected: the announcement is not visible on screen at any width, and does not interrupt what the screen reader is already reading more than a polite region normally does.
+  - **Not tested by the assistant.** The region's text is verified in `src/components/AppLayout.announcement.test.tsx` and by watching the live DOM in Chromium, but no screen reader has confirmed how or whether it is spoken.
 - [ ] Run the Python `ModuleNotFoundError` example in **Assistant**.
   - Expected: the result, its confidence badge, evidence, and the disclaimer are all read in a sensible order, and the "focus moved to the result heading" behaviour is announced rather than silently happening.
 
 ### What this pass adds over the automated suite
 
-`npm test` already checks axe violations, token contrast, labels, roles, and names in jsdom, and the 2026-10-25 browser audit checked 14 states × 2 themes × 3 viewports. Those tools cannot judge whether a focus ring is *visible*, whether reading order makes sense, whether a page sounds right, or whether 320 px reflows — so the boxes above are the part that stays manual. See **Accessibility** in `README.md` for what is covered automatically and for the open items.
+`npm test` already checks axe violations, token contrast, labels, roles, names, and the route announcement in jsdom, and the 2026-10-25 browser audit checked 14 states × 2 themes × 3 viewports plus the same 14 states × 2 themes × 6 widths for page-level sideways scroll. Those tools cannot judge whether a focus ring is *visible*, whether reading order makes sense, or whether a page sounds right — so the boxes above are the part that stays manual. See **Accessibility** in `README.md` for what is covered automatically and for the open items.
