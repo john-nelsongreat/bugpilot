@@ -154,6 +154,23 @@ Use the **Manual check report (edited)** created above. This report should have 
 - [ ] Open **Overview** and expected: the counts reflect the status change (**02 Open**, **02 Resolved**); the fix status is not changed by the quick status control.
 - [ ] Expected: no control, assistant result, or reload automatically marks a fix **Verified**.
 
+### Copy controls on a report detail
+
+Use the seeded **CSV export stalls on tables over 50,000 rows** report, which has both an error message and a proposed fix.
+
+- [ ] Open the report and click **Copy error message**. Paste into a text editor.
+  - Expected: the pasted text exactly matches the **Error message** block, including line breaks. The page says **Error message copied to the clipboard.** and focus stays on the button.
+- [ ] Click **Copy proposed fix** and paste into a text editor.
+  - Expected: the pasted text exactly matches the **Proposed fix** text. The page says **Proposed fix copied to the clipboard.** and focus stays on the button.
+- [ ] Reload the page and expected: no copy status is restored and the report is unchanged.
+- [ ] Open a report with no proposed fix, such as *Checkout total shows NaN after a promo code*.
+  - Expected: **Copy error message** is shown and **Copy proposed fix** is not.
+- [ ] Open a report with neither field, such as *Avatar fallback flickers after refresh*.
+  - Expected: neither copy button is shown.
+- [ ] Block clipboard-write for the site (in Chrome: open the site controls, choose **Site settings**, and set **Clipboard** to **Block**), reload the report, and click **Copy error message**.
+  - Expected: the page says **Could not copy automatically. Select the text and copy it manually.** The button stays focused and the report is unchanged.
+- [ ] Restore clipboard permission when finished.
+
 ## 6. Themes and persistence
 
 - [ ] On any page, find the theme button in the sidebar or header.
@@ -186,6 +203,23 @@ Perform these checks on a fresh assistant form unless a step says otherwise.
   - Expected: the likely cause names `requests`, and the evidence list shows the pasted line with `Line 1`.
   - Expected: debugging steps, a possible fix, example code, verification steps, limitations, and alternative explanations are present.
 - [ ] Expected: focus moves to the result heading after the analysis.
+
+### Whole-identifier snippet evidence
+
+- [ ] Click **Clear** and leave **Language** at `Auto — infer from the text`.
+- [ ] Paste this error:
+  ```text
+  NameError: name 'total' is not defined
+  ```
+- [ ] Paste this code snippet:
+  ```text
+  subtotal = 10
+  total = 0
+  print(total)
+  ```
+- [ ] Click **Analyze**.
+  - Expected: the heading is **Undefined name**, and the evidence shows the exception line plus **total = 0** with **Line 2**.
+  - Expected: no evidence entry quotes **subtotal = 10**.
 
 ### JavaScript result
 
