@@ -7,7 +7,7 @@ import {
   type StorageLike,
 } from './storage'
 import { FIELD_LIMITS, validateBugDraft } from './validation'
-import { makeBug } from '../../test/factories'
+import { makeBug, makeSavedDiagnosis } from '../../test/factories'
 
 function createMemoryStorage(initial: Record<string, string> = {}) {
   const entries = new Map(Object.entries(initial))
@@ -142,6 +142,110 @@ describe('loadBugState', () => {
     }
     expect(new Set(bugs.map((bug) => bug.status)).size).toBeGreaterThan(1)
     expect(new Set(bugs.map((bug) => bug.severity)).size).toBeGreaterThan(1)
+  })
+})
+
+describe('saved diagnosis persistence', () => {
+  it('round-trips a saved diagnosis through the real loader', () => {
+    const diagnosis = makeSavedDiagnosis()
+    const bug = makeBug({ id: 'diagnosed-bug', diagnosis })
+    const storage = createMemoryStorage()
+    expect(saveBugs([bug], storage).ok).toBe(true)
+
+    const loaded = loadBugState(storage)
+
+    expect(loaded.issue).toBeNull()
+    expect(loaded.bugs).toEqual([bug])
+    expect(loaded.bugs[0].diagnosis).toEqual(diagnosis)
+  })
+
+  it('does not add a diagnosis key to a report that has none', () => {
+    const bug = makeBug({ id: 'plain-bug' })
+    const storage = createMemoryStorage()
+    expect(saveBugs([bug], storage).ok).toBe(true)
+
+    const raw = storage.getItem(BUGS_STORAGE_KEY) as string
+    const loaded = loadBugState(storage)
+
+    expect(raw).not.toContain('diagnosis')
+    expect('diagnosis' in loaded.bugs[0]).toBe(false)
+    expect(loaded.bugs).toEqual([bug])
+  })
+
+  it.each([
+    [
+      'an invalid confidence',
+      { ...makeSavedDiagnosis(), confidence: 'certain' },
+    ],
+    ['a null diagnosis', null],
+    ['a non-object diagnosis', 'missing-module'],
+  ])(
+    'drops only %s from a stored record and keeps the report',
+    (_label, diagnosis) => {
+      const bug = makeBug({ id: 'malformed-diagnosis' })
+      const raw = JSON.stringify({
+        schemaVersion: 1,
+        bugs: [{ ...bug, diagnosis }],
+      })
+      const storage = createMemoryStorage({ [BUGS_STORAGE_KEY]: raw })
+
+      const loaded = loadBugState(storage)
+
+      expect(loaded.issue).toBeNull()
+      expect(loaded.bugs).toHaveLength(1)
+      expect(loaded.bugs[0].id).toBe('malformed-diagnosis')
+      expect('diagnosis' in loaded.bugs[0]).toBe(false)
+      expect(storage.getItem(BUGS_STORAGE_KEY)).toBe(raw)
+    },
+  )
+
+  it('drops unknown and dangerous diagnosis fields while loading', () => {
+    const bug = makeBug({ id: 'dangerous-diagnosis' })
+    const diagnosis = JSON.parse(`{
+      "category": "missing-module",
+      "ruleId": "python.missing-module",
+      "matchedSignature": null,
+      "confidence": "high",
+      "evidence": [
+        {
+          "label": "Error text",
+          "quote": "ModuleNotFoundError: No module named 'pandas'",
+          "__proto__": { "polluted": true },
+          "constructor": { "polluted": true },
+          "prototype": { "polluted": true },
+          "lineNumber": 2
+        }
+      ],
+      "savedAt": "2026-10-24T09:30:00.000Z",
+      "__proto__": { "polluted": true },
+      "constructor": { "polluted": true },
+      "prototype": { "polluted": true },
+      "rawErrorText": "private paste",
+      "codeSnippet": "private code"
+    }`)
+    const raw = JSON.stringify({
+      schemaVersion: 1,
+      bugs: [{ ...bug, diagnosis }],
+    })
+    const storage = createMemoryStorage({ [BUGS_STORAGE_KEY]: raw })
+
+    const loaded = loadBugState(storage)
+    const saved = loaded.bugs[0].diagnosis
+    if (!saved) throw new Error('Expected the diagnosis to load')
+
+    expect(loaded.issue).toBeNull()
+    expect(Object.keys(saved)).toEqual([
+      'category',
+      'ruleId',
+      'matchedSignature',
+      'confidence',
+      'evidence',
+      'savedAt',
+    ])
+    expect(Object.keys(saved.evidence[0])).toEqual(['label', 'quote'])
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
+    expect(JSON.stringify(loaded.bugs)).not.toContain('private paste')
+    expect(JSON.stringify(loaded.bugs)).not.toContain('private code')
   })
 })
 

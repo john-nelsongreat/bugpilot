@@ -12,6 +12,23 @@ export const FIX_STATUSES = [
 ] as const
 export type FixStatus = (typeof FIX_STATUSES)[number]
 
+export const DIAGNOSIS_CONFIDENCES = ['low', 'medium', 'high'] as const
+export type DiagnosisConfidence = (typeof DIAGNOSIS_CONFIDENCES)[number]
+
+export interface SavedDiagnosisEvidence {
+  label: string
+  quote: string
+}
+
+export interface SavedDiagnosis {
+  category: string
+  ruleId?: string
+  matchedSignature: string | null
+  confidence: DiagnosisConfidence
+  evidence: SavedDiagnosisEvidence[]
+  savedAt: string
+}
+
 export interface BugDraft {
   title: string
   description: string
@@ -33,6 +50,7 @@ export interface Bug extends BugDraft {
   id: string
   createdAt: string
   updatedAt: string
+  diagnosis?: SavedDiagnosis
 }
 
 export type BugField = keyof BugDraft

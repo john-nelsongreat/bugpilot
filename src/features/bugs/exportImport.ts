@@ -6,7 +6,7 @@ import {
   type FixStatus,
   type Severity,
 } from './types'
-import { validateBugDraft } from './validation'
+import { validateBugDraft, validateSavedDiagnosis } from './validation'
 import {
   BUGS_STORAGE_KEY,
   saveBugs,
@@ -94,7 +94,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toExportedBug(bug: Bug): Bug {
-  return {
+  const exported: Bug = {
     id: bug.id,
     title: bug.title,
     description: bug.description,
@@ -113,6 +113,15 @@ function toExportedBug(bug: Bug): Bug {
     createdAt: bug.createdAt,
     updatedAt: bug.updatedAt,
   }
+
+  if (bug.diagnosis !== undefined) {
+    const diagnosis = validateSavedDiagnosis(bug.diagnosis)
+    if (diagnosis.ok) {
+      exported.diagnosis = diagnosis.diagnosis
+    }
+  }
+
+  return exported
 }
 
 export function buildBugExport(
@@ -199,12 +208,22 @@ function parseImportedBug(
   const firstError = Object.values(errors)[0]
   if (firstError) return { reason: firstError }
 
+  const diagnosis = Object.hasOwn(value, 'diagnosis')
+    ? validateSavedDiagnosis(value.diagnosis)
+    : null
+  if (diagnosis && !diagnosis.ok) {
+    return {
+      reason: `The saved diagnosis is invalid: ${diagnosis.reason}`,
+    }
+  }
+
   return {
     bug: toExportedBug({
       ...draft,
       id: value.id,
       createdAt: value.createdAt,
       updatedAt: value.updatedAt,
+      ...(diagnosis?.ok ? { diagnosis: diagnosis.diagnosis } : {}),
     }),
   }
 }

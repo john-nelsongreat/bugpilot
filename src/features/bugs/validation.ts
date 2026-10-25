@@ -1,10 +1,14 @@
 import {
   BUG_STATUSES,
+  DIAGNOSIS_CONFIDENCES,
   FIX_STATUSES,
   SEVERITIES,
   type Bug,
   type BugDraft,
+  type DiagnosisConfidence,
   type FieldErrors,
+  type SavedDiagnosis,
+  type SavedDiagnosisEvidence,
 } from './types'
 
 export const FIELD_LIMITS = {
@@ -21,6 +25,15 @@ export const FIELD_LIMITS = {
   verificationNotes: 5000,
 } as const
 
+export const DIAGNOSIS_LIMITS = {
+  category: 80,
+  ruleId: 80,
+  matchedSignature: 300,
+  evidence: 5,
+  evidenceLabel: 80,
+  evidenceQuote: 500,
+} as const
+
 const FIELD_LABELS: Record<keyof typeof FIELD_LIMITS, string> = {
   title: 'title',
   projectName: 'project name',
@@ -33,6 +46,136 @@ const FIELD_LABELS: Record<keyof typeof FIELD_LIMITS, string> = {
   notes: 'notes',
   proposedFix: 'proposed fix',
   verificationNotes: 'verification notes',
+}
+
+export type SavedDiagnosisValidation =
+  | { ok: true; diagnosis: SavedDiagnosis }
+  | { ok: false; reason: string }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function invalidDiagnosis(reason: string): SavedDiagnosisValidation {
+  return { ok: false, reason }
+}
+
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+
+function isValidIsoTimestamp(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    ISO_TIMESTAMP.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  )
+}
+
+export function validateSavedDiagnosis(
+  value: unknown,
+): SavedDiagnosisValidation {
+  if (!isRecord(value)) {
+    return invalidDiagnosis('The saved diagnosis must be an object.')
+  }
+
+  if (typeof value.category !== 'string') {
+    return invalidDiagnosis('The diagnosis category must be text.')
+  }
+  if (value.category.length === 0) {
+    return invalidDiagnosis('Enter a diagnosis category.')
+  }
+  if (value.category.length > DIAGNOSIS_LIMITS.category) {
+    return invalidDiagnosis(
+      `Keep the diagnosis category to ${DIAGNOSIS_LIMITS.category} characters or fewer.`,
+    )
+  }
+
+  let ruleId: string | undefined
+  if (value.ruleId !== undefined) {
+    if (typeof value.ruleId !== 'string') {
+      return invalidDiagnosis('The diagnosis rule id must be text.')
+    }
+    if (value.ruleId.length > DIAGNOSIS_LIMITS.ruleId) {
+      return invalidDiagnosis(
+        `Keep the diagnosis rule id to ${DIAGNOSIS_LIMITS.ruleId} characters or fewer.`,
+      )
+    }
+    ruleId = value.ruleId
+  }
+
+  if (
+    value.matchedSignature !== null &&
+    typeof value.matchedSignature !== 'string'
+  ) {
+    return invalidDiagnosis('The matched signature must be text or null.')
+  }
+  if (
+    typeof value.matchedSignature === 'string' &&
+    value.matchedSignature.length > DIAGNOSIS_LIMITS.matchedSignature
+  ) {
+    return invalidDiagnosis(
+      `Keep the matched signature to ${DIAGNOSIS_LIMITS.matchedSignature} characters or fewer.`,
+    )
+  }
+
+  if (
+    !DIAGNOSIS_CONFIDENCES.includes(
+      value.confidence as DiagnosisConfidence,
+    )
+  ) {
+    return invalidDiagnosis('Choose a valid diagnosis confidence.')
+  }
+
+  if (!Array.isArray(value.evidence)) {
+    return invalidDiagnosis('The diagnosis evidence must be a list.')
+  }
+  if (value.evidence.length > DIAGNOSIS_LIMITS.evidence) {
+    return invalidDiagnosis(
+      `Keep the diagnosis evidence to ${DIAGNOSIS_LIMITS.evidence} items or fewer.`,
+    )
+  }
+
+  const evidence: SavedDiagnosisEvidence[] = []
+  for (const item of value.evidence) {
+    if (!isRecord(item)) {
+      return invalidDiagnosis('Each diagnosis evidence item must be an object.')
+    }
+    if (typeof item.label !== 'string') {
+      return invalidDiagnosis('Each evidence label must be text.')
+    }
+    if (item.label.length > DIAGNOSIS_LIMITS.evidenceLabel) {
+      return invalidDiagnosis(
+        `Keep each evidence label to ${DIAGNOSIS_LIMITS.evidenceLabel} characters or fewer.`,
+      )
+    }
+    if (typeof item.quote !== 'string') {
+      return invalidDiagnosis('Each evidence quote must be text.')
+    }
+    if (item.quote.length > DIAGNOSIS_LIMITS.evidenceQuote) {
+      return invalidDiagnosis(
+        `Keep each evidence quote to ${DIAGNOSIS_LIMITS.evidenceQuote} characters or fewer.`,
+      )
+    }
+    evidence.push({ label: item.label, quote: item.quote })
+  }
+
+  if (!isValidIsoTimestamp(value.savedAt)) {
+    return invalidDiagnosis(
+      'The diagnosis saved date must be a valid ISO timestamp.',
+    )
+  }
+
+  return {
+    ok: true,
+    diagnosis: {
+      category: value.category,
+      ...(ruleId === undefined ? {} : { ruleId }),
+      matchedSignature: value.matchedSignature as string | null,
+      confidence: value.confidence as DiagnosisConfidence,
+      evidence,
+      savedAt: value.savedAt,
+    },
+  }
 }
 
 export function validateBugDraft(draft: BugDraft): FieldErrors {
@@ -136,6 +279,9 @@ export function updateBug(
     ...normalizeBugDraft(draft),
     createdAt: existing.createdAt,
     updatedAt: now,
+    ...(existing.diagnosis === undefined
+      ? {}
+      : { diagnosis: existing.diagnosis }),
   }
 }
 

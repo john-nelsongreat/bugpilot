@@ -1,4 +1,4 @@
-import type { Bug, BugDraft } from '../features/bugs/types'
+import type { Bug, BugDraft, SavedDiagnosis } from '../features/bugs/types'
 
 let sequence = 0
 
@@ -18,6 +18,26 @@ export function makeBugDraft(overrides: Partial<BugDraft> = {}): BugDraft {
     proposedFix: '',
     fixStatus: null,
     verificationNotes: '',
+    ...overrides,
+  }
+}
+
+export function makeSavedDiagnosis(
+  overrides: Partial<SavedDiagnosis> = {},
+): SavedDiagnosis {
+  return {
+    category: 'missing-module',
+    ruleId: 'python.missing-module',
+    matchedSignature: "ModuleNotFoundError: No module named 'pandas'",
+    confidence: 'high',
+    evidence: [
+      {
+        label: 'Error text',
+        quote: "ModuleNotFoundError: No module named 'pandas'",
+      },
+      { label: 'Code snippet', quote: 'import pandas as pd' },
+    ],
+    savedAt: '2026-10-24T09:30:00.000Z',
     ...overrides,
   }
 }

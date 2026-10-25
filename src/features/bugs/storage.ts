@@ -8,7 +8,7 @@ import {
   type FixStatus,
   type Severity,
 } from './types'
-import { validateBugDraft } from './validation'
+import { validateBugDraft, validateSavedDiagnosis } from './validation'
 import { createSampleBugs } from './samples'
 
 export const BUGS_STORAGE_KEY = 'bugpilot.bugs.v1'
@@ -115,11 +115,16 @@ function parseStoredBug(value: unknown): Bug | null {
 
   if (Object.keys(validateBugDraft(draft)).length > 0) return null
 
+  const diagnosis = Object.hasOwn(value, 'diagnosis')
+    ? validateSavedDiagnosis(value.diagnosis)
+    : null
+
   return {
     ...draft,
     id: value.id,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    ...(diagnosis?.ok ? { diagnosis: diagnosis.diagnosis } : {}),
   }
 }
 

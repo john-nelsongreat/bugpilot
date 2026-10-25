@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeBug } from '../../test/factories'
+import { makeBug, makeSavedDiagnosis } from '../../test/factories'
 import { BUGS_STORAGE_KEY, saveBugs, type StorageLike } from './storage'
 import type { Bug } from './types'
 import {
@@ -547,5 +547,200 @@ describe('applying an import', () => {
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.message).toMatch(/unchanged/i)
+  })
+})
+
+const REPORT_KEYS = [
+  'id',
+  'title',
+  'description',
+  'projectName',
+  'language',
+  'errorMessage',
+  'stepsToReproduce',
+  'expectedBehavior',
+  'actualBehavior',
+  'severity',
+  'status',
+  'notes',
+  'proposedFix',
+  'fixStatus',
+  'verificationNotes',
+  'createdAt',
+  'updatedAt',
+]
+
+describe('saved diagnosis in exports', () => {
+  it('adds a diagnosis only after the existing fields, and only when present', () => {
+    const diagnosis = makeSavedDiagnosis()
+    const withDiagnosis = makeBug({ id: 'diagnosed-export', diagnosis })
+    const withoutDiagnosis = makeBug({ id: 'plain-export' })
+
+    const payload = buildBugExport([withDiagnosis, withoutDiagnosis], EXPORTED_AT)
+
+    expect(Object.keys(payload.bugs[0])).toEqual([...REPORT_KEYS, 'diagnosis'])
+    expect(Object.keys(payload.bugs[1])).toEqual(REPORT_KEYS)
+    expect(payload.bugs[0].diagnosis).toEqual(diagnosis)
+    expect(Object.keys(payload.bugs[0].diagnosis as object)).toEqual([
+      'category',
+      'ruleId',
+      'matchedSignature',
+      'confidence',
+      'evidence',
+      'savedAt',
+    ])
+    expect(
+      Object.keys((payload.bugs[0].diagnosis as NonNullable<Bug['diagnosis']>).evidence[0]),
+    ).toEqual(['label', 'quote'])
+  })
+
+  it('imports and re-exports an old file without a diagnosis byte-identically', () => {
+    const bugs = [
+      makeBug({
+        id: 'old-export-a',
+        title: 'Old report without diagnosis',
+        fixStatus: 'Accepted',
+        proposedFix: 'Use the tested path.',
+      }),
+      makeBug({ id: 'old-export-b' }),
+    ]
+    const text = serializeBugExport(bugs, EXPORTED_AT)
+
+    expect(text).not.toContain('"diagnosis":')
+
+    const parsed = expectParseOk(parseBugImport(text))
+
+    expect(parsed.bugs).toEqual(bugs)
+    expect(serializeBugExport(parsed.bugs, EXPORTED_AT)).toBe(text)
+  })
+
+  it('round-trips a saved diagnosis without changing any field', () => {
+    const diagnosis = makeSavedDiagnosis()
+    const bugs = [
+      makeBug({ id: 'diagnosis-a', diagnosis }),
+      makeBug({ id: 'diagnosis-b' }),
+    ]
+
+    const result = expectParseOk(
+      parseBugImport(serializeBugExport(bugs, EXPORTED_AT)),
+    )
+
+    expect(result.bugs).toEqual(bugs)
+    expect(result.bugs[0].diagnosis).toEqual(diagnosis)
+    expect('diagnosis' in result.bugs[1]).toBe(false)
+    expect(result.invalidCount).toBe(0)
+  })
+
+  it('preserves the diagnosis in merge and replace imports', () => {
+    const diagnosis = makeSavedDiagnosis()
+    const imported = makeBug({ id: 'merge-diagnosis', diagnosis })
+    const existing = makeBug({ id: 'existing-before-merge' })
+    const storage = memoryStorage()
+    seedStorage(storage, [existing])
+
+    const merged = applyBugImport({
+      currentBugs: [existing],
+      importedBugs: [imported],
+      invalidCount: 0,
+      mode: 'merge',
+      storage,
+    })
+
+    if (!merged.ok) throw new Error(merged.message)
+    expect(merged.bugs).toEqual([existing, imported])
+    expect(merged.bugs[1].diagnosis).toEqual(diagnosis)
+    const storedAfterMerge = JSON.parse(
+      storage.getItem(BUGS_STORAGE_KEY) as string,
+    ) as { bugs: Bug[] }
+    expect(storedAfterMerge.bugs[1].diagnosis).toEqual(diagnosis)
+
+    const replaced = applyBugImport({
+      currentBugs: merged.bugs,
+      importedBugs: [imported],
+      invalidCount: 0,
+      mode: 'replace',
+      storage,
+    })
+
+    if (!replaced.ok) throw new Error(replaced.message)
+    expect(replaced.bugs).toEqual([imported])
+    expect(replaced.bugs[0].diagnosis).toEqual(diagnosis)
+  })
+
+  it.each([
+    [
+      'an invalid confidence',
+      { ...makeSavedDiagnosis(), confidence: 'certain' },
+      /confidence/i,
+    ],
+    ['a null diagnosis', null, /object/i],
+    [
+      'an overlong category',
+      { ...makeSavedDiagnosis(), category: 'c'.repeat(81) },
+      /80 characters/,
+    ],
+  ])(
+    'marks a record with %s invalid with its position and reason',
+    (_label, diagnosis, reason) => {
+      const valid = makeBug({ id: 'valid-neighbour' })
+      const invalid = {
+        ...recordFor(makeBug({ id: 'invalid-diagnosis-import' })),
+        diagnosis,
+      }
+
+      const result = expectParseOk(
+        parseBugImport(envelopeWith([valid, invalid])),
+      )
+
+      expect(result.bugs).toEqual([valid])
+      expect(result.invalidCount).toBe(1)
+      expect(result.issues).toHaveLength(1)
+      expect(result.issues[0].position).toBe(2)
+      expect(result.issues[0].reason).toMatch(/saved diagnosis/i)
+      expect(result.issues[0].reason).toMatch(reason)
+    },
+  )
+
+  it('drops unknown and dangerous diagnosis fields during import', () => {
+    const base = recordFor(makeBug({ id: 'diagnosis-dangerous-keys' }))
+    base.diagnosis = JSON.parse(`{
+      "category": "missing-module",
+      "ruleId": "python.missing-module",
+      "matchedSignature": null,
+      "confidence": "high",
+      "evidence": [
+        {
+          "label": "Error text",
+          "quote": "ModuleNotFoundError: No module named 'pandas'",
+          "__proto__": { "polluted": true },
+          "constructor": { "polluted": true },
+          "prototype": { "polluted": true },
+          "lineNumber": 2
+        }
+      ],
+      "savedAt": "2026-10-24T09:30:00.000Z",
+      "__proto__": { "polluted": true },
+      "constructor": { "polluted": true },
+      "prototype": { "polluted": true },
+      "rawErrorText": "private paste",
+      "codeSnippet": "private code"
+    }`)
+
+    const result = expectParseOk(parseBugImport(envelopeWith([base])))
+    const saved = result.bugs[0].diagnosis
+    if (!saved) throw new Error('Expected the diagnosis to import')
+
+    expect(Object.keys(saved)).toEqual([
+      'category',
+      'ruleId',
+      'matchedSignature',
+      'confidence',
+      'evidence',
+      'savedAt',
+    ])
+    expect(Object.keys(saved.evidence[0])).toEqual(['label', 'quote'])
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
+    expect(JSON.stringify(result.bugs)).not.toContain('private paste')
+    expect(JSON.stringify(result.bugs)).not.toContain('private code')
   })
 })
