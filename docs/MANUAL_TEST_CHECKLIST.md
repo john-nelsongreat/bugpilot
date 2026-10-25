@@ -581,3 +581,37 @@ Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a devic
 ### What this pass adds over the automated suite
 
 `npm test` already checks axe violations, token contrast, labels, roles, names, and the route announcement in jsdom, and the 2026-10-25 browser audit checked 14 states × 2 themes × 3 viewports plus the same 14 states × 2 themes × 6 widths for page-level sideways scroll. Those tools cannot judge whether a focus ring is *visible*, whether reading order makes sense, or whether a page sounds right — so the boxes above are the part that stays manual. See **Accessibility** in `README.md` for what is covered automatically and for the open items.
+
+## 16. Security headers
+
+These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 14) reads that file, so a local preview will not show them. **Until the commit that adds the policy has been deployed and this section has been run, do not assume the live site sends it.** This section was added before the production response was inspected.
+
+### Header response
+
+- [ ] In PowerShell, run exactly:
+
+  ```powershell
+  (Invoke-WebRequest -Uri https://bugpilot-lac.vercel.app/bugs -Method Head -UseBasicParsing).Headers
+  ```
+
+  - Expected: the request succeeds. Header names may print in any case. Check these values:
+    - `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`
+    - `X-Content-Type-Options`: `nosniff`
+    - `Referrer-Policy`: `strict-origin-when-cross-origin`
+    - `X-Frame-Options`: `DENY`
+    - `Permissions-Policy`: `camera=(), microphone=(), geolocation=()`
+  - If `-Method Head` is rejected with a 405, repeat with `-Method Get` and read only `.Headers`; do not save the response body.
+- [ ] Repeat the command for the root `https://bugpilot-lac.vercel.app/`, for `https://bugpilot-lac.vercel.app/assistant`, and for a missing path such as `https://bugpilot-lac.vercel.app/missing-page`. Expected: all return the same CSP; deep links and the SPA fallback load the app instead of a 404.
+- [ ] Compare the policy with the block in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src`, no `'unsafe-eval'`, and no external hosts. Whitespace after semicolons is not significant.
+- [ ] If the header is missing, first confirm the deployment is actually the commit that changed `vercel.json`, and that Vercel marks it **Ready** as the current production deployment. Wait for the deployment to settle, hard-reload, and repeat. Do not conclude that the header works from the local preview or from the source file alone.
+- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: **1 test passed**. This checks the committed configuration, not the live response.
+
+### Browser console check on every page
+
+- [ ] Open the live site in a fresh Chromium profile. Open DevTools, select the Console, enable **Preserve log**, clear it, and reload.
+- [ ] Visit each route directly by typing the URL: `/`, `/bugs`, `/bugs/new`, a bug detail URL, that report's `/edit` URL, `/assistant`, and `/missing-page`.
+  - Expected: every page renders; **no** console error mentions `Content Security Policy`, `Refused to`, or a blocked resource; the fonts, icons, and favicon render.
+  - In the Network tab, select the document request and inspect its response headers. Expected: `content-security-policy` is present and matches the value above.
+- [ ] In both themes, repeat the main flows on the live site: create, edit, delete with confirmation, search/filter/sort, fix states, Python and JavaScript analyses plus **Copy code**, export download, import preview and merge, toast, joke rotation, keyboard focus, and both dialogs.
+  - Expected: behaviour matches the local build; the Console still has no CSP errors, and Network still shows only the site's own origin.
+- [ ] If a violation appears, copy the complete console message (directive, blocked URL, and source file) before changing anything. Do not add `'unsafe-inline'`, `'unsafe-eval'`, or a broad external host as the first response. Identify the resource, add only the narrowest source or remove the dependency, then repeat the local checks and this section.
