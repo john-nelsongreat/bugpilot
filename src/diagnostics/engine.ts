@@ -518,6 +518,18 @@ function buildConfidence(
   }
 }
 
+const IDENTIFIER_CHARACTERS = 'A-Za-z0-9_$'
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function wholeIdentifierPattern(token: string): RegExp {
+  return new RegExp(
+    `(?:^|[^${IDENTIFIER_CHARACTERS}])${escapeRegExp(token)}(?![${IDENTIFIER_CHARACTERS}])`,
+  )
+}
+
 function buildEvidence(
   selectedLine: SelectedLine,
   match: RuleMatch,
@@ -544,10 +556,11 @@ function buildEvidence(
     return evidence
   }
 
+  const patterns = tokens.map(wholeIdentifierPattern)
   const lines = codeSnippet.split(/\r?\n/)
   for (const [index, line] of lines.entries()) {
     const quote = line.trim()
-    if (quote !== '' && tokens.some((token) => quote.includes(token))) {
+    if (quote !== '' && patterns.some((pattern) => pattern.test(quote))) {
       evidence.push({
         source: 'code snippet',
         label: 'Related line from the supplied code',

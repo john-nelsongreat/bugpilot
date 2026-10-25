@@ -81,6 +81,116 @@ describe('diagnose', () => {
     )
   })
 
+  it.each(['subtotal = 10', 'total_count = 1', 'my_total = 2', '$total = 1'])(
+    'does not quote %s as snippet evidence for the identifier total',
+    (codeSnippet) => {
+      const result = diagnose({
+        language: 'auto',
+        errorText: "NameError: name 'total' is not defined",
+        codeSnippet,
+      })
+
+      expect(
+        result.evidence.filter((item) => item.source === 'code snippet'),
+      ).toEqual([])
+    },
+  )
+
+  it.each(['total', 'total = 1', 'print(total)', 'x = total + 1', 'total+=1'])(
+    'quotes the whole-identifier line %s as snippet evidence',
+    (codeSnippet) => {
+      const result = diagnose({
+        language: 'auto',
+        errorText: "NameError: name 'total' is not defined",
+        codeSnippet,
+      })
+
+      expect(result.evidence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'code snippet',
+            quote: codeSnippet,
+            lineNumber: 1,
+          }),
+        ]),
+      )
+    },
+  )
+
+  it('quotes the matching line in the reported subtotal scenario end to end', () => {
+    const result = diagnose({
+      language: 'auto',
+      errorText: "NameError: name 'total' is not defined",
+      codeSnippet: ['subtotal = 10', 'total = 0', 'print(total)'].join('\n'),
+    })
+
+    expect(result.category).toBe('undefined-name')
+    expect(result.evidence[0]).toEqual(
+      expect.objectContaining({
+        source: 'error text',
+        quote: "NameError: name 'total' is not defined",
+      }),
+    )
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'code snippet',
+          quote: 'total = 0',
+          lineNumber: 2,
+        }),
+      ]),
+    )
+    expect(
+      result.evidence.filter((item) => item.source === 'code snippet'),
+    ).toHaveLength(1)
+  })
+
+  it('matches a dotted token only when the whole dotted identifier appears', () => {
+    const result = diagnose({
+      language: 'auto',
+      errorText: "AttributeError: module 'pkg.sub' has no attribute 'load'",
+      codeSnippet: ['mypkg.sub', 'import pkg.sub'].join('\n'),
+    })
+
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'code snippet',
+          quote: 'import pkg.sub',
+          lineNumber: 2,
+        }),
+      ]),
+    )
+    expect(
+      result.evidence.filter((item) => item.source === 'code snippet'),
+    ).toHaveLength(1)
+  })
+
+  it('escapes regular expression characters in snippet tokens', () => {
+    const result = diagnose({
+      language: 'auto',
+      errorText:
+        "FileNotFoundError: [Errno 2] No such file or directory: 'data/input(1).csv'",
+      codeSnippet: [
+        "open('data/input(1)Xcsv')",
+        "open('data/input(1).csv')",
+      ].join('\n'),
+    })
+
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'code snippet',
+          quote: "open('data/input(1).csv')",
+          lineNumber: 2,
+        }),
+      ]),
+    )
+    expect(
+      result.evidence.filter((item) => item.source === 'code snippet'),
+    ).toHaveLength(1)
+  })
+
   it('uses Python traceback evidence to resolve a Python TypeError', () => {
     const errorText = [
       'Traceback (most recent call last):',
