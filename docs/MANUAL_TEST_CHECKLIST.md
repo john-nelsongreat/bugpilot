@@ -533,10 +533,10 @@ Resize the window to 320 CSS px wide (Device Toolbar is acceptable; a narrow rea
 
 - [ ] In the Console, run:
   ```js
-  ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth })
+  ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth })
   ```
-  - Expected: `scrollWidth <= innerWidth`, and no horizontal page scrollbar.
-  - **Known issue:** the current build reports `scrollWidth` about 15 px wider than `innerWidth` because `html` and `body` carry `min-width: 320px` (`src/index.css`). This is recorded, not fixed; if it is corrected, re-run this box and delete the note. The bug-log table is allowed to scroll **inside** its own container — the page itself must not move.
+  - Expected: `scrollWidth <= clientWidth`, and no horizontal page scrollbar. Compare against `clientWidth`, not `window.innerWidth`: `innerWidth` includes the vertical scrollbar, so it can hide the problem this check exists to find.
+  - **Known issue:** the current build reports `scrollWidth` 320 against a `clientWidth` of 305 at a 320 CSS px viewport, because `html` and `body` carry `min-width: 320px` (`src/index.css`) while the 15 px classic scrollbar reduces the usable width. The page therefore scrolls sideways by 15 px on every route — re-measured this way after the title change on `/`, `/bugs`, `/bugs/new`, a detail page, `/assistant`, and a missing path at 320 × 568 (light theme; the `min-width` floor is theme-independent). This is recorded, not fixed; if it is corrected, re-run this box and delete the note. The bug-log table is allowed to scroll **inside** its own container — the page itself must not move.
 - [ ] Confirm nothing is clipped at 320 px: the sidebar/header, stat cards, table, form fields and their error text, the Assistant panels, both dialogs, and the footer joke.
 
 ### 200% zoom
