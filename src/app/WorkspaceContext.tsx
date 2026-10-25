@@ -14,6 +14,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       id: nextToastId.current,
       message,
       tone: options?.tone ?? 'info',
+      ...(options?.link ? { link: options.link } : {}),
     })
   }, [])
 

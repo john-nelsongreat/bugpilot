@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FocusEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
 
 export type ToastTone = 'info' | 'error'
@@ -7,6 +8,7 @@ export type ToastMessage = {
   id: number
   message: string
   tone: ToastTone
+  link?: { to: string; label: string }
 }
 
 export const TOAST_AUTO_DISMISS_MS = 6000
@@ -61,7 +63,14 @@ export function Toast({ toast, onDismiss }: ToastProps) {
       onBlur={handleBlur}
     >
       <span className="toast-mark" aria-hidden="true" />
-      <p>{toast.message}</p>
+      <div className="toast-body">
+        <p>{toast.message}</p>
+        {toast.link ? (
+          <Link className="toast-link" to={toast.link.to}>
+            {toast.link.label}
+          </Link>
+        ) : null}
+      </div>
       <button
         type="button"
         className="icon-button toast-dismiss"

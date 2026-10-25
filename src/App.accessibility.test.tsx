@@ -269,6 +269,63 @@ describe('axe-core accessibility checks', () => {
     await expectNoViolations(container)
   })
 
+  it('passes with the save-diagnosis dialog open for a bug without a fix', async () => {
+    const user = userEvent.setup()
+    storeBugs(
+      makeBug({
+        id: 'axe-save-none',
+        title: 'A report waiting for a diagnosis',
+        language: 'Python',
+        errorMessage: "ModuleNotFoundError: No module named 'pandas'",
+        proposedFix: '',
+        fixStatus: null,
+      }),
+    )
+    const { container } = renderAt('/assistant?bugId=axe-save-none')
+
+    await user.click(screen.getByRole('button', { name: 'Analyze' }))
+    await screen.findByRole('heading', { level: 2, name: 'Missing module' })
+    await user.click(
+      screen.getByRole('button', { name: 'Save diagnosis to this bug' }),
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Save diagnosis to this bug?',
+    })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+
+    await expectNoViolations(container)
+  })
+
+  it('passes with the save-diagnosis dialog open for a bug with a fix', async () => {
+    const user = userEvent.setup()
+    storeBugs(
+      makeBug({
+        id: 'axe-save-existing',
+        title: 'A report with a proposed fix',
+        language: 'Python',
+        errorMessage: "ModuleNotFoundError: No module named 'pandas'",
+        proposedFix: 'Existing fix from a teammate.',
+        fixStatus: 'Verified',
+        verificationNotes: 'Checked on staging.',
+      }),
+    )
+    const { container } = renderAt('/assistant?bugId=axe-save-existing')
+
+    await user.click(screen.getByRole('button', { name: 'Analyze' }))
+    await screen.findByRole('heading', { level: 2, name: 'Missing module' })
+    await user.click(
+      screen.getByRole('button', { name: 'Save diagnosis to this bug' }),
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Save diagnosis to this bug?',
+    })
+    expect(dialog).toHaveTextContent('Fix state stays Verified.')
+
+    await expectNoViolations(container)
+  })
+
   it('passes with the import dialog open and a preview showing', async () => {
     const user = userEvent.setup()
     storeBugs(...sampleBugs())

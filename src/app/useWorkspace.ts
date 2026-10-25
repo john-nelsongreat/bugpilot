@@ -4,6 +4,7 @@ import { useBugWorkspace } from '../features/bugs/useBugWorkspace'
 
 export type NotifyOptions = {
   tone?: ToastTone
+  link?: { to: string; label: string }
 }
 
 export type WorkspaceValue = ReturnType<typeof useBugWorkspace> & {

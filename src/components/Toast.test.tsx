@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TOAST_AUTO_DISMISS_MS,
@@ -126,6 +127,28 @@ describe('Toast', () => {
 
     expect(screen.getByText('No notification')).toBeVisible()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('renders an optional link alongside the message', () => {
+    render(
+      <MemoryRouter>
+        <Toast
+          toast={{
+            ...infoToast,
+            link: { to: '/bugs/saved-bug', label: 'View bug' },
+          }}
+          onDismiss={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Status changed to Resolved.',
+    )
+    expect(screen.getByRole('link', { name: 'View bug' })).toHaveAttribute(
+      'href',
+      '/bugs/saved-bug',
+    )
   })
 
   it('keeps an error toast until it is dismissed', () => {

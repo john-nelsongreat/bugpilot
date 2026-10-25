@@ -4,13 +4,21 @@ import {
   Copy,
   Info,
   RotateCcw,
+  Save,
   Search,
   ShieldCheck,
   Stethoscope,
   X,
 } from 'lucide-react'
 import { useWorkspace } from '../app/useWorkspace'
+import { SaveDiagnosisDialog } from '../components/SaveDiagnosisDialog'
 import { assistantPrefillFor } from '../features/assistant/prefill'
+import {
+  canSaveDiagnosis,
+  composeProposedFix,
+  diagnosisAttachmentFor,
+  type SaveDiagnosisSelection,
+} from '../features/assistant/savePreview'
 import {
   MAX_ERROR_TEXT_LENGTH,
   diagnose,
@@ -30,7 +38,7 @@ type CopyStatus =
   | { kind: 'error'; message: string }
 
 export function AssistantPage() {
-  const { bugs } = useWorkspace()
+  const { bugs, attachDiagnosis, notify } = useWorkspace()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedBugId = searchParams.get('bugId')
   const requestedBug = requestedBugId
@@ -57,8 +65,11 @@ export function AssistantPage() {
   const [result, setResult] = useState<DiagnosticResult | null>(null)
   const [checkedSteps, setCheckedSteps] = useState<Set<number>>(() => new Set())
   const [copyStatus, setCopyStatus] = useState<CopyStatus | null>(null)
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const errorFieldRef = useRef<HTMLTextAreaElement>(null)
   const resultHeadingRef = useRef<HTMLHeadingElement>(null)
+  const saveButtonRef = useRef<HTMLButtonElement>(null)
 
   const overLimit = errorText.length > MAX_ERROR_TEXT_LENGTH
   const overLimitMessage = `This input is ${errorText.length.toLocaleString(
@@ -88,10 +99,14 @@ export function AssistantPage() {
     setResult(null)
     setCheckedSteps(new Set())
     setCopyStatus(null)
+    setSaveOpen(false)
+    setSaveError(null)
   }
 
   function handleRemoveBugContext() {
     setSearchParams({}, { replace: true })
+    setSaveOpen(false)
+    setSaveError(null)
   }
 
   function resetOutcome() {
@@ -99,6 +114,7 @@ export function AssistantPage() {
     setCheckedSteps(new Set())
     setCopyStatus(null)
     setFormError(null)
+    setSaveError(null)
   }
 
   function handleAnalyze(event: FormEvent<HTMLFormElement>) {
@@ -172,6 +188,38 @@ export function AssistantPage() {
     }
   }
 
+  function handleSaveDiagnosis(selection: SaveDiagnosisSelection) {
+    if (!loadedBug || !result?.possibleFix) return
+
+    const composition = composeProposedFix(result.possibleFix)
+    if (composition.exceedsLimit) {
+      setSaveError('The proposed fix is too long to save.')
+      return
+    }
+
+    const attached = attachDiagnosis(loadedBug.id, {
+      diagnosis: diagnosisAttachmentFor(result, selection.evidence),
+      proposedFix: composition.text,
+      replaceFix: selection.replaceFix,
+    })
+
+    if (!attached.ok) {
+      setSaveError(attached.message)
+      if (attached.code === 'storage-write-failed') {
+        notify(attached.message, { tone: 'error' })
+      }
+      return
+    }
+
+    setSaveOpen(false)
+    setSaveError(null)
+    notify('Diagnosis saved to this bug.', {
+      link: { to: `/bugs/${attached.bug.id}`, label: 'View bug' },
+    })
+    saveButtonRef.current?.focus()
+  }
+
+  const canSave = canSaveDiagnosis(loadedBug, result)
   const announcement = result
     ? `Analysis complete. ${diagnosticCategoryLabel(result.category)}. ${
         CONFIDENCE_LABELS[result.confidence.level]
@@ -399,6 +447,22 @@ export function AssistantPage() {
                 <p className="assistant-confidence-reason">
                   {result.confidence.reason}
                 </p>
+                {canSave ? (
+                  <div className="assistant-result-actions">
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      ref={saveButtonRef}
+                      onClick={() => {
+                        setSaveError(null)
+                        setSaveOpen(true)
+                      }}
+                    >
+                      <Save size={15} aria-hidden="true" />
+                      Save diagnosis to this bug
+                    </button>
+                  </div>
+                ) : null}
               </header>
 
               <div className="assistant-result-body">
@@ -565,6 +629,21 @@ export function AssistantPage() {
           )}
         </div>
       </div>
+
+      {saveOpen && loadedBug && result?.possibleFix ? (
+        <SaveDiagnosisDialog
+          bug={loadedBug}
+          result={result}
+          possibleFix={result.possibleFix}
+          error={saveError}
+          onCancel={() => {
+            setSaveOpen(false)
+            setSaveError(null)
+            saveButtonRef.current?.focus()
+          }}
+          onConfirm={handleSaveDiagnosis}
+        />
+      ) : null}
     </>
   )
 }
