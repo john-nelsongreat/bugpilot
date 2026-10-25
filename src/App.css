@@ -1342,6 +1342,7 @@ textarea[aria-invalid='true'] {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-bottom: 0.7rem;
 }
 
@@ -1745,6 +1746,36 @@ textarea[aria-invalid='true'] {
 .assistant-privacy-note strong {
   color: var(--ink);
   font-weight: 620;
+}
+
+.assistant-bug-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 92ch;
+  margin-bottom: 1.15rem;
+  padding: 0.55rem 0.7rem 0.55rem 0.95rem;
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 0.8rem;
+}
+
+.assistant-bug-context-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.assistant-bug-context-label strong {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+.assistant-bug-context .button {
+  margin-left: auto;
 }
 
 .assistant-layout {

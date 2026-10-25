@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Copy,
+  Info,
   RotateCcw,
   Search,
   ShieldCheck,
   Stethoscope,
+  X,
 } from 'lucide-react'
+import { useWorkspace } from '../app/useWorkspace'
+import { assistantPrefillFor } from '../features/assistant/prefill'
 import {
   MAX_ERROR_TEXT_LENGTH,
   diagnose,
@@ -25,10 +30,29 @@ type CopyStatus =
   | { kind: 'error'; message: string }
 
 export function AssistantPage() {
-  const [language, setLanguage] = useState<DiagnosticLanguage>('auto')
-  const [errorText, setErrorText] = useState('')
+  const { bugs } = useWorkspace()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedBugId = searchParams.get('bugId')
+  const requestedBug = requestedBugId
+    ? (bugs.find((bug) => bug.id === requestedBugId) ?? null)
+    : null
+  const initialPrefill = requestedBug ? assistantPrefillFor(requestedBug) : null
+  const loadedBug = requestedBug
+  const bugContextNotice =
+    requestedBugId && !loadedBug
+      ? 'No saved report matches this link. Paste an error to continue.'
+      : null
+  const [appliedBugId, setAppliedBugId] = useState<string | null>(
+    requestedBugId,
+  )
+  const [language, setLanguage] = useState<DiagnosticLanguage>(
+    initialPrefill?.language ?? 'auto',
+  )
+  const [errorText, setErrorText] = useState(initialPrefill?.errorText ?? '')
   const [codeSnippet, setCodeSnippet] = useState('')
-  const [reproductionDetails, setReproductionDetails] = useState('')
+  const [reproductionDetails, setReproductionDetails] = useState(
+    initialPrefill?.reproductionDetails ?? '',
+  )
   const [formError, setFormError] = useState<string | null>(null)
   const [result, setResult] = useState<DiagnosticResult | null>(null)
   const [checkedSteps, setCheckedSteps] = useState<Set<number>>(() => new Set())
@@ -49,6 +73,26 @@ export function AssistantPage() {
       resultHeadingRef.current?.focus()
     }
   }, [result])
+
+  // Adjusting state during render is the documented way to follow a changed
+  // URL parameter without an effect. Clearing the parameter (removing the
+  // context) deliberately leaves the typed text alone.
+  if (requestedBugId && requestedBugId !== appliedBugId) {
+    const nextPrefill = requestedBug ? assistantPrefillFor(requestedBug) : null
+    setAppliedBugId(requestedBugId)
+    setLanguage(nextPrefill?.language ?? 'auto')
+    setErrorText(nextPrefill?.errorText ?? '')
+    setCodeSnippet('')
+    setReproductionDetails(nextPrefill?.reproductionDetails ?? '')
+    setFormError(null)
+    setResult(null)
+    setCheckedSteps(new Set())
+    setCopyStatus(null)
+  }
+
+  function handleRemoveBugContext() {
+    setSearchParams({}, { replace: true })
+  }
 
   function resetOutcome() {
     setResult(null)
@@ -156,6 +200,32 @@ export function AssistantPage() {
           anywhere.
         </span>
       </p>
+
+      {loadedBug ? (
+        <div className="assistant-bug-context">
+          <span className="assistant-bug-context-label">
+            Loaded from bug: <strong>{loadedBug.title}</strong>
+          </span>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={handleRemoveBugContext}
+            aria-label="Remove loaded bug context"
+          >
+            <X size={14} aria-hidden="true" />
+            Remove
+          </button>
+        </div>
+      ) : null}
+
+      {bugContextNotice ? (
+        <div className="notice" role="status" aria-label="Bug context">
+          <Info size={16} aria-hidden="true" />
+          <div>
+            <p>{bugContextNotice}</p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="assistant-layout">
         <form

@@ -158,6 +158,15 @@ describe('axe-core accessibility checks', () => {
     await expectNoViolations(container)
   })
 
+  it('passes on the assistant with a loaded bug', async () => {
+    storeBugs(...sampleBugs())
+    const { container } = renderAt('/assistant?bugId=sample-checkout-nan')
+
+    expect(await screen.findByText(/Loaded from bug:/)).toBeVisible()
+
+    await expectNoViolations(container)
+  })
+
   it('passes on the assistant showing a Python result', async () => {
     const user = userEvent.setup()
     storeBugs(...sampleBugs())

@@ -108,6 +108,23 @@ describe('route change announcements', () => {
     expect(liveRegionText()).toBe('')
   })
 
+  it('does not announce a query-string-only change from a bug link', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/assistant']}>
+        <App />
+        <ProbeNavigator to="/assistant?bugId=sample-export-stall" />
+      </MemoryRouter>,
+    )
+
+    expect(liveRegionText()).toBe('')
+
+    await user.click(screen.getByRole('button', { name: 'Change the query string' }))
+
+    expect(await screen.findByText(/Loaded from bug:/)).toBeVisible()
+    expect(liveRegionText()).toBe('')
+  })
+
   it('does not announce a re-render of the same route', async () => {
     const user = userEvent.setup()
     renderAt('/bugs')

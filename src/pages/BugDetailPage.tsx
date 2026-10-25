@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Copy, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, Pencil, Stethoscope, Trash2 } from 'lucide-react'
 import { useWorkspace } from '../app/useWorkspace'
 import {
   FixStatusBadge,
@@ -202,6 +202,13 @@ export function BugDetailPage() {
             {bug.errorMessage ? (
               <>
                 <div className="detail-copy-row">
+                  <Link
+                    to={`/assistant?bugId=${encodeURIComponent(bug.id)}`}
+                    className="button button--secondary"
+                  >
+                    <Stethoscope size={15} aria-hidden="true" />
+                    Analyse with Assistant
+                  </Link>
                   <button
                     type="button"
                     className="button button--secondary assistant-copy"
