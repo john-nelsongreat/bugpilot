@@ -1,5 +1,7 @@
 # BugPilot
 
+[![CI](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml/badge.svg)](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml)
+
 **Live demo:** [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app)
 
 BugPilot is a local-first bug tracker and debugging assistant that runs entirely in the browser. It is built for capturing a reproducible bug report, keeping a searchable triage log, recording a fix through manual states, and getting rule-based hints from pasted Python or JavaScript error text. There is no account, backend, cloud database, telemetry, or AI API: saved reports and the theme preference stay in this browser, and the assistant analyses pasted text in the page without sending or storing it.
@@ -105,6 +107,10 @@ Then open `http://localhost:5180`. `--strictPort` makes the command fail instead
 | `npm run preview -- --port 4173 --strictPort` | Serves the production build on the fixed preview port used in this documentation. |
 
 All commands above, except `npm install` (dependencies were already installed) and the bare `npm run preview` (verified through the same preview server with explicit port flags), were run while preparing this README.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull request. One Ubuntu runner sets up Node 24 and then runs `npm ci`, `npm run lint`, `npm test`, and `npm run build` as four separately named steps, so a failed run names the exact stage that broke. The workflow requests `contents: read` permission only, cancels superseded runs of the same branch, times out after 20 minutes, and does not deploy anything.
 
 ## Production preview
 
