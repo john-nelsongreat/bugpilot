@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, Pencil, Trash2 } from 'lucide-react'
 import { useWorkspace } from '../app/useWorkspace'
 import {
   FixStatusBadge,
@@ -10,6 +10,26 @@ import {
 import { DeleteBugDialog } from '../components/DeleteBugDialog'
 import { bugCode, formatDateTime } from '../features/bugs/format'
 import { BUG_STATUSES, type BugStatus } from '../features/bugs/types'
+import { copyTextToClipboard } from '../lib/clipboard'
+
+type CopyStatus =
+  | { kind: 'success'; message: string }
+  | { kind: 'error'; message: string }
+
+function CopyStatusMessage({ status }: { status: CopyStatus }) {
+  return (
+    <p
+      className={
+        status.kind === 'error'
+          ? 'assistant-copy-status is-error'
+          : 'assistant-copy-status'
+      }
+      role={status.kind === 'error' ? 'alert' : 'status'}
+    >
+      {status.message}
+    </p>
+  )
+}
 
 export function BugDetailPage() {
   const { bugId } = useParams()
@@ -18,6 +38,8 @@ export function BugDetailPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [errorCopyStatus, setErrorCopyStatus] = useState<CopyStatus | null>(null)
+  const [fixCopyStatus, setFixCopyStatus] = useState<CopyStatus | null>(null)
   const deleteButtonRef = useRef<HTMLButtonElement>(null)
 
   const closeDialog = useCallback(() => {
@@ -49,6 +71,26 @@ export function BugDetailPage() {
     }
     setActionError(null)
     notify(`Status changed to ${nextStatus}.`)
+  }
+
+  async function handleCopy(field: 'error' | 'fix') {
+    if (!bug) return
+    const text = field === 'error' ? bug.errorMessage : bug.proposedFix
+    const label = field === 'error' ? 'Error message' : 'Proposed fix'
+    const copied = await copyTextToClipboard(text)
+    const status: CopyStatus = copied
+      ? { kind: 'success', message: `${label} copied to the clipboard.` }
+      : {
+          kind: 'error',
+          message:
+            'Could not copy automatically. Select the text and copy it manually.',
+        }
+
+    if (field === 'error') {
+      setErrorCopyStatus(status)
+    } else {
+      setFixCopyStatus(status)
+    }
   }
 
   function handleDelete() {
@@ -131,7 +173,22 @@ export function BugDetailPage() {
           >
             <h2 id="error-heading">Error message</h2>
             {bug.errorMessage ? (
-              <pre className="code-block">{bug.errorMessage}</pre>
+              <>
+                <div className="detail-copy-row">
+                  <button
+                    type="button"
+                    className="button button--secondary assistant-copy"
+                    onClick={() => void handleCopy('error')}
+                  >
+                    <Copy size={15} aria-hidden="true" />
+                    Copy error message
+                  </button>
+                </div>
+                {errorCopyStatus ? (
+                  <CopyStatusMessage status={errorCopyStatus} />
+                ) : null}
+                <pre className="code-block">{bug.errorMessage}</pre>
+              </>
             ) : (
               <p className="muted-copy">No error output was recorded.</p>
             )}
@@ -200,6 +257,23 @@ export function BugDetailPage() {
             </div>
 
             <h3>Proposed fix</h3>
+            {bug.proposedFix ? (
+              <>
+                <div className="detail-copy-row">
+                  <button
+                    type="button"
+                    className="button button--secondary assistant-copy"
+                    onClick={() => void handleCopy('fix')}
+                  >
+                    <Copy size={15} aria-hidden="true" />
+                    Copy proposed fix
+                  </button>
+                </div>
+                {fixCopyStatus ? (
+                  <CopyStatusMessage status={fixCopyStatus} />
+                ) : null}
+              </>
+            ) : null}
             <p className="prose">
               {bug.proposedFix || (
                 <span className="muted-copy">

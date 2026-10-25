@@ -1338,6 +1338,13 @@ textarea[aria-invalid='true'] {
   margin-top: 0;
 }
 
+.detail-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 0.7rem;
+}
+
 .prose {
   color: var(--ink-soft);
   font-size: 0.9rem;

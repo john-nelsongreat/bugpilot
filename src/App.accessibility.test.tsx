@@ -95,6 +95,29 @@ describe('axe-core accessibility checks', () => {
     await expectNoViolations(container)
   })
 
+  it('passes on a bug detail page with both copy buttons', async () => {
+    storeBugs(
+      makeBug({
+        id: 'copy-detail',
+        title: 'Copy controls on a saved report',
+        errorMessage:
+          "TypeError: Cannot read properties of undefined (reading 'total')\n    at calculateTotal (src/cart/total.ts:18:9)",
+        proposedFix:
+          'Default the missing total before formatting:\n\nconst total = cart.total ?? 0',
+      }),
+    )
+    const { container } = renderAt('/bugs/copy-detail')
+
+    expect(
+      await screen.findByRole('button', { name: 'Copy error message' }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Copy proposed fix' }),
+    ).toBeVisible()
+
+    await expectNoViolations(container)
+  })
+
   it('passes on the new bug form', async () => {
     storeBugs(...sampleBugs())
     const { container } = renderAt('/bugs/new')

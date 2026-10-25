@@ -10,6 +10,7 @@ import {
   MAX_ERROR_TEXT_LENGTH,
   diagnose,
 } from '../diagnostics/engine'
+import { copyTextToClipboard } from '../lib/clipboard'
 import type {
   DiagnosticCategory,
   DiagnosticLanguage,
@@ -132,18 +133,14 @@ export function AssistantPage() {
 
   async function handleCopy() {
     if (!result?.possibleFix) return
-    const text = result.possibleFix.exampleCode
+    const copied = await copyTextToClipboard(result.possibleFix.exampleCode)
 
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('Clipboard API unavailable')
-      }
-      await navigator.clipboard.writeText(text)
+    if (copied) {
       setCopyStatus({
         kind: 'success',
         message: 'Code copied to the clipboard.',
       })
-    } catch {
+    } else {
       setCopyStatus({
         kind: 'error',
         message:
