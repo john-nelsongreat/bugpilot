@@ -209,6 +209,39 @@ The **Bug log** header has **Export reports** and **Import reports** actions. Bo
 
 The array contains every saved report with all of its fields, including fix state, verification notes, and original timestamps. Theme preference, assistant input or results, footer joke indices, and every other storage key are never exported. With an empty log, the app says there is nothing to export and does not download a file. The download is built with a `Blob` and an object URL, which is revoked after the click; nothing is uploaded.
 
+### Saved diagnosis field (data layer only)
+
+A report may also carry one optional `diagnosis` object, added after `updatedAt`. It holds structured diagnostic metadata, not assistant input:
+
+```json
+"diagnosis": {
+  "category": "missing-module",
+  "ruleId": "python.missing-module",
+  "matchedSignature": "ModuleNotFoundError: No module named '<module>'",
+  "confidence": "high",
+  "evidence": [
+    {
+      "label": "Error text",
+      "quote": "ModuleNotFoundError: No module named 'pandas'"
+    }
+  ],
+  "savedAt": "2026-10-25T12:00:00.000Z"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `category` | Text, 1–80 characters. It is not restricted to the diagnostic engine's current categories, so a future category does not invalidate existing saved data. |
+| `ruleId` | Optional text, up to 80 characters. |
+| `matchedSignature` | Text up to 300 characters, or `null`. |
+| `confidence` | `low`, `medium`, or `high`. |
+| `evidence` | Up to 5 items. Each item is `{ label, quote }`, with `label` up to 80 characters and `quote` up to 500. |
+| `savedAt` | A valid ISO timestamp. |
+
+The field is optional and additive. Both browser storage and the export envelope stay at `schemaVersion: 1`. A report without a diagnosis serialises exactly as before: there is no `diagnosis: null` key. Old export files without the field import unchanged. An older BugPilot build will import the report but drop the diagnosis, so diagnosis data is lossy across downgrades; the core report is never rejected for it.
+
+**This is a data layer only, not an interface feature.** `attachDiagnosis` exists in `src/features/bugs/diagnosis.ts` with a thin wrapper in the workspace hook, and saved diagnoses are preserved through storage loading, ordinary edits, status and fix-state changes, export, and import. No page, button, route, or Assistant workflow calls the action yet and no diagnosis is displayed. Assistant text is still never stored. When the interface is added, it must preview the exact structured fields and proposed fix that will be written.
+
 ### Import
 
 The import dialog accepts a `.json` file up to **5 MB** and **5,000 reports**. It validates the envelope (`app` must be `bugpilot`; `schemaVersion` must be `1`) and every report with the same rules as the form:
@@ -411,7 +444,7 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
   - `bugpilot.bugs.preimport.v1` — the complete raw bug value captured immediately before the most recent successful import write. It is overwritten by the next import and can contain the same report text as the main key.
   - `bugpilot.theme.v1` — the selected light or dark theme.
 - **Session-only data.** Footer joke indices use `sessionStorage` keys named `bugpilot.footerJoke.<pageKey>`. They store an index, not page content.
-- **Assistant text is not saved.** Pasted error text, code snippets, reproduction details, and results are held in React component state for the current tab session. They are never written to localStorage, sessionStorage, a bug report, or any server. Refreshing or closing the tab discards them.
+- **Assistant text is not saved.** Pasted error text, code snippets, reproduction details, and results are held in React component state for the current tab session. They are never written to localStorage, sessionStorage, a bug report, or any server. Refreshing or closing the tab discards them. A saved-diagnosis data layer now exists for a later interface, but it stores only structured fields (`category`, optional `ruleId`, `matchedSignature`, `confidence`, evidence `label`/`quote` pairs, `savedAt`) plus the caller-supplied proposed fix. It never stores the raw pasted error text, source snippet, or reproduction details, and no interface calls it yet.
 - **No code execution.** BugPilot never executes submitted code, runs shell commands, installs packages, or modifies files on the user's computer. The diagnostic engine only pattern-matches text.
 - **Suggestions are not proof.** Possible fixes, debugging steps, and verification checklists are displayed text. The app does not apply a suggested change or mark a fix as verified. The user must make and verify changes outside BugPilot and record the result manually.
 - **Local does not mean encrypted.** Anyone with access to the browser profile can read the saved reports. Use a device and browser profile you trust, and do not treat this as secure storage for secrets.

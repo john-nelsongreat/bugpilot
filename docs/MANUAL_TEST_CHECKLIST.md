@@ -494,6 +494,23 @@ Use a disposable profile with the five sample reports. Do not run the replace or
   ```
   - Expected: the five imported reports return.
 
+### Saved diagnosis data layer (no interface yet)
+
+There is no diagnosis button, display, or form field yet. Verify the persistence and import rules through storage and the export file.
+
+- [ ] Create a JSON file **outside the project folder** with three reports: two valid reports carrying a `diagnosis` object and one without it. Include the fields listed in the README's **Saved diagnosis field** table.
+- [ ] Import it with **Add reports** and expect **Valid reports: 3**, **Invalid reports: 0**, and **Import complete. Added 3, skipped 0, replaced 0.**
+- [ ] Confirm the interface is unchanged: no diagnosis panel, button, badge, field, or route appears on the bug log, detail, or edit pages.
+- [ ] In the Console, inspect the stored reports:
+  ```js
+  JSON.parse(localStorage.getItem('bugpilot.bugs.v1')).bugs.map(b => ({ id: b.id, diagnosis: b.diagnosis, keys: Object.keys(b) }))
+  ```
+  Expected: the two diagnosed reports contain the same structured diagnosis and `savedAt`; the third has no `diagnosis` key at all.
+- [ ] Edit a diagnosed report (title, status, and fix state), save, reload, and run the Console inspection again. Expected: the diagnosis is unchanged each time and appears once.
+- [ ] Export reports. Expected: only the two diagnosed reports contain a `diagnosis` key, placed after `updatedAt`; the third report is byte-for-byte the old shape.
+- [ ] Import that export into a fresh profile (or after the empty-log Console step above) and expect the preview counts to match and the stored diagnosis values to be identical.
+- [ ] Create a second file with one otherwise valid report whose diagnosis has an invalid confidence or a bad `savedAt`, then import it. Expected: the preview lists that position with a reason starting **The saved diagnosis is invalid**, no record is repaired, and nothing is saved when it is the only report.
+
 ### Dialog focus, access, and responsive behavior
 
 - [ ] With at least one report present, open **Import reports** and press `Tab` and `Shift+Tab` repeatedly.
