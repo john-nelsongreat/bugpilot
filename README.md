@@ -4,7 +4,7 @@
 
 **Live demo:** [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app)
 
-BugPilot is a local-first bug tracker and debugging assistant that runs entirely in the browser. It is built for capturing a reproducible bug report, keeping a searchable triage log, recording a fix through manual states, and getting rule-based hints from pasted Python or JavaScript error text. There is no account, backend, cloud database, telemetry, or AI API: saved reports and the theme preference stay in this browser, and the assistant analyses pasted text in the page without sending or storing it.
+BugPilot is a local-first bug tracker and debugging assistant that runs entirely in the browser. It is built for capturing a reproducible bug report, keeping a searchable triage log, recording a fix through manual states, and getting rule-based hints from pasted Python or JavaScript error text. There is no account, backend, cloud database, telemetry, or AI API: saved reports and the theme preference stay in this browser, and the assistant analyses pasted text in the page without sending it. Assistant text is stored only when you explicitly save a diagnosis to a report.
 
 This repository contains a working MVP, not a hosted product. See [Limitations](#limitations) for what is intentionally out of scope.
 
@@ -17,9 +17,10 @@ This repository contains a working MVP, not a hosted product. See [Limitations](
 - **Validation**: title, project, language, and description are required; each field has a length limit; a fix status requires a proposed fix; `Verified` additionally requires verification notes.
 - **Fix tracking**: `Proposed`, `Accepted`, `Rejected`, and `Verified` are manual states. BugPilot never verifies a fix automatically. A bug's workflow status (`Open`, `In Progress`, `Resolved`, `Closed`) is separate from its fix status.
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
-- **Debug Assistant** at `/assistant`, backed by a local rule engine with 11 Python rules and 3 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives.
+- **Debug Assistant** at `/assistant`, backed by a local rule engine with 11 Python rules and 3 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
+- **Saved diagnoses**: after a recognised analysis loaded from a report, the Assistant previews every field and writes one diagnosis to that report when confirmed. The bug detail shows the category, signature, confidence, selected evidence, and saved date, and can remove the diagnosis without touching the proposed fix, fix state, status, or verification notes.
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
-- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete and import dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
+- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete, import, remove-diagnosis, and save-diagnosis dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
 
 ## Screenshots
@@ -40,6 +41,10 @@ Bug detail, light theme:
 
 ![BugPilot bug detail in the light theme showing a report with its error message, reproduction steps, and fix tracking.](docs/screenshots/bug-detail-light.png)
 
+Saved diagnosis on a bug detail, light theme:
+
+![BugPilot bug detail in the light theme showing a saved diagnosis with its category, confidence, signature, saved date, one saved evidence quote, and a remove action above fix tracking.](docs/screenshots/saved-diagnosis.png)
+
 Debug Assistant with a Python result, light theme:
 
 ![BugPilot Debug Assistant in the light theme showing a high-confidence Missing module diagnosis for a Python ModuleNotFoundError.](docs/screenshots/assistant-result-light.png)
@@ -48,11 +53,15 @@ Debug Assistant with a Python result, dark theme:
 
 ![BugPilot Debug Assistant in the dark theme showing the same Missing module result and evidence.](docs/screenshots/assistant-result-dark.png)
 
+Save-diagnosis preview, light theme:
+
+![BugPilot save-diagnosis dialog in the light theme showing the category, matched signature, confidence, one checked evidence item, the composed proposed fix, the fix-state consequence, and Cancel and Save diagnosis actions.](docs/screenshots/save-diagnosis-dialog.png)
+
 Dashboard at 390px, dark theme:
 
 <img src="docs/screenshots/dashboard-dark-390.png" alt="BugPilot dashboard at 390 pixels wide in the dark theme, with a compact header, stacked navigation, and a two-column stat grid." width="390" />
 
-The screenshots show the five fictional sample reports created on a first run. They are not real user data.
+The screenshots show the five fictional sample reports created on a first run; the saved diagnosis was saved to one of those samples while checking the documented flow. They are not real user data.
 
 ## Tech stack
 
@@ -150,7 +159,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; f
 
 No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exception is needed. `blob:` was not added: a real export download was exercised under this policy, produced and revoked its object URL, and downloaded the JSON without a violation. The only allowance added to the requested baseline is `data:` in `font-src`, and it is required by the built font above.
 
-**How it was checked locally.** On 2026-10-25 the production build was served by a temporary stdlib-only Node server outside the repository. It read the headers from `vercel.json` at startup, applied all of them, and used the same SPA fallback. Fresh Chromium contexts at 1440x700 with real 15px scrollbars loaded every route directly and exercised first-run seeding, create/edit/delete, search/filter/sort, fix states, both themes, the Debug Assistant (Python, JavaScript, unrecognised, empty, over-limit, copy, checklist, clear), export, import preview/merge and the replace gate, toasts, the joke rotation, keyboard focus, and both dialogs: **216 assertions, 0 CSP violations, 0 console errors, 0 page errors**, with requests only to the local server. A throwaway page then confirmed that an inline script, an external image, and an external `fetch` were each blocked and reported as a violation (exactly three expected violations). `src/csp.test.ts` also reads this file during `npm test` and fails if the global rule loses the policy, the required directives change, or an unsafe source appears.
+**How it was checked locally.** On 2026-10-25 the production build was served by a temporary stdlib-only Node server outside the repository. It read the headers from `vercel.json` at startup, applied all of them, and used the same SPA fallback. Fresh Chromium contexts at 1440x700 with real 15px scrollbars loaded every route directly and exercised first-run seeding, create/edit/delete, search/filter/sort, fix states, both themes, the Debug Assistant (Python, JavaScript, unrecognised, empty, over-limit, copy, checklist, clear), export, import preview/merge and the replace gate, toasts, the joke rotation, keyboard focus, and the then-existing delete and import dialogs: **216 assertions, 0 CSP violations, 0 console errors, 0 page errors**, with requests only to the local server. A throwaway page then confirmed that an inline script, an external image, and an external `fetch` were each blocked and reported as a violation (exactly three expected violations). `src/csp.test.ts` also reads this file during `npm test` and fails if the global rule loses the policy, the required directives change, or an unsafe source appears.
 
 **What this does not prove.** `npm run dev` and `npm run preview` do **not** apply `vercel.json`; they serve no CSP. The policy reaches users only after a Vercel deployment, and the live response had not yet been inspected when this section was written. Re-run the header command in [Security headers](docs/MANUAL_TEST_CHECKLIST.md#16-security-headers) after deploying and confirm the policy string before treating the production site as protected. A local emulator proves the policy is compatible with the build, not that the host is sending it.
 
@@ -165,7 +174,7 @@ No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exce
 | `/bugs/new` | New bug report form |
 | `/bugs/:bugId` | Bug detail with quick status changes, edit, and delete |
 | `/bugs/:bugId/edit` | Edit form for an existing report |
-| `/assistant` | Local Debug Assistant |
+| `/assistant` | Local Debug Assistant. `?bugId=<id>` prefills it from a saved report; the query carries only the id. |
 | `*` | Page-not-found screen with a link back to the overview |
 
 Routes are declared in `src/App.tsx`.
@@ -207,21 +216,33 @@ The **Bug log** header has **Export reports** and **Import reports** actions. Bo
 }
 ```
 
-The array contains every saved report with all of its fields, including fix state, verification notes, and original timestamps. Theme preference, assistant input or results, footer joke indices, and every other storage key are never exported. With an empty log, the app says there is nothing to export and does not download a file. The download is built with a `Blob` and an object URL, which is revoked after the click; nothing is uploaded.
+The array contains every saved report with all of its fields, including fix state, verification notes, a saved diagnosis and its composed fix, and original timestamps. Theme preference, unsaved assistant input or results, footer joke indices, and every other storage key are never exported. With an empty log, the app says there is nothing to export and does not download a file. The download is built with a `Blob` and an object URL, which is revoked after the click; nothing is uploaded.
 
-### Saved diagnosis field (data layer only)
+### Saved diagnoses
 
-A report may also carry one optional `diagnosis` object, added after `updatedAt`. It holds structured diagnostic metadata, not assistant input:
+A report may carry one optional `diagnosis` object, added after `updatedAt`. It is created from the Assistant and is displayed on the bug detail; it is not a form field.
+
+#### Saving from the Assistant
+
+- On a bug detail with a non-empty error message, **Analyse with Assistant** links to `/assistant?bugId=<id>`. The query carries only the id.
+- The Assistant prefills the report's error text, maps `Python` to Python and `JavaScript`, `TypeScript`, `JS`, `TS`, or `Node` to JavaScript (anything else to Auto), and composes reproduction details from the report's steps and actual behavior as `Steps to reproduce:` then `Actual behavior:`, with each source field trimmed and capped at its form limit. It does not analyze until **Analyze** is clicked.
+- A **Loaded from bug: <title>** chip identifies the context. Its **Remove** action clears the `bugId` query and the chip but keeps text already typed. An unknown id shows a non-blocking notice and leaves the Assistant unchanged. Opening the context writes nothing to storage.
+- After a recognised result with a possible fix, **Save diagnosis to this bug** appears only while that bug context is loaded.
+- The preview dialog is focus-trapped, starts on **Cancel**, closes on Escape, Cancel, the close button, or a backdrop click without writing, and returns focus to the trigger. It lists the category, matched signature (or **No specific signature**), confidence, every evidence item (checked by default and independently untickable), and the exact proposed fix.
+- The composed fix is the explanation, a blank line, `Example code:`, then the example code. If that exceeds 20,000 characters, the example code is left out and the dialog says so; if the explanation alone exceeds the limit, Save is disabled with an explanation. The text is never silently truncated.
+- With no existing fix, Save writes the composed fix and sets fix status to `Proposed`. With an existing fix, the fix and its recorded state are kept unless **Replace the existing proposed fix with this one** is ticked; ticking it replaces only the fix text, not the recorded state. Saving never marks a fix `Verified`, and it replaces an existing diagnosis with a new `savedAt`.
+- Success shows **Diagnosis saved to this bug.** with a **View bug** link. A storage failure shows the dialog error and a persistent error toast, and writes nothing.
+
+#### Stored shape
 
 ```json
 "diagnosis": {
   "category": "missing-module",
-  "ruleId": "python.missing-module",
   "matchedSignature": "ModuleNotFoundError: No module named '<module>'",
   "confidence": "high",
   "evidence": [
     {
-      "label": "Error text",
+      "label": "Final exception line",
       "quote": "ModuleNotFoundError: No module named 'pandas'"
     }
   ],
@@ -232,15 +253,17 @@ A report may also carry one optional `diagnosis` object, added after `updatedAt`
 | Field | Rule |
 | --- | --- |
 | `category` | Text, 1–80 characters. It is not restricted to the diagnostic engine's current categories, so a future category does not invalidate existing saved data. |
-| `ruleId` | Optional text, up to 80 characters. |
+| `ruleId` | Optional text, up to 80 characters. Imported files may carry it and it is preserved, but the current interface does not add it. |
 | `matchedSignature` | Text up to 300 characters, or `null`. |
 | `confidence` | `low`, `medium`, or `high`. |
-| `evidence` | Up to 5 items. Each item is `{ label, quote }`, with `label` up to 80 characters and `quote` up to 500. |
+| `evidence` | Up to 5 items. Each item is `{ label, quote }`, with `label` up to 80 characters and `quote` up to 500. Only evidence ticked in the preview is written; line numbers and source labels are not stored. |
 | `savedAt` | A valid ISO timestamp. |
+
+The current interface writes exactly `category`, `matchedSignature`, `confidence`, `evidence`, and `savedAt`. The composed fix goes into the report's ordinary `proposedFix`, outside the `diagnosis` object. The raw error text, code snippet, reproduction details, and unticked evidence are not stored. A ticked evidence quote can itself contain the final exception line, as in the example above.
 
 The field is optional and additive. Both browser storage and the export envelope stay at `schemaVersion: 1`. A report without a diagnosis serialises exactly as before: there is no `diagnosis: null` key. Old export files without the field import unchanged. An older BugPilot build will import the report but drop the diagnosis, so diagnosis data is lossy across downgrades; the core report is never rejected for it.
 
-**This is a data layer only, not an interface feature.** `attachDiagnosis` exists in `src/features/bugs/diagnosis.ts` with a thin wrapper in the workspace hook, and saved diagnoses are preserved through storage loading, ordinary edits, status and fix-state changes, export, and import. No page, button, route, or Assistant workflow calls the action yet and no diagnosis is displayed. Assistant text is still never stored. When the interface is added, it must preview the exact structured fields and proposed fix that will be written.
+Saved diagnoses are preserved through reload, ordinary edits, quick status changes, fix-state changes, export, and import. On the bug detail, **Remove saved diagnosis** opens a focus-trapped confirmation dialog; Escape, Cancel, the close button, or a backdrop click cancel without writing, and focus returns to the button. Confirming removes only the `diagnosis` field, keeps `proposedFix`, `fixStatus`, `verificationNotes`, and `status`, and shows **Saved diagnosis removed.** Removal cannot be undone.
 
 ### Import
 
@@ -266,12 +289,13 @@ A successful import preserves the imported timestamps, updates the dashboard and
 ```text
 src/
 ├─ app/            Workspace context: loads state, exposes bug actions, and owns toast notifications
-├─ components/     Shared layout, badges, delete and import dialogs, toast, and footer joke
+├─ components/     Shared layout, badges, delete/import/remove/save dialogs, toast, and footer joke
 ├─ content/        Static joke sets for each page key
 ├─ diagnostics/    Diagnostic types, matching engine, rule tests
 │  └─ rules/       Python and JavaScript diagnostic rules
 ├─ features/
-│  ├─ bugs/        Bug types, samples, validation, storage, querying, export/import, and the workspace hook
+│  ├─ assistant/   Bug-to-Assistant prefill and save-diagnosis composition
+│  ├─ bugs/        Bug types, samples, validation, storage, querying, saved diagnoses, export/import, and the workspace hook
 │  ├─ footer/      Joke selection, 60-second rotation, and sessionStorage handling
 │  └─ theme/       Theme resolution, persistence, and the WCAG contrast test
 ├─ pages/          Route-level pages for the dashboard, log, form, detail, assistant, and 404
@@ -293,6 +317,8 @@ Test files live beside the module they test. For example, the Python rules live 
 **Export and import.** `src/features/bugs/exportImport.ts` is a pure module with no React imports. It builds and serialises the export envelope, parses and validates an import file, counts existing ids, and applies a merge or replace while writing the backup key. It maps each allowed report field explicitly, so unknown or prototype-related keys cannot reach the log. `src/components/ImportBugDialog.tsx` owns only the dialog interaction and file reading; `src/pages/BugListPage.tsx` triggers the download and reports the result.
 
 **Fix states.** Fix status is an optional field on a bug, not a derived value. `src/pages/BugFormPage.tsx` edits it; `src/pages/BugDetailPage.tsx` displays it and allows quick changes to the separate workflow status. Marking a fix `Verified` is always a manual action, and the selected fix status is never inferred from the fix text or from the assistant. `Accepted` means the proposed fix was accepted; `Verified` means the user also recorded how it was checked.
+
+**Saved diagnoses.** `src/features/bugs/diagnosis.ts` validates and attaches or removes a diagnosis while leaving the report's fix fields alone. `src/features/assistant/prefill.ts` turns a report into Assistant fields without storing anything, and `src/features/assistant/savePreview.ts` composes the proposed fix and decides whether a save is possible. `src/components/SaveDiagnosisDialog.tsx` and `src/components/RemoveDiagnosisDialog.tsx` own only the dialog interaction; `src/pages/AssistantPage.tsx` calls the workspace's `attachDiagnosis`, and `src/pages/BugDetailPage.tsx` displays the saved fields and calls `removeDiagnosis`. The interface writes no `ruleId`.
 
 **Copying report text.** The detail page shows **Copy error message** and **Copy proposed fix** only when the corresponding field has text. Each button copies that field unchanged through `src/lib/clipboard.ts` and reports success with `role="status"` or a manual-copy fallback with `role="alert"`. Copying does not write to storage, change the report, or mark a fix as verified.
 
@@ -444,7 +470,8 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
   - `bugpilot.bugs.preimport.v1` — the complete raw bug value captured immediately before the most recent successful import write. It is overwritten by the next import and can contain the same report text as the main key.
   - `bugpilot.theme.v1` — the selected light or dark theme.
 - **Session-only data.** Footer joke indices use `sessionStorage` keys named `bugpilot.footerJoke.<pageKey>`. They store an index, not page content.
-- **Assistant text is not saved.** Pasted error text, code snippets, reproduction details, and results are held in React component state for the current tab session. They are never written to localStorage, sessionStorage, a bug report, or any server. Refreshing or closing the tab discards them. A saved-diagnosis data layer now exists for a later interface, but it stores only structured fields (`category`, optional `ruleId`, `matchedSignature`, `confidence`, evidence `label`/`quote` pairs, `savedAt`) plus the caller-supplied proposed fix. It never stores the raw pasted error text, source snippet, or reproduction details, and no interface calls it yet.
+- **Assistant text is session-only unless you save a diagnosis.** Pasted error text, code snippets, reproduction details, verification checkmarks, and unsaved results are held in React component state for the current tab session. Opening the Assistant from a bug, analyzing, copying code, and ticking checklist items write nothing; refreshing or closing the tab discards the text, and nothing is sent anywhere.
+- **What saving a diagnosis stores.** Only an explicit **Save diagnosis** confirmation writes data: the structured fields `category`, `matchedSignature`, `confidence`, the evidence items you tick (`label` and `quote`), and `savedAt`, plus the composed proposed fix in the report's normal `proposedFix` field. It never stores the whole pasted error text, code snippet, reproduction details, or unticked evidence. A ticked evidence quote can itself contain the final exception line, so untick that item if you do not want that line saved. No assistant text is written to any other storage key.
 - **No code execution.** BugPilot never executes submitted code, runs shell commands, installs packages, or modifies files on the user's computer. The diagnostic engine only pattern-matches text.
 - **Suggestions are not proof.** Possible fixes, debugging steps, and verification checklists are displayed text. The app does not apply a suggested change or mark a fix as verified. The user must make and verify changes outside BugPilot and record the result manually.
 - **Local does not mean encrypted.** Anyone with access to the browser profile can read the saved reports. Use a device and browser profile you trust, and do not treat this as secure storage for secrets.
@@ -459,9 +486,9 @@ BugPilot is checked at three levels: automated tests in the repository, a live a
 
 | Check | Where | Runs | Notes |
 | --- | --- | --- | --- |
-| axe-core rule engine | `src/App.accessibility.test.tsx` + `src/test/axe.ts` | `npm test` | 14 tests render every route and state through the real router and layout: overview (first run), bug log (seeded and empty), bug detail, new form, the new form with its error summary after an empty submit, edit form, assistant (empty, Python result, validation error), not-found, delete dialog open, import dialog open with a preview, and a visible toast. Each asserts an empty violations array. |
+| axe-core rule engine | `src/App.accessibility.test.tsx` + `src/test/axe.ts` | `npm test` | 20 tests render every route and state through the real router and layout: overview (first run), bug log (seeded and empty), bug detail (with no copy buttons and with both copy buttons), a bug detail with a saved diagnosis, new form, the new form with its error summary after an empty submit, edit form, assistant (empty, loaded from a bug, Python result, validation error), not-found, delete dialog open, remove-diagnosis dialog open, save-diagnosis dialog open for a bug with and without an existing fix, import dialog open with a preview, and a visible toast. Each asserts an empty violations array. |
 | Theme token contrast | `src/features/theme/contrast.test.ts` | `npm test` | 8 tests compute WCAG AA ratios for text, badge, border, and focus-ring token pairs in both themes. This is where contrast is covered, because axe cannot measure it under jsdom. |
-| Route announcement | `src/components/AppLayout.announcement.test.tsx` | `npm test` | 7 tests drive the real router and the app layout: silent on first load, announces the page entered by clicking a nav link and a bug detail page's own report title, announces on history back and forward, stays quiet when only the query string changes or when the same route re-renders (theme toggle), and leaves focus on the link that caused the navigation. |
+| Route announcement | `src/components/AppLayout.announcement.test.tsx` | `npm test` | 8 tests drive the real router and the app layout: silent on first load, announces the page entered by clicking a nav link and a bug detail page's own report title, announces on history back and forward, stays quiet when only the query string changes (including the Assistant's `bugId` link) or when the same route re-renders (theme toggle), and leaves focus on the control that caused the navigation. |
 | Lint | `npm run lint` (`oxlint --deny-warnings`) | `npm test` is separate | `react-refresh/only-export-components` and the other 115 rules fail the run on a warning, so component files cannot quietly re-absorb non-component exports. |
 
 axe-core 4.14.0 is a `devDependency` only. The single module that imports it, `src/test/axe.ts`, is reachable only from `src/App.accessibility.test.tsx`, and the built bundle contains no `axe-core` string — confirmed by `grep -c "axe-core" dist/assets/index-*.js`, which returns 0. The `color-contrast` rule is switched off in the helper because jsdom performs no layout and paints nothing, so axe cannot resolve a real background for an element — the rule is not weakening a check, it is disabling one that cannot run there. Layout-dependent rules (`target-size`, reflow, zoom) are in the same position.
@@ -474,7 +501,7 @@ Later the same day, after the reflow and announcement changes, the whole matrix 
 
 Confirmed in that audit:
 
-- **Keyboard**: the skip link is the first stop and lands on `<main>`; tab order follows the visual order on every page; focus is visible on every stop; no focus trap outside the two dialogs; `Escape` closes both dialogs and returns focus to their trigger; every action (create, edit, delete, status change, filter, export, import, theme toggle, assistant run) is reachable without a mouse.
+- **Keyboard**: the skip link is the first stop and lands on `<main>`; tab order follows the visual order on every page; focus is visible on every stop; no focus trap outside the app's dialogs; `Escape` closes each dialog and returns focus to its trigger; every action (create, edit, delete, status change, filter, export, import, theme toggle, assistant run) is reachable without a mouse.
 - **Structure**: one `h1` per page with no skipped heading levels; every form control has a label, and inline errors are linked to their control; `lang="en"` on `<html>`; `<meta name="viewport">` does not block zoom.
 - **Motion**: `prefers-reduced-motion: reduce` collapses all animations and transitions (`src/index.css`), verified by emulation.
 - **Title**: `document.title` now changes per route — `<page label> · BugPilot`, with a bug detail page titled after its own report. Before this pass the tab kept the static `index.html` title on every route, which the manual WCAG 2.4.2 check flagged. axe did not report it: its `page-title` rule only requires a non-empty title.
@@ -507,7 +534,7 @@ These were observed in the live audit and deliberately left in place, each becau
 - Unrecognised input is reported plainly with general steps; no cause or fix is guessed.
 - Error text is capped at 20,000 characters.
 - Reports live in one browser origin. Clearing site data, using a different browser profile, or switching between the dev and preview ports hides the reports saved under the other origin. JSON export and import move reports between origins, but there is no automatic backup, sync, or multi-user support.
-- Import accepts only BugPilot schema version 1 exports, up to 5 MB and 5,000 reports. It imports reports only; theme, assistant text, and footer state are not transferable. A file with newer schema version is rejected rather than guessed at.
+- Import accepts only BugPilot schema version 1 exports, up to 5 MB and 5,000 reports. It imports reports only; a saved diagnosis travels with its report, but theme, unsaved assistant text, and footer state are not transferable. A file with newer schema version is rejected rather than guessed at.
 - The pre-import backup is a single key overwritten by each import. It is a safety copy for the immediately preceding log, not a version history.
 - Fixes are never verified automatically, and the app does not run the user's code to verify anything.
 - No backend, authentication, cloud storage, external AI provider, deployment, or hosting is included.
@@ -547,7 +574,7 @@ None of the following exists in the current app:
 
 ## Manual test checklist
 
-Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, export and import, the joke footer, toast behavior, keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
+Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
 
 ## License
 

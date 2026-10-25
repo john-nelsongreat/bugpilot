@@ -293,6 +293,8 @@ Perform these checks on a fresh assistant form unless a step says otherwise.
 
 ### Assistant privacy check
 
+Run this before saving any diagnosis. Once a diagnosis is saved, the evidence items you keep are stored in the report, as the next section checks.
+
 - [ ] Before analyzing, record the current storage in the Console:
   ```js
   ({ local: { ...localStorage }, session: { ...sessionStorage } })
@@ -309,6 +311,92 @@ Perform these checks on a fresh assistant form unless a step says otherwise.
 - [ ] Run `Object.keys(sessionStorage).filter((key) => key.startsWith('bugpilot.footerJoke.'))`.
   - Expected: only footer joke index keys are present; no assistant text or result.
 - [ ] Reload the Assistant page. Expected: the form is empty and no previous pasted text or result is restored.
+
+### Saved diagnosis: analyse, save, verify, and remove
+
+Run this on a fresh profile with the five sample reports. *Checkout total shows NaN after a promo code* starts with no proposed fix and no diagnosis.
+
+**Prefill and context**
+
+- [ ] Open *Checkout total shows NaN after a promo code* and expected: **Analyse with Assistant** sits with **Copy error message** in the error-message section.
+- [ ] Click **Analyse with Assistant**.
+  - Expected: the URL is `/assistant?bugId=sample-checkout-nan`.
+  - Expected: a **Loaded from bug: Checkout total shows NaN after a promo code** chip appears, Language is `JavaScript`, the error field contains the report's error, Reproduction details contains `Steps to reproduce:` and `Actual behavior:`, and the result panel still says **No analysis yet**. Nothing has run automatically.
+- [ ] Type `keep this text` into **Code snippet**, then click **Remove** on the chip.
+  - Expected: the chip and the `bugId` query disappear, the typed text stays, and no analysis runs.
+- [ ] Navigate to `/assistant?bugId=missing-report`.
+  - Expected: the notice **No saved report matches this link. Paste an error to continue.** appears, there is no chip, and the form is usable.
+- [ ] Navigate back to `/assistant?bugId=sample-checkout-nan` and click **Analyze**.
+  - Expected: **Type mismatch**, **High confidence**, the evidence **Final exception line**, and **Save diagnosis to this bug**.
+- [ ] Click **Remove** on the chip while the result is visible.
+  - Expected: **Save diagnosis to this bug** disappears, the result stays, and storage does not change. Reopen the link and analyze again to continue.
+
+**Preview and save**
+
+- [ ] Click **Save diagnosis to this bug**.
+  - Expected: the dialog **Save diagnosis to this bug?** shows Category `Type mismatch`, the matched signature, **High confidence**, the evidence item checked, and a **Proposed fix** preview containing the explanation, a blank line, `Example code:`, and the example code.
+  - Expected: it says this bug has no proposed fix, so saving stores one and sets the fix state to **Proposed**.
+  - Expected: it says nothing is marked as verified, and focus starts on **Cancel**.
+- [ ] Press `Tab` and `Shift+Tab` repeatedly. Expected: focus cycles through the dialog's close button, **Cancel**, the evidence checkbox, and **Save diagnosis** only. Press `Escape`.
+  - Expected: the dialog closes, focus returns to **Save diagnosis to this bug**, and no report changes.
+- [ ] Reopen the preview, untick the evidence checkbox, and click **Cancel**.
+  - Expected: no diagnosis is saved, and focus returns to the trigger. In the Console, this returns `undefined`:
+    ```js
+    JSON.parse(localStorage.getItem('bugpilot.bugs.v1')).bugs.find(b => b.id === 'sample-checkout-nan').diagnosis
+    ```
+- [ ] Reopen the preview and expected: the evidence is checked again by default. Untick it, then click **Save diagnosis**.
+  - Expected: a toast says **Diagnosis saved to this bug.** with a **View bug** link, focus returns to the trigger, and the link opens `/bugs/sample-checkout-nan`.
+- [ ] Expected: the detail shows a **Saved diagnosis** section with `Type mismatch`, **High confidence**, the signature, and the saved date. **Saved evidence** says **No evidence was saved with this diagnosis.**
+  - Expected: **Fix tracking** shows **Proposed**, the composed proposed fix is present, the fact panel says **Fix status: Proposed**, the workflow status is still `Open`, and the verification notes are unchanged.
+- [ ] Reload the detail. Expected: the diagnosis, composed fix, and `Proposed` state persist.
+
+**Existing fix, Verified state, and replacement**
+
+- [ ] Click **Edit report**, set **Fix status** to `Verified`, enter `Checked during the saved-diagnosis test.` in **Verification notes**, and click **Save changes**.
+  - Expected: the saved diagnosis is still shown once, and **Fix tracking** changes to **Verified** with the notes.
+- [ ] Click **Analyse with Assistant** again, click **Analyze**, then **Save diagnosis to this bug**.
+  - Expected: the dialog says the existing proposed fix will be **KEPT** and only the diagnosis is saved, shows an unticked **Replace the existing proposed fix with this one** checkbox, says **Fix state stays Verified.**, and names the existing saved-diagnosis date.
+- [ ] Save without ticking replace, then click **View bug**. Expected: the diagnosis is replaced with a new saved date, **Saved evidence** now shows **Final exception line**, the proposed fix text is unchanged, and **Fix status** is still `Verified` with the same notes.
+- [ ] Edit the report, change **Proposed fix** to `Existing fix kept during the diagnosis test.`, keep **Fix status** `Verified` and the notes, and save.
+- [ ] Click **Analyse with Assistant** again, click **Analyze**, click **Save diagnosis to this bug**, tick **Replace the existing proposed fix with this one**, and save. Click **View bug** in the toast.
+  - Expected: the proposed fix becomes the composed explanation plus example code, while **Fix status** stays `Verified` and the verification notes are unchanged.
+- [ ] Reload the detail and expected: exactly one saved diagnosis, `Verified`, and the notes remain.
+- [ ] In the Console, inspect what the save wrote:
+  ```js
+  (() => {
+    const saved = JSON.parse(localStorage.getItem('bugpilot.bugs.v1')).bugs.find(b => b.id === 'sample-checkout-nan');
+    return {
+      diagnosisKeys: Object.keys(saved.diagnosis).sort(),
+      evidence: saved.diagnosis.evidence,
+      diagnosisHasRawStack: JSON.stringify(saved.diagnosis).includes('applyDiscount'),
+      diagnosisHasSteps: JSON.stringify(saved.diagnosis).includes('SAVE10'),
+      fixHasRawStack: saved.proposedFix.includes('applyDiscount'),
+      fixStatus: saved.fixStatus,
+    };
+  })()
+  ```
+  - Expected: the keys are `category`, `confidence`, `evidence`, `matchedSignature`, and `savedAt`; evidence is exactly the ticked **Final exception line** `{ label, quote }`; the three raw-text checks are `false`; and `fixStatus` is `Verified`.
+  - Expected: the full pasted error text, stack frames, reproduction details, and any unticked evidence are not in the diagnosis or the composed fix.
+
+**Remove**
+
+- [ ] Click **Remove saved diagnosis**.
+  - Expected: the dialog **Remove saved diagnosis?** explains that only the diagnosis is removed and the proposed fix, fix state, status, and verification notes are kept, and that this cannot be undone. Focus starts on **Cancel**.
+- [ ] Press `Escape`. Expected: the dialog closes, focus returns to **Remove saved diagnosis**, and the diagnosis remains.
+- [ ] Reopen and click **Cancel**. Expected: the same.
+- [ ] Reopen, press `Tab` and `Shift+Tab` repeatedly. Expected: focus cycles only through the close button, **Cancel**, and **Remove diagnosis**.
+- [ ] Click **Remove diagnosis**.
+  - Expected: a toast says **Saved diagnosis removed.**, the **Saved diagnosis** section disappears, and the proposed fix, `Verified` state, verification notes, and workflow status remain.
+- [ ] Reload. Expected: the diagnosis stays removed and the fix fields are unchanged.
+- [ ] In the Console, expected: the report has no `diagnosis` key, and `proposedFix`, `fixStatus`, and `verificationNotes` still hold their values.
+
+**Limits and layout**
+
+- [ ] With no `bugId` context, analyze the Python `ModuleNotFoundError` example. Expected: no **Save diagnosis to this bug** button appears.
+- [ ] Analyze `The widget exploded.` with no context. Expected: the result is **Unrecognised** and there is no save button.
+- [ ] The 20,000-character composition limits and the storage-failure path are covered by the automated tests; do not paste a multi-megabyte fixture or force a quota failure by hand.
+- [ ] At 390 × 844 in both themes, open the preview from the checkout report. Expected: the dialog fits the viewport with internal scrolling, its actions are reachable, and the page does not scroll sideways.
+- [ ] At 1440 × 900 in both themes, expected: the preview is centered and every field is readable.
 
 ## 8. Joke footer
 
@@ -494,22 +582,21 @@ Use a disposable profile with the five sample reports. Do not run the replace or
   ```
   - Expected: the five imported reports return.
 
-### Saved diagnosis data layer (no interface yet)
+### Saved diagnosis export and import
 
-There is no diagnosis button, display, or form field yet. Verify the persistence and import rules through storage and the export file.
+Run this after the saved-diagnosis flow above. Save a diagnosis again if the earlier import steps replaced or restored the log, or if you followed the saved-diagnosis flow through its remove step.
 
-- [ ] Create a JSON file **outside the project folder** with three reports: two valid reports carrying a `diagnosis` object and one without it. Include the fields listed in the README's **Saved diagnosis field** table.
-- [ ] Import it with **Add reports** and expect **Valid reports: 3**, **Invalid reports: 0**, and **Import complete. Added 3, skipped 0, replaced 0.**
-- [ ] Confirm the interface is unchanged: no diagnosis panel, button, badge, field, or route appears on the bug log, detail, or edit pages.
-- [ ] In the Console, inspect the stored reports:
+- [ ] On **Bug log**, click **Export reports** and open the downloaded file.
+  - Expected: the diagnosed report contains a `diagnosis` object after `updatedAt`, with `category`, `matchedSignature`, `confidence`, `evidence`, and `savedAt`.
+  - Expected: the report's ordinary `proposedFix`, `fixStatus`, and `verificationNotes` are exported too. The diagnosis contains only the selected evidence `label`/`quote` pairs, not the full pasted error text, the code snippet, or the reproduction details.
+- [ ] Import that export into a fresh profile (or the other local origin), using **Replace all reports** and its acknowledgement so the same sample ids are not skipped. Expected: the preview counts it as valid, and after import the detail shows the same category, signature, confidence, evidence quote, saved date, proposed fix, `Verified` state, and verification notes.
+- [ ] Import an older export whose report has no `diagnosis` field. Expected: it remains valid, imports normally, and the detail shows no **Saved diagnosis** section and no `diagnosis: null` key.
+- [ ] Create a JSON file **outside the project folder** with one otherwise valid report whose diagnosis has an invalid confidence or a bad `savedAt`, then import it. Expected: the preview lists that position with a reason starting **The saved diagnosis is invalid**, no record is repaired, and nothing is saved when it is the only report.
+- [ ] In the Console, inspect the imported reports:
   ```js
   JSON.parse(localStorage.getItem('bugpilot.bugs.v1')).bugs.map(b => ({ id: b.id, diagnosis: b.diagnosis, keys: Object.keys(b) }))
   ```
-  Expected: the two diagnosed reports contain the same structured diagnosis and `savedAt`; the third has no `diagnosis` key at all.
-- [ ] Edit a diagnosed report (title, status, and fix state), save, reload, and run the Console inspection again. Expected: the diagnosis is unchanged each time and appears once.
-- [ ] Export reports. Expected: only the two diagnosed reports contain a `diagnosis` key, placed after `updatedAt`; the third report is byte-for-byte the old shape.
-- [ ] Import that export into a fresh profile (or after the empty-log Console step above) and expect the preview counts to match and the stored diagnosis values to be identical.
-- [ ] Create a second file with one otherwise valid report whose diagnosis has an invalid confidence or a bad `savedAt`, then import it. Expected: the preview lists that position with a reason starting **The saved diagnosis is invalid**, no record is repaired, and nothing is saved when it is the only report.
+  Expected: each diagnosed report has one `diagnosis` key; a report without one has no `diagnosis` key at all.
 
 ### Dialog focus, access, and responsive behavior
 
