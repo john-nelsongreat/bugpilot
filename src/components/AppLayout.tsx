@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -10,6 +11,7 @@ import {
   Stethoscope,
   Sun,
 } from 'lucide-react'
+import { getRouteTitle } from '../app/routeTitle'
 import { useWorkspace } from '../app/useWorkspace'
 import { getFooterPageKey } from '../features/footer/footerJoke'
 import { useTheme } from '../features/theme/useTheme'
@@ -31,12 +33,17 @@ export function AppLayout({
   footerJokeRandom,
   footerJokeIntervalMs,
 }: AppLayoutProps = {}) {
-  const { seeded, issue, toast, dismissToast } = useWorkspace()
+  const { bugs, seeded, issue, toast, dismissToast } = useWorkspace()
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
   const footerPageKey = getFooterPageKey(location.pathname)
+  const routeTitle = getRouteTitle(location.pathname, bugs)
   const nextTheme = theme === 'dark' ? 'light' : 'dark'
   const themeLabel = `Switch to ${nextTheme} theme`
+
+  useEffect(() => {
+    document.title = routeTitle
+  }, [routeTitle])
 
   return (
     <div className="app-shell">

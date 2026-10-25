@@ -19,7 +19,7 @@ This repository contains a working MVP, not a hosted product. See [Limitations](
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
 - **Debug Assistant** at `/assistant`, backed by a local rule engine with 11 Python rules and 3 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives.
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
-- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete and import dialogs with focus return to their triggers, status announcements, auto-dismissing toast, and a WCAG contrast test for the theme tokens.
+- **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete and import dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
 
 ## Screenshots
@@ -65,7 +65,7 @@ The screenshots show the five fictional sample reports created on a first run. T
 | Icons | Lucide React 1.61.0 |
 | Fonts | Fontsource variable packages for Archivo, Instrument Sans, and JetBrains Mono |
 | Styling | Hand-written CSS with custom properties; no CSS framework |
-| Tests | Vitest 5.0.5, Testing Library, jsdom 30.1.3 |
+| Tests | Vitest 5.0.5, Testing Library, jsdom 30.1.3, axe-core 4.14.0 (dev only) |
 | Linting | oxlint 1.88.0 |
 | Storage | Browser `localStorage` and `sessionStorage` only |
 
@@ -101,7 +101,7 @@ Then open `http://localhost:5180`. `--strictPort` makes the command fail instead
 | `npm run dev` | Starts the Vite development server with hot module replacement. |
 | `npm run dev -- --port 5180 --strictPort` | Starts the development server on the fixed port used in this documentation. |
 | `npm test` | Runs the Vitest suite once. The project is configured to run test files serially on this Windows machine; see [Windows notes](#windows-notes). |
-| `npm run lint` | Runs oxlint over the project. |
+| `npm run lint` | Runs oxlint with `--deny-warnings`, so a warning fails the command the same way an error does. |
 | `npm run build` | Runs the TypeScript project build, then creates the production bundle in `dist/`. |
 | `npm run preview` | Serves an existing `dist/` build. Run `npm run build` first. |
 | `npm run preview -- --port 4173 --strictPort` | Serves the production build on the fixed preview port used in this documentation. |
@@ -387,7 +387,52 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 - **Deletion is permanent.** Deleting a report removes it from the browser's stored array immediately; there is no undo. Export a JSON file first if you may need a copy. An import copies the previous raw log to `bugpilot.bugs.preimport.v1`, but that single slot is overwritten by the next import.
 - **Imported text is treated as text.** Import never executes code, fetches URLs, or interprets markup. Every imported field is validated and displayed through the same React text rendering as a manually entered report.
 
-## Limitations
+## Accessibility
+
+BugPilot is checked at three levels: automated tests in the repository, a live audit against the production build, and a manual pass that only a human or a screen reader can do. None of the three is a conformance statement.
+
+### Automated
+
+| Check | Where | Runs | Notes |
+| --- | --- | --- | --- |
+| axe-core rule engine | `src/App.accessibility.test.tsx` + `src/test/axe.ts` | `npm test` | 14 tests render every route and state through the real router and layout: overview (first run), bug log (seeded and empty), bug detail, new form, the new form with its error summary after an empty submit, edit form, assistant (empty, Python result, validation error), not-found, delete dialog open, import dialog open with a preview, and a visible toast. Each asserts an empty violations array. |
+| Theme token contrast | `src/features/theme/contrast.test.ts` | `npm test` | 8 tests compute WCAG AA ratios for text, badge, border, and focus-ring token pairs in both themes. This is where contrast is covered, because axe cannot measure it under jsdom. |
+| Lint | `npm run lint` (`oxlint --deny-warnings`) | `npm test` is separate | `react-refresh/only-export-components` and the other 115 rules fail the run on a warning, so component files cannot quietly re-absorb non-component exports. |
+
+axe-core 4.14.0 is a `devDependency` only. The single module that imports it, `src/test/axe.ts`, is reachable only from `src/App.accessibility.test.tsx`, and the built bundle contains no `axe-core` string — confirmed by `grep -c "axe-core" dist/assets/index-*.js`, which returns 0. The `color-contrast` rule is switched off in the helper because jsdom performs no layout and paints nothing, so axe cannot resolve a real background for an element — the rule is not weakening a check, it is disabling one that cannot run there. Layout-dependent rules (`target-size`, reflow, zoom) are in the same position.
+
+### Audited live
+
+On 2026-10-25 the built app (`npm run build`, then `npm run preview -- --port 4173 --strictPort`) was audited in Chromium through Playwright with axe-core 4.14.0 injected from `node_modules` — not from a CDN — and with `color-contrast` **enabled**. Each state ran in a fresh, isolated browser context with real visible scrollbars, in light and dark theme, at 1440x900, 390x844 and 320x568: **84 runs across 14 states, 0 violations.** The same build was walked through with the keyboard only, measured for horizontal page scroll at 320 CSS px and at a 200% zoom equivalent (720x450 CSS px at device scale factor 2), and inspected for landmarks, heading order, form labels and error associations, document language, per-route titles, and `prefers-reduced-motion`.
+
+Confirmed in that audit:
+
+- **Keyboard**: the skip link is the first stop and lands on `<main>`; tab order follows the visual order on every page; focus is visible on every stop; no focus trap outside the two dialogs; `Escape` closes both dialogs and returns focus to their trigger; every action (create, edit, delete, status change, filter, export, import, theme toggle, assistant run) is reachable without a mouse.
+- **Structure**: one `h1` per page with no skipped heading levels; every form control has a label, and inline errors are linked to their control; `lang="en"` on `<html>`; `<meta name="viewport">` does not block zoom.
+- **Motion**: `prefers-reduced-motion: reduce` collapses all animations and transitions (`src/index.css`), verified by emulation.
+- **Title**: `document.title` now changes per route — `<page label> · BugPilot`, with a bug detail page titled after its own report. Before this pass the tab kept the static `index.html` title on every route, which the manual WCAG 2.4.2 check flagged. axe did not report it: its `page-title` rule only requires a non-empty title. This was the only accessibility fix applied.
+
+### Manual, and not covered
+
+- **No screen reader testing.** NVDA and Narrator were not used; nothing here proves how the app sounds. JAWS, NVDA, and VoiceOver all remain untested.
+- **Chromium on Windows only.** No Firefox, Safari, iOS, or Android device was used, and the small viewports were emulated rather than physical.
+- **No braille, magnification, switch, or voice-control testing**, and no usability testing with disabled users.
+
+### Known limits
+
+Automated tools surface only a slice of the issues a real user meets: axe reports on the DOM it is given, so it cannot judge reading order in a screenshot, whether a focus ring is *perceptible* to a particular user, whether the labels describe what they say they do, or anything about how a page sounds. Add to that the jsdom gaps above. **Full WCAG conformance is not claimed** — no formal audit against WCAG 2.1 AA or 2.2 has been completed, and the open items below are listed rather than fixed.
+
+### Open items
+
+These were observed in the live audit and deliberately left in place, each because the fix is a global style change or a behaviour change beyond the scope of this pass.
+
+| Area | Observation | Severity | Proposed fix |
+| --- | --- | --- | --- |
+| reflow (1.4.10) | `html` and `body` both carry `min-width: 320px` (`src/index.css`), so at exactly 320 CSS px the page scrolls sideways by about 15 px on every route. | Moderate, and axe cannot report it — no rule measures page scroll | Drop the `min-width` floors and let the widest fixed element (`table`, the sidebar grid column) define the break; needs a screenshot pass at 320 px on all seven routes, so it was left for a dedicated styling task. |
+| route announcements (2.4.2 support) | A route change leaves focus where it was and nothing is announced; only the browser-chrome title changes. | Minor / ambiguous — SPA-only behaviour, no axe rule | Move focus to `<main>` (it already has `tabIndex={-1}`) or add a visually hidden live region that names the new page. Both change interaction behaviour, so neither was applied blind. |
+| `banner` landmark | The brand and theme toggle sit in the sidebar `<aside>`; there is no `<header>`/`banner`. | Minor | Wrap the sidebar header in a `<header>` inside a `banner` region, or leave it — every other required landmark (`main`, `navigation`, `contentinfo`, `complementary`) is present exactly once. |
+| axe `incomplete` | Four selectors returned "cannot determine" instead of pass/fail: `.recent-meta span:nth-child(3)` (background painted by a pseudo-element), `.import-stats li:nth-child(3)` and `.import-outcome` (overlapping text), `#delete-dialog-description` (dialog background sampling), and one toast sample at 320 px in the light theme. | Unknown — not violations, not passes either | Screenshot each at rest and check the ratios by hand; `.recent-meta` could take a real background instead of a `::before` one. |
+| toast contrast timing | Mid-animation samples of the toast measured 2.14:1 and a danger button 4.08:1 while fading; at rest both are clean, because the tokens are only correct over their intended background. | Not a violation once settled | Leave the fade, or raise the toast tokens so the ratio holds at partial opacity; would need a token change and a contrast-test update. |
 
 - The diagnostic engine is strict and rule-based. It recognises the documented signatures and categories only; it is not a general log parser or an AI model.
 - It analyses the final exception line, with optional code-snippet evidence and language clues from reproduction details. It cannot inspect the source tree, installed packages, virtual environments, `PATH`, environment variables, browser globals, or the rest of the stack.
@@ -401,6 +446,7 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 - No backend, authentication, cloud storage, external AI provider, deployment, or hosting is included.
 - Browser testing has been done on Chromium on Windows only. Firefox, Safari, and physical mobile devices are not covered.
 - Automated tests run in jsdom; they do not replace the manual browser checks in [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md).
+- Accessibility is tested and audited as far as this tooling reaches, and no WCAG conformance is claimed. Open items and the parts that were never tested are listed in [Accessibility](#accessibility).
 
 ## Windows notes
 
@@ -434,7 +480,7 @@ None of the following exists in the current app:
 
 ## Manual test checklist
 
-Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, export and import, the joke footer, toast behavior, keyboard navigation, responsive layouts, corrupted storage, and the production preview.
+Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, export and import, the joke footer, toast behavior, keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
 
 ## License
 

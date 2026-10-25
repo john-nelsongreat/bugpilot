@@ -31,7 +31,7 @@ Record the run:
   ```
 - [ ] Open `http://localhost:5180`.
 - [ ] Open DevTools and keep the Console and Network tabs available. Clear the Console before starting.
-- [ ] Expected: the page title is **BugPilot — Local bug tracker**; the sidebar says **Local-only workspace** and **Reports stay in this browser. Nothing is uploaded.**
+- [ ] Expected: the browser tab title is **Overview · BugPilot** (the page label plus the product name, set by the app after it loads; the HTML shipped in `index.html` starts as **BugPilot — Local bug tracker**); the sidebar says **Local-only workspace** and **Reports stay in this browser. Nothing is uploaded.**
 - [ ] Expected: the Console has no errors, and the Network tab has no requests to external hosts. Vite's own local WebSocket connection is expected in development.
 
 ## 1. First-run seeding
@@ -506,3 +506,67 @@ Use a disposable profile with the five sample reports. Do not run the replace or
 - [ ] At 390 × 844 and 1440 × 900, repeat the layout checks from section 11. Expected: parity with the development build.
 - [ ] Stop the preview server with `Ctrl+C`.
 - [ ] Optional cleanup: clear the `localhost:4173` site data if you do not want the preview's sample workspace to remain in the profile.
+
+## 15. Accessibility walkthrough
+
+Section 10 covers keyboard behaviour during the normal flow. This section is the dedicated pass: automated tests prove the DOM is well-formed, and only a human can judge whether the app is actually usable without sight, without a mouse, at small widths, and at high zoom. Run it on the production preview (section 14) or on `npm run dev`, in a disposable profile, in **both themes**.
+
+### Keyboard-only pass
+
+Put the mouse aside — or unplug it — and complete the whole session with the keyboard.
+
+- [ ] On each of `/`, `/bugs`, `/bugs/new`, a report detail, `/bugs/<id>/edit`, `/assistant`, and a missing path: press `Tab` from the top of the page to the bottom, then `Shift+Tab` back.
+  - Expected: the order matches the visual order; nothing is skipped; the focus ring is visible on **every** stop, including against cards, tables, badges, and both themes.
+  - Expected: no stop is unreachable and no stop traps you — `Tab` eventually reaches the browser UI or wraps inside a dialog on purpose.
+- [ ] Use the skip link on each page.
+  - Expected: it is the first stop, becomes visible on focus, and `Enter` lands inside `<main>` with the next `Tab` going to the first page control, not back to the sidebar.
+- [ ] Open the delete dialog and the import dialog with `Enter`, press `Tab`/`Shift+Tab` around each, then press `Escape`.
+  - Expected: focus stays inside the dialog while open and returns to the exact button that opened it.
+- [ ] Complete the flows without a pointer: create a report, fix a validation error through the error-summary links, change a status, set a fix state to `Verified` with notes, edit, delete, search and filter, sort, clear filters, toggle the theme, run an Assistant analysis, tick checklist boxes, export, and import.
+  - Expected: every action is reachable and operable; every select responds to arrow keys; no control needs a hover state to be found.
+- [ ] Watch the toast while it is focused or hovered.
+  - Expected: `Tab` reaches **Dismiss notification**, and the toast does not disappear while focus is inside it.
+
+### 320 CSS px reflow (WCAG 1.4.10)
+
+Resize the window to 320 CSS px wide (Device Toolbar is acceptable; a narrow real window is better) and check each of the seven routes in both themes.
+
+- [ ] In the Console, run:
+  ```js
+  ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth })
+  ```
+  - Expected: `scrollWidth <= innerWidth`, and no horizontal page scrollbar.
+  - **Known issue:** the current build reports `scrollWidth` about 15 px wider than `innerWidth` because `html` and `body` carry `min-width: 320px` (`src/index.css`). This is recorded, not fixed; if it is corrected, re-run this box and delete the note. The bug-log table is allowed to scroll **inside** its own container — the page itself must not move.
+- [ ] Confirm nothing is clipped at 320 px: the sidebar/header, stat cards, table, form fields and their error text, the Assistant panels, both dialogs, and the footer joke.
+
+### 200% zoom
+
+Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a device scale factor of 2) and repeat the reflow check on every route.
+
+- [ ] Expected: content reflows to the narrower width instead of being cut off; text does not overlap other text; no button, badge, dialog action, or table cell is unreachable without scrolling **vertically**.
+- [ ] Expected: the focus ring, the toast, and both dialogs stay fully on screen at this zoom.
+
+### Motion
+
+- [ ] Turn on reduce motion at the OS level, or emulate `prefers-reduced-motion: reduce` in DevTools, and reload.
+  - Expected: the toast, dialog, and backdrop animations no longer slide or fade; nothing animates repeatedly; the footer joke still changes on its 60-second schedule (a content change, not motion).
+
+### Screen reader (smoke test)
+
+**Not tested by the assistant.** No screen reader was run while preparing this project — NVDA, Narrator, JAWS, and VoiceOver are all untested, and nothing in the automated suite or the browser audit substitutes for them. If you have one available:
+
+- [ ] Start NVDA (Windows, free) or Narrator (`Win` + `Ctrl` + `Enter`) and open **Overview** in browse mode.
+  - Expected: the document announces the page, the **`Overview · BugPilot`** tab title matches the spoken heading, headings and landmarks are announced, and the stat values read as label plus number rather than as loose digits.
+  - Expected: the **Sample workspace loaded.** status is announced on arrival, and the **Saved data needs attention** alert is announced when storage is unreadable (section 12).
+- [ ] Navigate by heading and by landmark.
+  - Expected: one `main`, one navigation, one content information region, one `h1` per page, and no skipped heading level.
+- [ ] Tab to a form control and read its label; then submit the empty form.
+  - Expected: each control speaks its own label and any hint, invalid fields are announced as invalid, and the error summary is read with working links.
+- [ ] Open the delete dialog and the import dialog.
+  - Expected: the dialog is announced as a dialog, its description is read, and returning focus to the trigger is audible.
+- [ ] Run the Python `ModuleNotFoundError` example in **Assistant**.
+  - Expected: the result, its confidence badge, evidence, and the disclaimer are all read in a sensible order, and the "focus moved to the result heading" behaviour is announced rather than silently happening.
+
+### What this pass adds over the automated suite
+
+`npm test` already checks axe violations, token contrast, labels, roles, and names in jsdom, and the 2026-10-25 browser audit checked 14 states × 2 themes × 3 viewports. Those tools cannot judge whether a focus ring is *visible*, whether reading order makes sense, whether a page sounds right, or whether 320 px reflows — so the boxes above are the part that stays manual. See **Accessibility** in `README.md` for what is covered automatically and for the open items.
