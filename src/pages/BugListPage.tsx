@@ -7,7 +7,7 @@ import {
   Search,
   Upload,
 } from 'lucide-react'
-import { useWorkspace } from '../app/WorkspaceContext'
+import { useWorkspace } from '../app/useWorkspace'
 import { SeverityBadge, StatusBadge } from '../components/Badges'
 import { ImportBugDialog } from '../components/ImportBugDialog'
 import {

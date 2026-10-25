@@ -1,25 +1,7 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
-import type { ToastMessage, ToastTone } from '../components/Toast'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
+import type { ToastMessage } from '../components/Toast'
 import { useBugWorkspace } from '../features/bugs/useBugWorkspace'
-
-type NotifyOptions = {
-  tone?: ToastTone
-}
-
-type WorkspaceValue = ReturnType<typeof useBugWorkspace> & {
-  toast: ToastMessage | null
-  notify: (message: string, options?: NotifyOptions) => void
-  dismissToast: () => void
-}
-
-const WorkspaceContext = createContext<WorkspaceValue | null>(null)
+import { WorkspaceContext, type NotifyOptions } from './useWorkspace'
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const workspace = useBugWorkspace()
@@ -46,12 +28,4 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       {children}
     </WorkspaceContext.Provider>
   )
-}
-
-export function useWorkspace(): WorkspaceValue {
-  const value = useContext(WorkspaceContext)
-  if (!value) {
-    throw new Error('useWorkspace must be used inside WorkspaceProvider')
-  }
-  return value
 }

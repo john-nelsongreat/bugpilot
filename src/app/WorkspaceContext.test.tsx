@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Toast } from '../components/Toast'
-import { WorkspaceProvider, useWorkspace } from './WorkspaceContext'
+import { WorkspaceProvider } from './WorkspaceContext'
+import { useWorkspace } from './useWorkspace'
 
 function ToastHarness() {
   const { toast, notify, dismissToast } = useWorkspace()

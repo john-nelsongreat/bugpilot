@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
-import { useWorkspace } from '../app/WorkspaceContext'
+import { useWorkspace } from '../app/useWorkspace'
 import {
   FixStatusBadge,
   SeverityBadge,

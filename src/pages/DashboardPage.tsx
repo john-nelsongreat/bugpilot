@@ -5,7 +5,7 @@ import {
   Plus,
   TriangleAlert,
 } from 'lucide-react'
-import { useWorkspace } from '../app/WorkspaceContext'
+import { useWorkspace } from '../app/useWorkspace'
 import { SeverityBadge, StatusBadge } from '../components/Badges'
 import { formatDate } from '../features/bugs/format'
 import {

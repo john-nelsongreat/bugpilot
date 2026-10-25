@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertCircle, ArrowLeft } from 'lucide-react'
-import { useWorkspace } from '../app/WorkspaceContext'
+import { useWorkspace } from '../app/useWorkspace'
 import { bugCode } from '../features/bugs/format'
 import {
   BUG_STATUSES,

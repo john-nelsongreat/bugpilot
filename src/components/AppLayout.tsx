@@ -10,7 +10,7 @@ import {
   Stethoscope,
   Sun,
 } from 'lucide-react'
-import { useWorkspace } from '../app/WorkspaceContext'
+import { useWorkspace } from '../app/useWorkspace'
 import { getFooterPageKey } from '../features/footer/footerJoke'
 import { useTheme } from '../features/theme/useTheme'
 import { FooterJoke } from './FooterJoke'
