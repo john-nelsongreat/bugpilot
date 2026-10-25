@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -40,16 +40,36 @@ export function AppLayout({
   const routeTitle = getRouteTitle(location.pathname, bugs)
   const nextTheme = theme === 'dark' ? 'light' : 'dark'
   const themeLabel = `Switch to ${nextTheme} theme`
+  const [announcement, setAnnouncement] = useState('')
+  const announcedPath = useRef<string | null>(null)
 
   useEffect(() => {
     document.title = routeTitle
   }, [routeTitle])
+
+  useEffect(() => {
+    const previousPath = announcedPath.current
+    announcedPath.current = location.pathname
+
+    if (previousPath === null || previousPath === location.pathname) return
+    setAnnouncement(routeTitle)
+  }, [location.pathname, routeTitle])
 
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
+
+      <p
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label="Current page"
+      >
+        {announcement}
+      </p>
 
       <aside className="sidebar">
         <div className="sidebar-header">
