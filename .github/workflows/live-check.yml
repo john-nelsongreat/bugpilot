@@ -1,0 +1,38 @@
+name: Live site check
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Optional base URL to check (leave empty for the live site)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-site-check
+  cancel-in-progress: false
+
+jobs:
+  live-check:
+    name: Check the live site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Check the live site
+        env:
+          LIVE_URL: ${{ inputs.url }}
+        run: node scripts/check-live.mjs

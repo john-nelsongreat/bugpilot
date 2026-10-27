@@ -1,6 +1,6 @@
 # BugPilot
 
-[![CI](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml/badge.svg)](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml)
+[![CI](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml/badge.svg)](https://github.com/john-nelsongreat/bugpilot/actions/workflows/ci.yml) [![Live site check](https://github.com/john-nelsongreat/bugpilot/actions/workflows/live-check.yml/badge.svg)](https://github.com/john-nelsongreat/bugpilot/actions/workflows/live-check.yml)
 
 **Live demo:** [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app)
 
@@ -164,6 +164,22 @@ No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exce
 **What this does not prove.** `npm run dev` and `npm run preview` do **not** apply `vercel.json`; they serve no CSP. The policy reaches users only after a Vercel deployment, and the live response had not yet been inspected when this section was written. Re-run the header command in [Security headers](docs/MANUAL_TEST_CHECKLIST.md#16-security-headers) after deploying and confirm the policy string before treating the production site as protected. A local emulator proves the policy is compatible with the build, not that the host is sending it.
 
 **Adding a new source later.** Add the narrowest origin or path to the specific directive it needs, not to `default-src`, and avoid broad `https:` entries. A new image host belongs in `img-src`; a new API belongs in `connect-src`; a new font belongs in `font-src`. Never add `'unsafe-inline'` to `script-src`; use a separate same-origin script, or a build-time hash if an inline script is unavoidable. If a style attribute becomes unavoidable, prefer `style-src-attr 'unsafe-inline'` over opening up `style-src`. Add `blob:` only if a feature is proven to need it, and only on the directive that needs it. Then rebuild, update `src/csp.test.ts` if an asserted directive changed, run `npm test`, and repeat the live header and console checks.
+
+## Live site monitoring
+
+`.github/workflows/live-check.yml` runs `scripts/check-live.mjs` once a day at 06:17 UTC, and it can be run by hand from the repository's **Actions** tab (**Live site check** → **Run workflow**). The optional `url` input sends the same checks to another address; leaving it empty uses [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
+
+The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares all five security headers with the values in `vercel.json`, fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. Network errors are retried twice; redirects are reported and not followed.
+
+Run it locally with:
+
+```bash
+node scripts/check-live.mjs
+```
+
+A red run means at least one route, header, asset or timing check failed. It is a basic health check, not an uptime guarantee, and it does not exercise any interactive feature.
+
+GitHub can delay or skip scheduled runs. Scheduled workflows in a public repository are disabled automatically after 60 days without repository activity; if that happens, re-enable the workflow in the Actions tab. The workflow had not run on GitHub when this section was written; the badge will show its first completed run only after it is pushed and run.
 
 ## Routes
 
