@@ -4,6 +4,14 @@
 
 **Live demo:** [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app)
 
+## Demo
+
+![Animated dark-theme BugPilot walkthrough: a checkout NaN report is opened, analysed in the Assistant, saved without evidence, and shown again with a saved-diagnosis toast.](docs/demo/bugpilot-demo.gif)
+
+A 34-second walkthrough: open the bug log, open the checkout report, choose **Analyse with Assistant**, run **Analyze**, save the diagnosis with its evidence item left unticked, and finish on the saved bug with a **Diagnosis saved** toast and a **View bug** link.
+
+Sharper version: [watch the MP4](docs/demo/bugpilot-demo.mp4).
+
 BugPilot is a local-first bug tracker and debugging assistant that runs entirely in the browser. It is built for capturing a reproducible bug report, keeping a searchable triage log, recording a fix through manual states, and getting rule-based hints from pasted Python or JavaScript error text. There is no account, backend, cloud database, telemetry, or AI API: saved reports and the theme preference stay in this browser, and the assistant analyses pasted text in the page without sending it. Assistant text is stored only when you explicitly save a diagnosis to a report.
 
 This repository contains a working MVP, not a hosted product. See [Limitations](#limitations) for what is intentionally out of scope.
