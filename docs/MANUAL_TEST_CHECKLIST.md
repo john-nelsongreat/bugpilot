@@ -315,6 +315,97 @@ For each line, clear the form, keep **Language** set to `Python`, and click **An
 
 One related distinction: a `TypeError` line that repeats codec wording is not a Unicode error. The existing Python TypeError rule classifies it as **Type mismatch** at **Medium confidence**, so it does not appear in this Unrecognised list.
 
+### Batch B1 JavaScript/Node rules
+
+Set **Language** to `JavaScript` for each one-line example below unless a step says otherwise. Every result should show the evidence **Final exception line** with **Line 1**. These are Node.js runtime shapes; the Python rules must stay quiet.
+
+- [ ] Clear the form and paste:
+  ```text
+  Error: Cannot find module 'express'
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **Missing module**, **High confidence**, signature `Error: Cannot find module '<package>'`.
+  - Expected: the likely cause mentions installing the package, `package.json`, or the project folder, and the fix suggests `npm install`.
+- [ ] Clear the form and paste:
+  ```text
+  Error: Cannot find module './missing-handler'
+  ```
+- [ ] Click **Analyze**. Expected: **Missing module**, **High confidence**, signature `Error: Cannot find module '<path>'`; the advice mentions the path, letter case, and missing build output.
+- [ ] Clear the form and paste:
+  ```text
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'date-fns' imported from /home/ana/app/src/index.mjs
+  ```
+- [ ] Click **Analyze**. Expected: **Missing module**, **High confidence**, signature `Error [ERR_MODULE_NOT_FOUND]: Cannot find package '<package>' imported from <path>`.
+- [ ] Clear the form and paste:
+  ```text
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module './utils' imported from /home/ana/app/src/index.mjs
+  ```
+- [ ] Click **Analyze**. Expected: **Missing module**, **High confidence**, signature `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<path>' imported from <path>`; the advice mentions adding the file extension.
+
+- [ ] Clear the form and paste:
+  ```text
+  Error: listen EADDRINUSE: address already in use :::3000
+  ```
+- [ ] Click **Analyze**. Expected: **Port already in use**, **High confidence**, signature `Error: listen EADDRINUSE: address already in use <address>`.
+  - Expected: the steps mention `netstat -ano | findstr :3000` on Windows and `lsof -i :3000` on macOS or Linux, and warn to end only a process you recognise and never end unknown system processes.
+
+- [ ] Clear the form and paste:
+  ```text
+  Error: ENOENT: no such file or directory, open '/home/ana/app/config.json'
+  ```
+- [ ] Click **Analyze**. Expected: **Missing file**, **High confidence**, signature `Error: ENOENT: no such file or directory, <operation> '<path>'`; the advice mentions `process.cwd()` and `__dirname`.
+- [ ] Clear the form and paste:
+  ```text
+  Error: spawn ffmpeg ENOENT
+  ```
+- [ ] Click **Analyze**. Expected: **Missing file**, **High confidence**, signature `Error: spawn <command> ENOENT`; the advice mentions PATH, `.cmd` or `shell: true` on Windows, and restarting the terminal.
+
+- [ ] Clear the form and paste:
+  ```text
+  Error: EACCES: permission denied, open '/var/app/config.json'
+  ```
+- [ ] Click **Analyze**. Expected: **Permission denied**, **High confidence**, signature `Error: EACCES: permission denied, <operation> '<path>'`.
+- [ ] Clear the form and paste:
+  ```text
+  Error: listen EACCES: permission denied 0.0.0.0:80
+  ```
+- [ ] Click **Analyze**. Expected: **Permission denied**, **High confidence**, signature `Error: listen EACCES: permission denied <address>`; the advice mentions ports below 1024, a higher port, or a reverse proxy.
+- [ ] Clear the form and paste:
+  ```text
+  Error: EPERM: operation not permitted
+  ```
+- [ ] Click **Analyze**. Expected: **Permission denied**, **High confidence**, signature `Error: EPERM: operation not permitted`; the advice mentions a locked file on Windows.
+
+- [ ] Clear the form and paste:
+  ```text
+  RangeError: Maximum call stack size exceeded
+  ```
+- [ ] Click **Analyze**. Expected: **Recursion error**, **High confidence**, signature `RangeError: Maximum call stack size exceeded`.
+  - Expected: the advice mentions the base case, logging arguments, iteration, getters and setters, and circular data, and does not suggest increasing the stack size as a fix.
+
+- [ ] Switch **Language** to `Auto — infer from the text`, clear the form, and paste:
+  ```text
+  Error: Cannot find module 'express'
+  Require stack:
+  - C:\Users\ana\app\server.js
+      at Module._resolveFilename (node:internal/modules/cjs/loader:1228:15)
+      at Object.<anonymous> (C:\Users\ana\app\server.js:1:17)
+  Node.js v22.11.0
+  ```
+- [ ] Click **Analyze**. Expected: **Missing module**, **High confidence**, and a confidence reason that names JavaScript evidence; the evidence is the `Error:` line at **Line 1**, not a stack frame.
+
+### Batch B1 lookalikes
+
+For each line, clear the form, set **Language** to `JavaScript`, and click **Analyze**. Expected every time: **Unrecognised**, **Low confidence**, **No rule matched**, and no possible fix. No cause is invented.
+
+- [ ] `2026-10-28 12:00:00 WARN Cannot find module 'express'`
+- [ ] `2026-10-28 12:00:00 WARN EADDRINUSE: address already in use :::3000`
+- [ ] `2026-10-28 12:00:00 WARN ENOENT: no such file or directory, open '/app/x.json'`
+- [ ] `2026-10-28 12:00:00 ERROR EACCES: permission denied, open '/app/x'`
+- [ ] `2026-10-28 12:00:00 WARN RangeError: Maximum call stack size exceeded`
+
+One related distinction: a Python traceback ending in `ModuleNotFoundError: No module named 'requests'` still returns **Missing module** at **High confidence** through the Python rule, not the Node module rule.
+
 ### Unrecognised input
 
 - [ ] Click **Clear** and paste:

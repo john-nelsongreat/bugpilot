@@ -25,7 +25,7 @@ This repository contains a working MVP, not a hosted product. See [Limitations](
 - **Validation**: title, project, language, and description are required; each field has a length limit; a fix status requires a proposed fix; `Verified` additionally requires verification notes.
 - **Fix tracking**: `Proposed`, `Accepted`, `Rejected`, and `Verified` are manual states. BugPilot never verifies a fix automatically. A bug's workflow status (`Open`, `In Progress`, `Resolved`, `Closed`) is separate from its fix status.
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
-- **Debug Assistant** at `/assistant`, backed by a local rule engine with 16 Python rules and 3 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
+- **Debug Assistant** at `/assistant`, backed by a local rule engine with 16 Python rules and 8 JavaScript rules. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
 - **Saved diagnoses**: after a recognised analysis loaded from a report, the Assistant previews every field and writes one diagnosis to that report when confirmed. The bug detail shows the category, signature, confidence, selected evidence, and saved date, and can remove the diagnosis without touching the proposed fix, fix state, status, or verification notes.
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
 - **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete, import, remove-diagnosis, and save-diagnosis dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
@@ -97,7 +97,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 
 - Tested in Chromium on Windows only; Firefox, Safari, and physical mobile devices are not covered.
 - No screen-reader pass yet; NVDA, Narrator, JAWS, and VoiceOver remain untested. See [Accessibility](#accessibility) for the full list.
-- The assistant recognises only the 19 documented rules: 16 Python and 3 JavaScript.
+- The assistant recognises only the 24 documented rules: 16 Python and 8 JavaScript.
 
 ## Tech stack
 
@@ -378,7 +378,7 @@ Test files live beside the module they test. For example, the Python rules live 
 
 **Footer jokes.** `src/content/footerJokes.ts` holds four jokes for each of six page keys. `src/features/footer/footerJoke.ts` maps a pathname to a page key, avoids choosing the same joke twice in a row when alternatives exist, and stores the last index in `sessionStorage` under `bugpilot.footerJoke.<pageKey>` (with an in-memory fallback when storage is blocked). `src/components/FooterJoke.tsx` rotates the joke every 60 seconds. `src/App.tsx` accepts an optional `VITE_FOOTER_JOKE_INTERVAL_MS` environment override for development, but the default is 60 seconds.
 
-**Diagnostics.** `src/diagnostics/types.ts` defines the rule contract and result shape. `src/diagnostics/engine.ts` selects the final exception line, infers a language when needed, runs the registered rules, chooses the most specific match, and builds confidence, evidence, and fallback output. `src/diagnostics/rules/python.ts` and `src/diagnostics/rules/javascript.ts` contain the 19 rules (16 Python and 3 JavaScript) and register them in the exported `pythonRules` and `javascriptRules` arrays. `src/pages/AssistantPage.tsx` is only the UI: it holds pasted text in component state and calls `diagnose()` in the browser.
+**Diagnostics.** `src/diagnostics/types.ts` defines the rule contract and result shape. `src/diagnostics/engine.ts` selects the final exception line, infers a language when needed, runs the registered rules, chooses the most specific match, and builds confidence, evidence, and fallback output. `src/diagnostics/rules/python.ts` and `src/diagnostics/rules/javascript.ts` contain the 24 rules (16 Python and 8 JavaScript) and register them in the exported `pythonRules` and `javascriptRules` arrays. `src/pages/AssistantPage.tsx` is only the UI: it holds pasted text in component state and calls `diagnose()` in the browser.
 
 ## How the diagnostic engine works
 
@@ -412,7 +412,7 @@ The engine looks for the last exception-shaped line in `errorText`, then falls b
 | `limitations` | What the rule and engine cannot see. Every result also states that the guidance is local and rule-based. |
 | `alternativeExplanations` | Other plausible causes for the same signature. |
 
-Supported categories are `missing-module`, `import-failure`, `undefined-name`, `type-mismatch`, `missing-attribute`, `missing-key`, `index-out-of-range`, `missing-file`, `permission-denied`, `syntax-error`, `indentation-error`, `division-by-zero`, `invalid-value`, `recursion-error`, `unicode-error`, and `json-decode-error`.
+Supported categories are `missing-module`, `import-failure`, `undefined-name`, `type-mismatch`, `missing-attribute`, `missing-key`, `index-out-of-range`, `missing-file`, `permission-denied`, `syntax-error`, `indentation-error`, `division-by-zero`, `invalid-value`, `recursion-error`, `unicode-error`, `json-decode-error`, and `port-in-use`.
 
 ### Supported Python rules
 
@@ -436,6 +436,21 @@ Each rule matches only the selected exception line. When a line is not an exact 
 | `RecursionError` | `maximum recursion depth exceeded`, optionally followed by `while calling a Python object` or `in comparison` | `RuntimeError`, other `RecursionError` messages, and prose mentions |
 | `UnicodeDecodeError` and `UnicodeEncodeError` | `'<codec>' codec can't decode` or `can't encode` a byte, bytes, character, or characters | `ValueError` or `TypeError` lines that contain the same words, and unknown codec-message shapes |
 | `JSONDecodeError` | `JSONDecodeError`, `json.JSONDecodeError`, `json.decoder.JSONDecodeError`, and `requests.exceptions.JSONDecodeError` with `Expecting value`, `Expecting property name`, `Extra data`, `Unterminated string`, or `Invalid control character` | `ValueError` carrying the same words, unknown `JSONDecodeError` messages, and JavaScript `SyntaxError` |
+
+### Supported JavaScript rules
+
+These rules cover browser and Node.js runtime errors. The five Node.js rules are registered after the three original rules, so an existing JavaScript match is never stolen. The engine also recognises `Error:` and `Error [CODE]:` lines as Node-style error lines when no other exception line is present.
+
+| Rule | Recognises | Deliberately does not claim |
+| --- | --- | --- |
+| `ReferenceError` | `name is not defined`, `Cannot access <name> before initialization`, and other `ReferenceError` lines as generic | Python `NameError`, `AttributeError`, or a prose mention of a name |
+| `TypeError` | JavaScript shapes such as reading or setting properties of `undefined` or `null`, `is not a function`, `is not iterable`, and assignment to a constant; other `TypeError` lines as generic | Python `TypeError` shapes such as unsupported operands or failed concatenation |
+| `SyntaxError` | JavaScript parser messages such as `Unexpected token`, `Unexpected end of JSON input`, and `Cannot use import statement outside a module` | Python parser messages such as `invalid syntax` |
+| Node module not found | `Error: Cannot find module '<package>'`, `Error: Cannot find module '<path>'` (with or without a `Require stack:` list), and `Error [ERR_MODULE_NOT_FOUND]: Cannot find package or module '<package or path>' imported from <path>` | Python `ModuleNotFoundError`, `ERR_REQUIRE_ESM`, unquoted module names, and prose mentions |
+| Port in use | `Error: listen EADDRINUSE: address already in use <address>` for `:::PORT`, `0.0.0.0:PORT`, `127.0.0.1:PORT`, and `localhost:PORT` | `EADDRINUSE` in a log line, comment, or prose, and listen errors without the address |
+| Node file error | `Error: ENOENT: no such file or directory` with `open`, `stat`, `scandir`, `mkdir`, or `readFile` and a quoted path, and `Error: spawn <command> ENOENT` | Other ENOENT operations such as `lstat`, Python `FileNotFoundError`, and bare `ENOENT` mentions |
+| Permission error | `Error: EACCES: permission denied` with `open`, `mkdir`, or `scandir` and a quoted path, `Error: listen EACCES: permission denied <address>`, and `Error: EPERM: operation not permitted` | Python `PermissionError`, other error codes, and log or prose mentions |
+| Call stack | `RangeError: Maximum call stack size exceeded` | Other `RangeError` messages such as `Invalid array length`, and log or prose mentions |
 
 ### Matching, confidence, and evidence
 
@@ -461,7 +476,7 @@ The rule contract is `DiagnosticRule` in `src/diagnostics/types.ts`. A rule belo
 3. **Implement `match(line)`.** Anchor the expression so prose mentions and lookalike lines do not match. Return `null` when the line is not a match. When it matches, return a stable `signature`, the correct `specificity`, and only the captures the explanation needs.
 4. **Implement `explain(match, context)`.** Return `likelyCause`, `debuggingSteps`, a complete `possibleFix` (`explanation`, `whereItMayApply`, `exampleCode`), `verificationSteps`, `limitations`, and `alternativeExplanations`. Keep the example code illustrative; the app never runs it.
 5. **Register the rule.** Add the exported rule object to the `pythonRules` or `javascriptRules` array at the bottom of the file. That array is what the engine reads.
-6. **Add tests beside the existing rule tests.** For Python, extend `src/diagnostics/python-rules.test.ts`; for JavaScript, extend `src/diagnostics/javascript-rules.test.ts`. Add at least:
+6. **Add tests beside the existing rule tests.** For Python, extend `src/diagnostics/python-rules.test.ts`; for JavaScript, extend `src/diagnostics/javascript-rules.test.ts`, or add a focused batch test file such as `src/diagnostics/javascript-rules-batch-b1.test.ts`. Add at least:
    - a direct match test: `expect(rule.match(line)).not.toBeNull()`;
    - an engine test: `diagnose({ language: 'python', errorText: line })` returns the expected category, a non-null signature, a possible fix, and non-low confidence;
    - a **false-positive test** for a nearby but different signature and for the same words inside a prose sentence, both of which must return `null`;
@@ -606,7 +621,7 @@ These were observed in the live audit and deliberately left in place, each becau
 
 - The diagnostic engine is strict and rule-based. It recognises the documented signatures and categories only; it is not a general log parser or an AI model.
 - It analyses the final exception line, with optional code-snippet evidence and language clues from reproduction details. It cannot inspect the source tree, installed packages, virtual environments, `PATH`, environment variables, browser globals, or the rest of the stack.
-- There are no Node.js or `PATH`-specific diagnostic rules. JavaScript runtime errors can still match the three JavaScript rules.
+- Node.js errors are covered by five Node.js rules: module resolution, `EADDRINUSE`, `ENOENT` file and spawn failures, `EACCES`/`EPERM`, and `RangeError` call-stack overflow. The engine still cannot inspect `PATH`, environment variables, the filesystem, or running processes, so these results are guidance from the error text only.
 - Unrecognised input is reported plainly with general steps; no cause or fix is guessed.
 - Error text is capped at 20,000 characters.
 - Reports live in one browser origin. Clearing site data, using a different browser profile, or switching between the dev and preview ports hides the reports saved under the other origin. JSON export and import move reports between origins, but there is no automatic backup, sync, or multi-user support.
@@ -642,7 +657,7 @@ To revert to Vitest's defaults, remove `fileParallelism: false`, `pool: 'threads
 None of the following exists in the current app:
 
 - Automatic backup/restore, version history, or sync between browsers. The current app exports and imports reports manually only.
-- Additional diagnostic rules, including Node.js and `PATH`-specific cases.
+- Additional diagnostic rules beyond the current 24, for example browser, React, network, or JSON-specific cases.
 - Integration with test-runner or CI output.
 - An optional external AI provider. Any such provider would need to be opt-in, clearly disclosed, and reviewed for the project's no-transmission constraint; no provider is configured now.
 - Deployment, hosting, CI, authentication, multi-user use, or a database.
