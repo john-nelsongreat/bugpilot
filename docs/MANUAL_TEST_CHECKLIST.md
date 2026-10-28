@@ -250,6 +250,71 @@ Perform these checks on a fresh assistant form unless a step says otherwise.
   ```
 - [ ] Click **Analyze**. Expected: **Type mismatch**, high confidence, and JavaScript-specific guidance.
 
+### Batch A Python rules
+
+Set **Language** to `Python` for each example unless a step says otherwise. Every result below should show the evidence **Final exception line** with **Line 1**.
+
+- [ ] Clear the form and paste:
+  ```text
+  ZeroDivisionError: division by zero
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **Division by zero**, **High confidence**, signature `ZeroDivisionError: division by zero`.
+  - Expected: the likely cause mentions a zero or empty divisor, and the possible fix inspects the divisor and guards the zero or empty case rather than swallowing the error.
+
+- [ ] Clear the form and paste each `ValueError` line separately. Each should return **Invalid value**, **High confidence**, and its own signature:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `ValueError: invalid literal for int() with base 10: 'abc'` | `ValueError: invalid literal for int() with base <base>: '<value>'` |
+  | `ValueError: could not convert string to float: '1,234.5'` | `ValueError: could not convert string to float: '<value>'` |
+  | `ValueError: not enough values to unpack (expected 2, got 1)` | `ValueError: not enough values to unpack (expected <expected>, got <got>)` |
+  | `ValueError: too many values to unpack (expected 2)` | `ValueError: too many values to unpack (expected <expected>)` |
+  | `ValueError: math domain error` | `ValueError: math domain error` |
+  | `ValueError: 'apple' is not in list` | `ValueError: '<value>' is not in list` |
+- [ ] Clear the form and paste `ValueError: something unusual happened`.
+  - Expected: **Invalid value**, **Medium confidence**, signature `ValueError: <unclassified value error>`, and wording that the specific cause cannot be narrowed from this line. This generic result must be lower confidence than the six sub-signatures above.
+
+- [ ] Clear the form and paste:
+  ```text
+  RecursionError: maximum recursion depth exceeded
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **Recursion error**, **High confidence**, signature `RecursionError: maximum recursion depth exceeded`.
+  - Expected: the advice mentions finding the base case, prints the argument at each call, suggests an iterative approach when the depth is legitimately large, and warns that raising `sys.setrecursionlimit` is usually a workaround.
+
+- [ ] Clear the form and paste:
+  ```text
+  UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **Unicode error**, **High confidence**, signature `UnicodeDecodeError: '<codec>' codec cannot decode the input`.
+  - Expected: the fix mentions opening the text with an explicit encoding such as `encoding="utf-8"` and warns that `errors="ignore"` silently loses data.
+- [ ] Clear the form and paste:
+  ```text
+  UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 5: character maps to <undefined>
+  ```
+- [ ] Click **Analyze**. Expected: **Unicode error**, **High confidence**, signature `UnicodeEncodeError: '<codec>' codec cannot encode the text`.
+
+- [ ] Clear the form and paste:
+  ```text
+  json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **JSON decode error**, **High confidence**, signature `JSONDecodeError: <invalid JSON payload>`.
+  - Expected: the fix asks you to print the raw response and status before parsing and to check for an empty body, an HTML page, or a BOM.
+
+### Batch A lookalikes
+
+For each line, clear the form, keep **Language** set to `Python`, and click **Analyze**. Expected every time: **Unrecognised**, **Low confidence**, **No rule matched**, and no possible fix. No cause is invented.
+
+- [ ] `ArithmeticError: division by zero`
+- [ ] `2026-10-28 12:00:00 ERROR ValueError: math domain error`
+- [ ] `RuntimeError: maximum recursion depth exceeded`
+- [ ] `2026-10-28 12:00:00 WARNING UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff`
+- [ ] `json.decoder.JSONDecodeError: something unusual happened`
+
+One related distinction: a `TypeError` line that repeats codec wording is not a Unicode error. The existing Python TypeError rule classifies it as **Type mismatch** at **Medium confidence**, so it does not appear in this Unrecognised list.
+
 ### Unrecognised input
 
 - [ ] Click **Clear** and paste:
