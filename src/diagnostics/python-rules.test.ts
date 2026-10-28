@@ -6,12 +6,17 @@ import {
   pythonImportErrorRule,
   pythonIndentationErrorRule,
   pythonIndexErrorRule,
+  pythonJsonDecodeErrorRule,
   pythonKeyErrorRule,
   pythonModuleNotFoundErrorRule,
   pythonNameErrorRule,
   pythonPermissionErrorRule,
+  pythonRecursionErrorRule,
   pythonSyntaxErrorRule,
   pythonTypeErrorRule,
+  pythonUnicodeErrorRule,
+  pythonValueErrorRule,
+  pythonZeroDivisionErrorRule,
 } from './rules/python'
 import type {
   DiagnosticRule,
@@ -92,6 +97,38 @@ const POSITIVE_CASES: PositiveCase[] = [
     line: 'IndentationError: unexpected indent',
     category: 'indentation-error',
   },
+  {
+    name: 'ZeroDivisionError',
+    rule: pythonZeroDivisionErrorRule,
+    line: 'ZeroDivisionError: division by zero',
+    category: 'division-by-zero',
+  },
+  {
+    name: 'ValueError',
+    rule: pythonValueErrorRule,
+    line: "ValueError: invalid literal for int() with base 10: 'abc'",
+    category: 'invalid-value',
+  },
+  {
+    name: 'RecursionError',
+    rule: pythonRecursionErrorRule,
+    line: 'RecursionError: maximum recursion depth exceeded',
+    category: 'recursion-error',
+  },
+  {
+    name: 'UnicodeDecodeError',
+    rule: pythonUnicodeErrorRule,
+    line:
+      "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+    category: 'unicode-error',
+  },
+  {
+    name: 'JSONDecodeError',
+    rule: pythonJsonDecodeErrorRule,
+    line:
+      'json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)',
+    category: 'json-decode-error',
+  },
 ]
 
 const LOOKALIKES: Array<[string, DiagnosticRule, string]> = [
@@ -145,6 +182,31 @@ const LOOKALIKES: Array<[string, DiagnosticRule, string]> = [
     'IndentationError',
     pythonIndentationErrorRule,
     'SyntaxError: unexpected indent',
+  ],
+  [
+    'ZeroDivisionError',
+    pythonZeroDivisionErrorRule,
+    'ArithmeticError: division by zero',
+  ],
+  [
+    'ValueError',
+    pythonValueErrorRule,
+    "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+  ],
+  [
+    'RecursionError',
+    pythonRecursionErrorRule,
+    'RuntimeError: maximum recursion depth exceeded',
+  ],
+  [
+    'UnicodeDecodeError',
+    pythonUnicodeErrorRule,
+    "TypeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+  ],
+  [
+    'JSONDecodeError',
+    pythonJsonDecodeErrorRule,
+    'ValueError: Expecting value: line 1 column 1 (char 0)',
   ],
 ]
 

@@ -96,6 +96,17 @@ describe('Saved diagnosis section', () => {
     expect(screen.getByText('Dependency lockfile drift')).toBeVisible()
   })
 
+  it('shows the readable batch-A category label instead of the raw id', () => {
+    renderDetail({
+      diagnosis: makeSavedDiagnosis({
+        category: 'json-decode-error',
+      }),
+    })
+
+    expect(screen.getByText('JSON decode error')).toBeVisible()
+    expect(screen.queryByText('json-decode-error')).not.toBeInTheDocument()
+  })
+
   it('renders evidence as text and never as HTML', () => {
     const quote = '<img src=x onerror="alert(1)">'
     const { container } = renderDetail({

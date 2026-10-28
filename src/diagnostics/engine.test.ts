@@ -331,7 +331,7 @@ describe('diagnose', () => {
     ['whitespace-only text', '  \n\t '],
     [
       'unsupported error text',
-      "ValueError: invalid literal for int() with base 10: 'abc'",
+      'RuntimeError: something unusual happened',
     ],
     [
       'a prose mention of an error',

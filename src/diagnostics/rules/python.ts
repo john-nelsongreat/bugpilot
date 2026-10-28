@@ -49,6 +49,29 @@ const INDENTATION_ERROR = /^IndentationError:\s+(.+)$/
 const KNOWN_INDENTATION_ERROR =
   /(?:unexpected indent|expected an indented block|unindent does not match any outer indentation level|too many levels of indentation)/i
 
+const ZERO_DIVISION_ERROR =
+  /^ZeroDivisionError:\s+(division by zero|integer division or modulo by zero|float division by zero|float modulo|integer modulo by zero)$/
+
+const VALUE_ERROR = /^ValueError:\s+(.+)$/
+const INVALID_INT_LITERAL =
+  /^invalid literal for int\(\) with base (\d+):\s+(['"])(.*)\2$/
+const INVALID_FLOAT_LITERAL =
+  /^could not convert string to float:\s+(['"])(.*)\1$/
+const NOT_ENOUGH_VALUES =
+  /^not enough values to unpack \(expected (\d+), got (\d+)\)$/
+const TOO_MANY_VALUES = /^too many values to unpack \(expected (\d+)\)$/
+const MATH_DOMAIN_ERROR = /^math domain error$/
+const VALUE_NOT_IN_LIST = /^(['"])(.+?)\1 is not in list$/
+
+const RECURSION_ERROR =
+  /^RecursionError:\s+maximum recursion depth exceeded(?:\s+(while calling a Python object|in comparison))?$/
+
+const UNICODE_ERROR =
+  /^Unicode(Decode|Encode)Error:\s+'([^']+)' codec can't (?:decode|encode) (?:byte|bytes|character|characters)\b.*$/
+
+const JSON_DECODE_ERROR =
+  /^(?:(?:json(?:\.decoder)?|requests\.exceptions)\.)?JSONDecodeError:\s+(Expecting value|Expecting property name enclosed in double quotes|Extra data|Unterminated string(?: starting at)?|Invalid control character(?: at)?)(?::\s*line \d+ column \d+ \(char \d+\))?\s*$/
+
 export const pythonModuleNotFoundErrorRule: DiagnosticRule = {
   id: 'python.module-not-found',
   language: 'python',
@@ -824,6 +847,637 @@ export const pythonIndentationErrorRule: DiagnosticRule = {
   },
 }
 
+export const pythonZeroDivisionErrorRule: DiagnosticRule = {
+  id: 'python.zero-division-error',
+  language: 'python',
+  category: 'division-by-zero',
+  match(line: string): RuleMatch | null {
+    const matched = ZERO_DIVISION_ERROR.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    return {
+      signature: 'ZeroDivisionError: division by zero',
+      specificity: 'specific',
+      captures: { reason: matched[1] },
+    }
+  },
+  explain(): RuleNarrative {
+    return {
+      likelyCause:
+        'Python evaluated a division or modulo expression whose divisor was zero or empty at that moment. The divisor may come from user input, a count, or a collection whose length happened to be zero.',
+      debuggingSteps: [
+        'Find the division or modulo operation in the traceback and identify the divisor.',
+        'Print or inspect the divisor and the values that produced it just before the failing line.',
+        'Check whether the divisor can be zero or empty for valid input, and decide what the correct result should be for that case.',
+        'Guard the zero or empty case explicitly rather than wrapping the whole calculation in a broad exception handler.',
+      ],
+      possibleFix: {
+        explanation:
+          'Inspect the divisor before dividing and guard the zero or empty case. Decide what the correct result should be for that input, such as skipping it, returning None, or raising a clear error, rather than using a broad handler to swallow the error.',
+        whereItMayApply:
+          'Apply this at the division or modulo site; only guard the cases where zero is legitimate and do not hide data problems.',
+        exampleCode: [
+          'def safe_ratio(total, count):',
+          '    if count == 0:',
+          '        return None',
+          '    return total / count',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same reproduction with the zero or empty input.',
+        'Check that the ZeroDivisionError is gone and the chosen zero-case result is the intended one.',
+        'Run the normal non-zero case as well to confirm the calculation still works.',
+      ],
+      limitations: [
+        'The final message does not show which expression failed or where the divisor came from.',
+        'This engine cannot inspect runtime values, input data, or the surrounding source.',
+      ],
+      alternativeExplanations: [
+        'The divisor came from a collection that was empty on this path.',
+        'A loop or aggregation produced zero where the code assumed a positive count.',
+        'The wrong variable was used as the divisor or the operands were swapped.',
+      ],
+    }
+  },
+}
+
+function valueErrorNarrative(match: RuleMatch): RuleNarrative {
+  const reason = match.captures.reason
+  const value = match.captures.value ?? 'the supplied text'
+  const base = match.captures.base ?? 'the given'
+  const expected = match.captures.expected
+  const got = match.captures.got
+
+  if (reason === 'invalid-int-literal') {
+    return {
+      likelyCause: `Python tried to convert "${value}" to an int with base ${base}, but the text is not a valid integer in that base. The text may come from user input, a file, or an API field that uses a different format.`,
+      debuggingSteps: [
+        'Find the int() conversion in the traceback and identify the raw value passed to it.',
+        'Print the value with repr() to see spaces, signs, decimal points, or other characters that are not valid digits.',
+        'Check whether the intended base matches the text, for example whether a prefix belongs in the value.',
+        'Decide how invalid input should behave before changing the conversion.',
+      ],
+      possibleFix: {
+        explanation:
+          'Inspect and validate the raw text before converting it, then convert it deliberately with the intended base or format instead of wrapping the conversion in a broad handler.',
+        whereItMayApply:
+          'Apply this at the conversion site; confirm whether the input should be rejected, normalized, or read from a different field.',
+        exampleCode: [
+          'raw = "12.5"',
+          'if raw.strip().lstrip("-").isdigit():',
+          '    count = int(raw)',
+          'else:',
+          '    count = None',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same conversion with the value that failed.',
+        'Test a valid integer, an empty value, and the invalid format that caused the error.',
+        'Check that the chosen invalid-input behavior is explicit and visible to the caller.',
+      ],
+      limitations: [
+        'The message shows the value but not where it came from or what the code intended to accept.',
+        'This engine cannot inspect the input source, locale, or surrounding conversion code.',
+      ],
+      alternativeExplanations: [
+        'The text contains a decimal point or thousands separator instead of an integer.',
+        'The value was read from the wrong column, field, or line.',
+        'The intended numeric base does not match the format of the text.',
+      ],
+    }
+  }
+
+  if (reason === 'invalid-float-literal') {
+    return {
+      likelyCause: `Python tried to convert "${value}" to a float, but the text is not a valid float literal. A decimal comma, currency symbol, thousands separator, or empty value commonly causes this.`,
+      debuggingSteps: [
+        'Find the float() conversion in the traceback and identify the raw value passed to it.',
+        'Print the value with repr() to see separators, symbols, or whitespace around the number.',
+        'Check the expected number format and locale before changing the value.',
+        'Decide how invalid input should behave instead of silently defaulting it.',
+      ],
+      possibleFix: {
+        explanation:
+          'Inspect the raw text and normalize only the formatting you can justify, then convert it with float() or a deliberate parser for the expected locale.',
+        whereItMayApply:
+          'Apply this at the conversion boundary; do not strip characters unless you know they are formatting rather than data.',
+        exampleCode: [
+          'raw = "1,234.5"',
+          'cleaned = raw.replace(",", "")',
+          'amount = float(cleaned)',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same conversion with the failing text.',
+        'Test a plain decimal, an empty value, and the formatted input that caused the error.',
+        'Check that the normalization does not change values for other inputs.',
+      ],
+      limitations: [
+        'The message shows the value but not the locale or source that formatted it.',
+        'This engine cannot inspect the input data or parse rules used before the conversion.',
+      ],
+      alternativeExplanations: [
+        'The value uses a decimal comma or a thousands separator.',
+        'A currency symbol or unit was included in the text.',
+        'The field is empty or contains a placeholder rather than a number.',
+      ],
+    }
+  }
+
+  if (reason === 'not-enough-values') {
+    return {
+      likelyCause: `Python tried to unpack a sequence into ${expected ?? 'the expected number of'} names, but the sequence produced only ${got ?? 'fewer'} values. The data may be shorter or shaped differently than the code assumes.`,
+      debuggingSteps: [
+        'Find the unpacking assignment in the traceback and count the names on the left.',
+        'Print the sequence and its length before the assignment to confirm its actual shape.',
+        'Check the query, split, or API response that produced the sequence.',
+        'Decide whether a shorter sequence is valid input or an error for this code path.',
+      ],
+      possibleFix: {
+        explanation:
+          'Check the sequence length before unpacking, and handle a shorter sequence explicitly rather than assuming the expected shape.',
+        whereItMayApply:
+          'Apply this where the sequence enters the assignment; choose a clear behavior for missing values instead of padding with arbitrary defaults.',
+        exampleCode: [
+          'point = (1, 2)',
+          'if len(point) == 2:',
+          '    x, y = point',
+          'else:',
+          '    x = y = None',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the unpacks with the sequence that failed.',
+        'Test a sequence with exactly the expected number of values.',
+        'Check that the shorter-sequence behavior is intentional and visible.',
+      ],
+      limitations: [
+        'The message gives the expected and actual counts but not the sequence contents or source.',
+        'This engine cannot inspect the data shape or the code that produced the sequence.',
+      ],
+      alternativeExplanations: [
+        'A query or split returned fewer fields than expected.',
+        'A filter or validation step removed values before the assignment.',
+        'The unpacking target expects a different data shape than the source provides.',
+      ],
+    }
+  }
+
+  if (reason === 'too-many-values') {
+    return {
+      likelyCause: `Python tried to unpack a sequence into ${expected ?? 'the expected number of'} names, but the sequence produced more values than expected. The data may contain extra columns or items.`,
+      debuggingSteps: [
+        'Find the unpacking assignment in the traceback and count the names on the left.',
+        'Print the sequence and its length before the assignment to confirm the extra values.',
+        'Check whether the source added a column, a separator changed, or the wrong field was selected.',
+        'Decide whether the extra values should be ignored deliberately or treated as an error.',
+      ],
+      possibleFix: {
+        explanation:
+          'Confirm the expected sequence shape and either unpack the extra values deliberately, such as with a starred target, or select the fields you need before unpacking.',
+        whereItMayApply:
+          'Apply this at the unpacking site; do not discard extra data unless you have confirmed it is safe to ignore.',
+        exampleCode: [
+          '# Keep the first value and collect any extra values explicitly.',
+          'first, *rest = values',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same unpacking with the sequence that failed.',
+        'Test a sequence with exactly the expected number of values.',
+        'Check that any extra values are handled intentionally rather than silently dropped.',
+      ],
+      limitations: [
+        'The message gives the expected count but not the extra values or their source.',
+        'This engine cannot inspect the sequence contents or the code that produced them.',
+      ],
+      alternativeExplanations: [
+        'The data gained an extra column or item that the code does not expect.',
+        'A split or delimiter change produced more parts than before.',
+        'The wrong sequence or field was selected for this assignment.',
+      ],
+    }
+  }
+
+  if (reason === 'math-domain') {
+    return {
+      likelyCause:
+        'A math function received a value outside its defined domain. A negative value passed to a square root or logarithm, or zero passed to a logarithm, commonly causes this.',
+      debuggingSteps: [
+        'Find the math call in the traceback and identify the value passed to it.',
+        'Check the function domain and whether the value can legitimately fall outside it.',
+        'Trace the value back to its source and decide how out-of-domain input should behave.',
+        'Guard the domain explicitly instead of catching the ValueError and continuing with an invalid result.',
+      ],
+      possibleFix: {
+        explanation:
+          'Check the input against the function domain before calling it, and handle out-of-domain values explicitly with a documented result or error.',
+        whereItMayApply:
+          'Apply this at the math call; confirm whether invalid inputs should be rejected, clamped, or handled by a different calculation.',
+        exampleCode: [
+          'import math',
+          '',
+          'value = -1',
+          'if value >= 0:',
+          '    root = math.sqrt(value)',
+          'else:',
+          '    root = None',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the math call with the value that failed.',
+        'Test the boundary value, the valid case, and the out-of-domain case.',
+        'Check that the chosen result is meaningful rather than an arbitrary fallback.',
+      ],
+      limitations: [
+        'The message does not name the function or value that fell outside the domain.',
+        'This engine cannot inspect runtime values or the mathematical intent of the code.',
+      ],
+      alternativeExplanations: [
+        'The input is negative where the function requires a non-negative value.',
+        'The input is zero for a logarithm or another function with a restricted domain.',
+        'Earlier rounding or unit conversion produced an invalid value.',
+      ],
+    }
+  }
+
+  if (reason === 'not-in-list') {
+    return {
+      likelyCause: `The value "${value}" was not found in the list that the code searched. The list may be empty, contain different values, or have been filtered earlier.`,
+      debuggingSteps: [
+        'Find the list method or search in the traceback and identify the list and target value.',
+        'Print the list and the target to compare spelling, case, and formatting.',
+        'Check whether an earlier filter, query, or normalization changed the list.',
+        'Decide what should happen when the value is absent instead of relying on the exception.',
+      ],
+      possibleFix: {
+        explanation:
+          'Check membership before searching, and decide explicitly what should happen when the value is absent instead of relying on a broad handler.',
+        whereItMayApply:
+          'Apply this at the search or lookup site; choose a clear absent-value result rather than adding the missing item blindly.',
+        exampleCode: [
+          'fruits = ["pear", "plum"]',
+          'target = "apple"',
+          'if target in fruits:',
+          '    index = fruits.index(target)',
+          'else:',
+          '    index = -1',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same search with the missing value.',
+        'Test a value that is present and a list that is empty.',
+        'Check that the absent-value behavior is intentional and visible.',
+      ],
+      limitations: [
+        'The message shows the missing value but not the list contents or how the list was built.',
+        'This engine cannot inspect the list data or the earlier filtering steps.',
+      ],
+      alternativeExplanations: [
+        'The list is empty or was filtered before the search.',
+        'The value differs by case, whitespace, or type from the list entries.',
+        'The wrong list or target variable was used.',
+      ],
+    }
+  }
+
+  return {
+    likelyCause:
+      'Python raised a ValueError, but the final message does not match one of the supported value-error forms, so the specific cause cannot be narrowed from this line alone.',
+    debuggingSteps: [
+      'Copy the full ValueError message and the traceback frame that points to your own code.',
+      'Identify the operation that raised it: a conversion, unpacking, search, math call, or validation check.',
+      'Inspect the value and the expected format at that operation before changing dependencies.',
+      'Reproduce the failure with the smallest input that still shows the same message.',
+    ],
+    possibleFix: {
+      explanation:
+        'Use the full ValueError message to determine which conversion, lookup, or validation failed, then handle that specific case. The engine cannot suggest a narrower fix without a recognised sub-signature.',
+      whereItMayApply:
+        'Apply this at the operation named in the full traceback; do not catch ValueError broadly and continue with a guessed value.',
+      exampleCode: [
+        'try:',
+        '    value = int(raw)',
+        'except ValueError as error:',
+        '    print(f"Invalid value: {raw!r}")',
+        '    raise',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same reproduction with the same input.',
+      'Check whether the message changes to a recognised form that names the failing value or shape.',
+      'Confirm the handled case behaves as intended without hiding other ValueErrors.',
+    ],
+    limitations: [
+      'This generic result uses only the final message and cannot identify the exact operation that raised it.',
+      'This engine cannot inspect runtime values or the surrounding source.',
+    ],
+    alternativeExplanations: [
+      'A conversion received text that does not match the expected format.',
+      'A lookup or membership test used a missing value.',
+      'A validation rule or library function rejected the input for an unsupported reason.',
+    ],
+  }
+}
+
+export const pythonValueErrorRule: DiagnosticRule = {
+  id: 'python.value-error',
+  language: 'python',
+  category: 'invalid-value',
+  match(line: string): RuleMatch | null {
+    const matched = VALUE_ERROR.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    const detail = matched[1]
+    const invalidInt = INVALID_INT_LITERAL.exec(detail)
+    if (invalidInt) {
+      return {
+        signature:
+          "ValueError: invalid literal for int() with base <base>: '<value>'",
+        specificity: 'specific',
+        captures: {
+          reason: 'invalid-int-literal',
+          base: invalidInt[1],
+          value: invalidInt[3],
+        },
+      }
+    }
+
+    const invalidFloat = INVALID_FLOAT_LITERAL.exec(detail)
+    if (invalidFloat) {
+      return {
+        signature: "ValueError: could not convert string to float: '<value>'",
+        specificity: 'specific',
+        captures: {
+          reason: 'invalid-float-literal',
+          value: invalidFloat[2],
+        },
+      }
+    }
+
+    const notEnough = NOT_ENOUGH_VALUES.exec(detail)
+    if (notEnough) {
+      return {
+        signature:
+          'ValueError: not enough values to unpack (expected <expected>, got <got>)',
+        specificity: 'specific',
+        captures: {
+          reason: 'not-enough-values',
+          expected: notEnough[1],
+          got: notEnough[2],
+        },
+      }
+    }
+
+    const tooMany = TOO_MANY_VALUES.exec(detail)
+    if (tooMany) {
+      return {
+        signature:
+          'ValueError: too many values to unpack (expected <expected>)',
+        specificity: 'specific',
+        captures: {
+          reason: 'too-many-values',
+          expected: tooMany[1],
+        },
+      }
+    }
+
+    if (MATH_DOMAIN_ERROR.test(detail)) {
+      return {
+        signature: 'ValueError: math domain error',
+        specificity: 'specific',
+        captures: { reason: 'math-domain' },
+      }
+    }
+
+    const notInList = VALUE_NOT_IN_LIST.exec(detail)
+    if (notInList) {
+      return {
+        signature: "ValueError: '<value>' is not in list",
+        specificity: 'specific',
+        captures: { reason: 'not-in-list', value: notInList[2] },
+      }
+    }
+
+    return {
+      signature: 'ValueError: <unclassified value error>',
+      specificity: 'generic',
+      captures: { detail },
+    }
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    return valueErrorNarrative(match)
+  },
+}
+
+export const pythonRecursionErrorRule: DiagnosticRule = {
+  id: 'python.recursion-error',
+  language: 'python',
+  category: 'recursion-error',
+  match(line: string): RuleMatch | null {
+    const matched = RECURSION_ERROR.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    return {
+      signature: 'RecursionError: maximum recursion depth exceeded',
+      specificity: 'specific',
+      captures: { reason: matched[1] ?? 'unspecified' },
+    }
+  },
+  explain(): RuleNarrative {
+    return {
+      likelyCause:
+        'Python exceeded its maximum call depth. A recursive function may be missing a base case, may never reach it with this input, or may use runaway mutual recursion.',
+      debuggingSteps: [
+        'Find the recursive call in the traceback and identify the argument that should eventually reach the base case.',
+        'Print that argument at each call to see whether it approaches the base case or repeats the same value.',
+        'Make sure every path through the function can reach the base case before the next recursive call.',
+        'If the depth is legitimately large, consider an explicit loop or iterative traversal instead of relying on a raised limit.',
+      ],
+      possibleFix: {
+        explanation:
+          'Make the base case reachable for every input, or convert the recursion to an explicit loop when the depth is legitimately large. Verify the new stopping condition with small and boundary inputs before relying on it.',
+        whereItMayApply:
+          'Apply this to the recursive function; do not treat a raised recursion limit as a fix for a missing base case.',
+        exampleCode: [
+          'def countdown(n):',
+          '    if n <= 0:',
+          '        return 0',
+          '    return countdown(n - 1)',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same input that triggered the RecursionError.',
+        'Check that the function terminates and returns the expected result.',
+        'Test the smallest input and an input that previously produced the deepest recursion.',
+      ],
+      limitations: [
+        'Raising sys.setrecursionlimit is usually a workaround; it can trade a RecursionError for a crash and does not fix a missing base case.',
+        'This engine cannot inspect the recursive function or the depth of the data that reached it.',
+      ],
+      alternativeExplanations: [
+        'The base case is unreachable because the argument does not change as expected.',
+        'Two or more functions call each other without a shared stopping condition.',
+        'The recursion depth is legitimate but exceeds the default limit for this runtime.',
+      ],
+    }
+  },
+}
+
+export const pythonUnicodeErrorRule: DiagnosticRule = {
+  id: 'python.unicode-error',
+  language: 'python',
+  category: 'unicode-error',
+  match(line: string): RuleMatch | null {
+    const matched = UNICODE_ERROR.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    const direction = matched[1].toLowerCase()
+    const codec = matched[2]
+    return {
+      signature:
+        direction === 'decode'
+          ? "UnicodeDecodeError: '<codec>' codec cannot decode the input"
+          : "UnicodeEncodeError: '<codec>' codec cannot encode the text",
+      specificity: 'specific',
+      captures: { reason: 'codec-mismatch', direction, codec },
+    }
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    const codec = match.captures.codec ?? 'the named'
+    const isDecode = match.captures.direction === 'decode'
+    const likelyCause = isDecode
+      ? `Python read bytes and tried to decode them with the "${codec}" codec, but the data contains a byte sequence that codec does not accept. The data may use a different encoding, or the file may be corrupted or truncated.`
+      : `Python tried to encode text with the "${codec}" codec, but that codec cannot represent one of the characters. This is common on Windows when the default encoding is not UTF-8.`
+
+    return {
+      likelyCause,
+      debuggingSteps: [
+        'Identify the read or write operation and the codec named in the message.',
+        'Inspect the first bytes of the input, or the character that could not be encoded, instead of guessing the encoding.',
+        'Open the file or stream with an explicit, known encoding such as encoding="utf-8".',
+        'If the data really uses another encoding, name it deliberately; do not add errors="ignore" just to silence the error.',
+      ],
+      possibleFix: {
+        explanation: isDecode
+          ? 'Open the text with the encoding the data actually uses, commonly encoding="utf-8", and handle undecodable bytes explicitly.'
+          : 'Write the text with an encoding that can represent it, such as UTF-8, or explicitly replace or reject characters that cannot be represented.',
+        whereItMayApply:
+          'Apply this at the file, stream, or network boundary where text is decoded or encoded; confirm the real encoding before changing it.',
+        exampleCode: isDecode
+          ? [
+              'with open("data.csv", "r", encoding="utf-8") as handle:',
+              '    text = handle.read()',
+            ].join('\n')
+          : [
+              'with open("report.txt", "w", encoding="utf-8") as handle:',
+              '    handle.write("done")',
+            ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same read or write with the same data.',
+        'Check that the expected characters appear intact and no replacement characters were introduced.',
+        'Test the boundary cases: an empty input and a sample that contains the character or byte that failed.',
+      ],
+      limitations: [
+        'Using errors="ignore" or errors="replace" can silently drop or change data, so it is not a fix for an unknown encoding.',
+        'This engine cannot inspect the file bytes, the system locale, or the actual encoding used at runtime.',
+      ],
+      alternativeExplanations: [
+        'The file uses a different single-byte encoding such as Windows-1252 or Latin-1.',
+        'The terminal or console encoding differs from the encoding used for the file.',
+        'The data mixes encodings or includes a byte-order mark that the reader did not expect.',
+      ],
+    }
+  },
+}
+
+export const pythonJsonDecodeErrorRule: DiagnosticRule = {
+  id: 'python.json-decode-error',
+  language: 'python',
+  category: 'json-decode-error',
+  match(line: string): RuleMatch | null {
+    const matched = JSON_DECODE_ERROR.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    return {
+      signature: 'JSONDecodeError: <invalid JSON payload>',
+      specificity: 'specific',
+      captures: { reason: matched[1] },
+    }
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    const reason = match.captures.reason ?? ''
+    let likelyCause =
+      'The text passed to the JSON parser is not valid JSON for an unsupported reason.'
+
+    if (reason.startsWith('Expecting value')) {
+      likelyCause =
+        'The JSON parser found no value where one was required. A common cause is an empty response body or an HTML/error page returned instead of JSON.'
+    } else if (reason.startsWith('Expecting property name')) {
+      likelyCause =
+        'The JSON parser expected an object property name in double quotes but found something else. Single quotes, a trailing comma, or a truncated object commonly causes this.'
+    } else if (reason.startsWith('Extra data')) {
+      likelyCause =
+        'The parser finished one JSON value and then found extra text. The input may contain more than one document or trailing characters.'
+    } else if (reason.startsWith('Unterminated string')) {
+      likelyCause =
+        'A JSON string did not close before the input ended, so the payload may be truncated or contain an unescaped quote.'
+    } else if (reason.startsWith('Invalid control character')) {
+      likelyCause =
+        'The JSON text contains a raw control character that must be escaped inside a string.'
+    }
+
+    return {
+      likelyCause,
+      debuggingSteps: [
+        'Print the raw response body, status code, and content type before parsing.',
+        'Check whether the body is empty, an HTML error page, or prefixed by a byte-order mark.',
+        'Validate the text with a JSON parser and inspect the reported line and column.',
+        'Fix the source or the parsing boundary instead of catching the error and silently returning an empty object.',
+      ],
+      possibleFix: {
+        explanation:
+          'Inspect the raw response or payload and its status before parsing. Confirm that the source returns JSON rather than an empty body, HTML, or a BOM-prefixed document, and handle that expected case explicitly.',
+        whereItMayApply:
+          'Apply this at the parsing boundary; do not hide a non-JSON response behind a broad exception handler.',
+        exampleCode: [
+          'response = client.get(url)',
+          'response.raise_for_status()',
+          'raw = response.text',
+          'if not raw.strip():',
+          '    raise ValueError("Expected JSON, but the response body was empty")',
+          'data = json.loads(raw.lstrip("\\ufeff"))',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same request and inspect the status and raw body again.',
+        'Parse a known-good JSON payload to confirm the parser and content type agree.',
+        'Check the empty, HTML, and BOM-prefixed cases that previously failed.',
+      ],
+      limitations: [
+        'The message gives a line and column in the text but does not show the source of that text.',
+        'This engine cannot inspect network responses, files, or the parser configuration.',
+      ],
+      alternativeExplanations: [
+        'The endpoint returned an HTML login or error page instead of JSON.',
+        'The response body was empty or the request used the wrong URL.',
+        'The payload is double-encoded, starts with a BOM, or contains unescaped control characters.',
+      ],
+    }
+  },
+}
+
 export const pythonRules: readonly DiagnosticRule[] = [
   pythonModuleNotFoundErrorRule,
   pythonImportErrorRule,
@@ -836,4 +1490,9 @@ export const pythonRules: readonly DiagnosticRule[] = [
   pythonPermissionErrorRule,
   pythonSyntaxErrorRule,
   pythonIndentationErrorRule,
+  pythonZeroDivisionErrorRule,
+  pythonValueErrorRule,
+  pythonRecursionErrorRule,
+  pythonUnicodeErrorRule,
+  pythonJsonDecodeErrorRule,
 ]

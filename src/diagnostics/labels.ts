@@ -12,6 +12,11 @@ export const DIAGNOSTIC_CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
   'permission-denied': 'Permission denied',
   'syntax-error': 'Syntax error',
   'indentation-error': 'Indentation error',
+  'division-by-zero': 'Division by zero',
+  'invalid-value': 'Invalid value',
+  'recursion-error': 'Recursion error',
+  'unicode-error': 'Unicode error',
+  'json-decode-error': 'JSON decode error',
   unrecognized: 'Unrecognised',
 }
 

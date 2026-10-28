@@ -14,6 +14,11 @@ export type SupportedDiagnosticCategory =
   | 'permission-denied'
   | 'syntax-error'
   | 'indentation-error'
+  | 'division-by-zero'
+  | 'invalid-value'
+  | 'recursion-error'
+  | 'unicode-error'
+  | 'json-decode-error'
 
 export type DiagnosticCategory =
   | SupportedDiagnosticCategory
