@@ -20,6 +20,34 @@ const NEW_RULES = [
   ['python.json-decode-error', 'json-decode-error', 'JSON decode error'],
 ] as const
 
+const BATCH_B1_RULES = [
+  [
+    'javascript.node-module-not-found',
+    'javascript',
+    'missing-module',
+    'Missing module',
+  ],
+  ['javascript.port-in-use', 'javascript', 'port-in-use', 'Port already in use'],
+  [
+    'javascript.node-file-error',
+    'javascript',
+    'missing-file',
+    'Missing file',
+  ],
+  [
+    'javascript.permission-error',
+    'javascript',
+    'permission-denied',
+    'Permission denied',
+  ],
+  [
+    'javascript.call-stack-exceeded',
+    'javascript',
+    'recursion-error',
+    'Recursion error',
+  ],
+] as const
+
 describe('diagnostic rule registry', () => {
   it('registers every batch-A rule once with a stable id and category', () => {
     for (const [id, category] of NEW_RULES) {
@@ -55,6 +83,24 @@ describe('diagnostic rule registry', () => {
   it.each(NEW_RULES)(
     'labels %s with %s on the detail page',
     (_id, category, label) => {
+      expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
+      expect(diagnosticCategoryLabel(category)).toBe(label)
+    },
+  )
+
+  it('registers every batch-B1 rule once in the JavaScript array', () => {
+    for (const [id, language, category] of BATCH_B1_RULES) {
+      const rules = javascriptRules.filter((rule) => rule.id === id)
+
+      expect(rules).toHaveLength(1)
+      expect(rules[0].language).toBe(language)
+      expect(rules[0].category).toBe(category)
+    }
+  })
+
+  it.each(BATCH_B1_RULES)(
+    'labels %s with %s on the detail page',
+    (_id, _language, category, label) => {
       expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
       expect(diagnosticCategoryLabel(category)).toBe(label)
     },

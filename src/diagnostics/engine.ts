@@ -33,6 +33,9 @@ const LANGUAGE_LABELS: Record<ResolvedLanguage, string> = {
 const EXCEPTION_LINE =
   /^(?:Uncaught\s+(?:\(in promise\)\s+)?)?(?:(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*(?:Error|Exception)):\s*\S/
 
+const NODE_ERROR_LINE =
+  /^(?:Uncaught\s+(?:\(in promise\)\s+)?)?Error(?:\s+\[[A-Z][A-Z0-9_]*\])?:\s+\S/
+
 const SAFETY_LIMITATION =
   'This is local, rule-based guidance based only on the pasted text; it has not inspected or executed your project.'
 
@@ -160,6 +163,18 @@ const LANGUAGE_SIGNALS: ReadonlyArray<{
     label: 'a .js or .ts filename',
     weight: 1,
     pattern: /\b[\w.-]+\.(?:js|mjs|cjs|jsx|ts|tsx)\b/i,
+  },
+  {
+    language: 'javascript',
+    label: 'a Node.js error code',
+    weight: 2,
+    pattern: /\b(?:ERR_MODULE_NOT_FOUND|EADDRINUSE|EACCES|EPERM|ENOENT)\b/,
+  },
+  {
+    language: 'javascript',
+    label: 'a Node.js require stack',
+    weight: 2,
+    pattern: /^Require stack:\s*$/m,
   },
 ]
 
@@ -653,6 +668,7 @@ function selectExceptionLine(errorText: string): SelectedLine | null {
   const lines = errorText.split(/\r?\n/)
   let lastNonEmpty: SelectedLine | null = null
   let lastException: SelectedLine | null = null
+  let lastNodeError: SelectedLine | null = null
 
   lines.forEach((line, index) => {
     const text = line.trim()
@@ -663,10 +679,12 @@ function selectExceptionLine(errorText: string): SelectedLine | null {
     lastNonEmpty = { text, lineNumber: index + 1 }
     if (EXCEPTION_LINE.test(text)) {
       lastException = { text, lineNumber: index + 1 }
+    } else if (NODE_ERROR_LINE.test(text)) {
+      lastNodeError = { text, lineNumber: index + 1 }
     }
   })
 
-  return lastException ?? lastNonEmpty
+  return lastException ?? lastNodeError ?? lastNonEmpty
 }
 
 function stripConsolePrefix(line: string): string {

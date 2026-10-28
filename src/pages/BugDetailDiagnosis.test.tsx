@@ -107,6 +107,17 @@ describe('Saved diagnosis section', () => {
     expect(screen.queryByText('json-decode-error')).not.toBeInTheDocument()
   })
 
+  it('shows the readable port-in-use label instead of the raw id', () => {
+    renderDetail({
+      diagnosis: makeSavedDiagnosis({
+        category: 'port-in-use',
+      }),
+    })
+
+    expect(screen.getByText('Port already in use')).toBeVisible()
+    expect(screen.queryByText('port-in-use')).not.toBeInTheDocument()
+  })
+
   it('renders evidence as text and never as HTML', () => {
     const quote = '<img src=x onerror="alert(1)">'
     const { container } = renderDetail({

@@ -17,6 +17,7 @@ export const DIAGNOSTIC_CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
   'recursion-error': 'Recursion error',
   'unicode-error': 'Unicode error',
   'json-decode-error': 'JSON decode error',
+  'port-in-use': 'Port already in use',
   unrecognized: 'Unrecognised',
 }
 

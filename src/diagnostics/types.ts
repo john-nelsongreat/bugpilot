@@ -19,6 +19,7 @@ export type SupportedDiagnosticCategory =
   | 'recursion-error'
   | 'unicode-error'
   | 'json-decode-error'
+  | 'port-in-use'
 
 export type DiagnosticCategory =
   | SupportedDiagnosticCategory
