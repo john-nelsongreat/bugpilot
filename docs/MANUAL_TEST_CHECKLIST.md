@@ -406,6 +406,128 @@ For each line, clear the form, set **Language** to `JavaScript`, and click **Ana
 
 One related distinction: a Python traceback ending in `ModuleNotFoundError: No module named 'requests'` still returns **Missing module** at **High confidence** through the Python rule, not the Node module rule.
 
+### Batch B2 JavaScript rules
+
+Set **Language** to `JavaScript` for each one-line example unless a step says otherwise. Every result should show the evidence **Final exception line** with **Line 1**. These are browser, network, JSON, and React shapes; the Python rules must stay quiet.
+
+**JSON parse errors**
+
+- [ ] Clear the form and paste each line separately. Each should return **JSON decode error** at **High confidence** with its own signature:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `SyntaxError: Unexpected token < in JSON at position 0` | `SyntaxError: Unexpected token '<' in JSON at position <position>` |
+  | `SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON` | `SyntaxError: Unexpected token '<', ... is not valid JSON` |
+  | `SyntaxError: Unexpected token u in JSON at position 0` | `SyntaxError: Unexpected token u in JSON at position 0` |
+  | `SyntaxError: "undefined" is not valid JSON` | `SyntaxError: "undefined" is not valid JSON` |
+  | `SyntaxError: Unexpected end of JSON input` | `SyntaxError: Unexpected end of JSON input` |
+  | `SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data` | `SyntaxError: JSON.parse: unexpected character` |
+  | `SyntaxError: JSON.parse: unexpected end of data at line 1 column 1 of the JSON data` | `SyntaxError: JSON.parse: unexpected end of data` |
+  | `SyntaxError: JSON Parse error: Unrecognized token '<'` | `SyntaxError: JSON Parse error: Unrecognized token '<'` |
+  | `SyntaxError: JSON Parse error: Unexpected EOF` | `SyntaxError: JSON Parse error: Unexpected EOF` |
+  | `SyntaxError: Unexpected token '}', ... is not valid JSON` | `SyntaxError: <invalid JSON payload>` |
+- [ ] Expected: the HTML cases mention an HTML page, `index.html`, or an error page; the empty or truncated cases mention an empty or truncated body; the `undefined` cases mention an undefined value.
+- [ ] Expected: the fix asks you to print the response status, content-type, and raw text before parsing, and to check the URL, an empty response, a dev-server `index.html`, or a missing `await`.
+- [ ] Clear the form and paste `SyntaxError: Unexpected token '}'`.
+  - Expected: **Syntax error** at **High confidence** with signature `SyntaxError: <JavaScript parser error>`. The JSON rule must not claim an ordinary parser message.
+- [ ] Clear the form and paste `2026-10-28T10:00:00Z SyntaxError: Unexpected token < in JSON at position 0`.
+  - Expected: **Unrecognised** with no possible fix; a timestamped or prose mention is not treated as the final exception line.
+
+**Network request failures**
+
+- [ ] Clear the form and paste `TypeError: Failed to fetch`.
+- [ ] Click **Analyze**. Expected: **Network request failed**, **High confidence**, signature `TypeError: Failed to fetch`; the cause says browsers hide the underlying reason and lists server, URL or port, network, CORS, extension, and TLS possibilities.
+- [ ] Clear the form and paste `TypeError: NetworkError when attempting to fetch resource.`
+  - Expected: **Network request failed**, **High confidence**, same signature.
+- [ ] Clear the form and paste `TypeError: Load failed`.
+  - Expected: **Network request failed**, **Low confidence**, signature `TypeError: Load failed`; the reason says the wording is generic and the confidence is capped.
+- [ ] Clear the form and paste `TypeError: fetch failed`.
+  - Expected: **Network request failed**, **High confidence**, signature `TypeError: fetch failed`.
+- [ ] Clear the form and paste:
+  ```text
+  TypeError: fetch failed
+      at node:internal/deps/undici/undici:12345:11
+    [cause]: Error: connect ECONNREFUSED 127.0.0.1:3000
+  ```
+  - Expected: **Network request failed**, **High confidence**, signature `TypeError: fetch failed`; the cause names `ECONNREFUSED`.
+- [ ] Clear the form and paste each console line separately. Expected every time: **Network request failed**, **High confidence**, with the signature shown:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `GET http://localhost:3000/api net::ERR_CONNECTION_REFUSED` | `net::ERR_CONNECTION_REFUSED` |
+  | `net::ERR_NAME_NOT_RESOLVED` | `net::ERR_NAME_NOT_RESOLVED` |
+  | `net::ERR_INTERNET_DISCONNECTED` | `net::ERR_INTERNET_DISCONNECTED` |
+  | `GET https://localhost:3000/api net::ERR_CERT_AUTHORITY_INVALID` | `net::ERR_CERT_<reason>` |
+- [ ] Expected: the steps mention the DevTools Network tab, the server and port, DNS, the network connection, and certificate warnings where relevant.
+- [ ] Clear the form and paste `TypeError: x is not a function`.
+  - Expected: **Type mismatch** at **High confidence**; the network rule must not claim an ordinary TypeError.
+- [ ] Clear the form and paste `net::ERR_CONNECTION_REFUSED was printed in the build log`.
+  - Expected: **Unrecognised** with no possible fix; a code mentioned in prose is not a console failure line.
+
+**CORS blocked requests**
+
+- [ ] Clear the form and paste:
+  ```text
+  Access to fetch at 'http://localhost:3000/api' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **CORS blocked request**, **High confidence**, signature `Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header`.
+  - Expected: the cause names `Access-Control-Allow-Origin`; the fix says the server must send the header, the front-end cannot fix it, `mode: 'no-cors'` does not fix it, and a dev-server proxy is an option.
+- [ ] Clear the form and paste:
+  ```text
+  Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+  ```
+  - Expected: **CORS blocked request**, **High confidence**, signature `... blocked by CORS policy: preflight request does not pass access control check`; the cause and steps mention `OPTIONS` and the preflight.
+- [ ] Clear the form and paste:
+  ```text
+  Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a value 'https://other.example.com' that is not equal to the supplied origin.
+  ```
+  - Expected: **CORS blocked request**, **High confidence**, signature `... blocked by CORS policy: 'Access-Control-Allow-Origin' does not match the supplied origin`.
+- [ ] Clear the form and paste:
+  ```text
+  Access to fetch at 'https://api.example.com/me' from origin 'https://app.example.com' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'.
+  ```
+  - Expected: **CORS blocked request**, **High confidence**, signature `... blocked by CORS policy: credentials mode cannot use a wildcard origin`; the fix says to return the specific origin and never combine a wildcard with credentials.
+- [ ] Clear the form and paste the first CORS example with `XMLHttpRequest` instead of `fetch`.
+  - Expected: the same **missing 'Access-Control-Allow-Origin' header** signature; the transport is reported as `XMLHttpRequest`.
+- [ ] Clear the form and paste `2026-10-28T10:00:00Z Access to fetch at 'http://x' from origin 'http://y' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.`
+  - Expected: **Unrecognised** with no possible fix.
+
+**React errors**
+
+- [ ] Clear the form and paste:
+  ```text
+  Uncaught Error: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+  ```
+- [ ] Click **Analyze**.
+  - Expected: **React error**, **High confidence**, signature `Error: Invalid hook call. Hooks can only be called inside of the body of a function component.`
+  - Expected: the cause mentions the Rules of Hooks, and the steps or fix mention `npm ls react react-dom` and a duplicate or second copy of React.
+- [ ] Clear the form and paste `Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.`
+  - Expected: **React error**, **High confidence**; the cause mentions a state setter and `onClick` during render, and the fix shows `onClick={() => setCount(...)}`.
+- [ ] Clear the form and paste `Uncaught Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate.`
+  - Expected: **React error**, **High confidence**, signature `Error: Maximum update depth exceeded.`; the advice mentions an effect, its dependency array, and an update loop.
+- [ ] Clear the form and paste `Error: Objects are not valid as a React child (found: object with keys {name, age}). If you meant to render a collection of children, use an array instead.`
+  - Expected: **React error**, **High confidence**, signature `Error: Objects are not valid as a React child (found: <value>)`; the advice mentions mapping objects to elements or rendering a string.
+- [ ] Clear the form and paste `Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.`
+  - Expected: **Unrecognised** with no possible fix; `Warning:` is not the runtime error line.
+
+**Automatic detection and precedence**
+
+- [ ] Leave **Language** at `Auto — infer from the text`, clear the form, and paste:
+  ```text
+  SyntaxError: Unexpected token < in JSON at position 0
+      at getData (src/api/client.js:10:5)
+  ```
+  - Expected: **JSON decode error**, **High confidence**, and a confidence reason that names JavaScript.
+- [ ] Clear the form and paste `TypeError: Failed to fetch` with the same two-line JavaScript stack below it.
+  - Expected: **Network request failed**, **High confidence**, and a confidence reason that names JavaScript.
+- [ ] Clear the form and paste `Uncaught Error: Invalid hook call. Hooks can only be called inside of the body of a function component.` with the same stack below it.
+  - Expected: **React error**, **High confidence**, and a confidence reason that names JavaScript.
+- [ ] Clear the form and paste a CORS console line from above on its own.
+  - Expected: **CORS blocked request**, **High confidence**, and a confidence reason that names JavaScript.
+- [ ] Clear the form, set **Language** to `JavaScript`, and paste `SyntaxError: Unexpected token < in JSON at position 0`.
+  - Expected: **JSON decode error**, not **Syntax error**. The JSON rule takes precedence over the generic parser fallback for JSON wording only.
+
+One related distinction: a plain `SyntaxError: Unexpected token '}'` still returns **Syntax error**, and `TypeError: x is not a function` still returns **Type mismatch**; the new rules supersede the generic fallbacks only when their own message families match.
+
 ### Unrecognised input
 
 - [ ] Click **Clear** and paste:
