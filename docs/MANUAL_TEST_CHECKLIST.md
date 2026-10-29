@@ -432,6 +432,29 @@ Set **Language** to `JavaScript` for each one-line example unless a step says ot
 - [ ] Clear the form and paste `2026-10-28T10:00:00Z SyntaxError: Unexpected token < in JSON at position 0`.
   - Expected: **Unrecognised** with no possible fix; a timestamped or prose mention is not treated as the final exception line.
 
+**Bare JSON messages (no `SyntaxError:` prefix)**
+
+These are the same distinctive browser messages pasted without the error class, which is how some console and logging tools present them. Leave **Language** on `Auto` unless a step says otherwise.
+
+- [ ] Clear the form and paste each line separately. Expected every time: **JSON decode error**, **Medium confidence** (not High — the error class is missing), and the signature shown:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `JSON.parse: unexpected character at line 1 column 1 of the JSON data` | `SyntaxError: JSON.parse: unexpected character` |
+  | `JSON.parse: unexpected end of data at line 1 column 1 of the JSON data` | `SyntaxError: JSON.parse: unexpected end of data` |
+  | `JSON Parse error: Unrecognized token '<'` | `SyntaxError: JSON Parse error: Unrecognized token '<'` |
+  | `JSON Parse error: Unexpected EOF` | `SyntaxError: JSON Parse error: Unexpected EOF` |
+  | `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` | `SyntaxError: Unexpected token '<', ... is not valid JSON` |
+  | `Unexpected token < in JSON at position 0` | `SyntaxError: Unexpected token '<' in JSON at position <position>` |
+  | `Unexpected end of JSON input` | `SyntaxError: Unexpected end of JSON input` |
+  | `"undefined" is not valid JSON` | `SyntaxError: "undefined" is not valid JSON` |
+- [ ] Expected: the confidence reason says the error class was missing and the result was capped at Medium; the cause, steps, fix, and verification guidance match the prefixed form of the same message.
+- [ ] Paste `Unexpected token }` alone.
+  - Expected: **Syntax error** at **High confidence** with signature `SyntaxError: <JavaScript parser error>`. The JSON rule must not claim a generic parser message.
+- [ ] Paste `2026-10-29T10:00:00Z JSON.parse: unexpected character at line 1 column 1 of the JSON data` and separately `The log said JSON Parse error: Unexpected EOF while loading.`
+  - Expected: **Unrecognised** with no possible fix both times; a timestamped or prose mention is not treated as the final exception line.
+- [ ] Set **Language** to `Python` and paste `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`.
+  - Expected: **JSON decode error** at **High confidence** from the Python rule, not the Medium-capped JavaScript bare form.
+
 **Network request failures**
 
 - [ ] Clear the form and paste `TypeError: Failed to fetch`.
@@ -1141,6 +1164,9 @@ These checks apply to the deployed Vercel site. The headers are defined in `verc
 - [ ] Visit each route directly by typing the URL: `/`, `/bugs`, `/bugs/new`, a bug detail URL, that report's `/edit` URL, `/assistant`, and `/missing-page`.
   - Expected: every page renders; **no** console error mentions `Content Security Policy`, `Refused to`, or a blocked resource; the fonts, icons, and favicon render.
   - In the Network tab, select the document request and inspect its response headers. Expected: `content-security-policy` is present and matches the value above.
+- [ ] Repeat the console check in Firefox and in Safari, or in Playwright WebKit when Safari is unavailable (Playwright WebKit approximates Safari; physical Safari was not tested).
+  - Expected in Chromium and Firefox: no CSP message on any route or during the flows below.
+  - Expected in WebKit/Safari: each `<select>` created by JavaScript produces one `style-src-attr` message (4 on `/bugs`, 3 on `/bugs/new`, 1 on a report detail and on `/assistant`). A minimal page that only calls `document.createElement('select')` reproduces this, so it is WebKit's own form-control handling, not an inline style written by the app. Treat any other CSP message — especially `style-src-elem`, or one whose source points to an element the app styled — as a real finding. Confirm that `<html>` has no `style` attribute after toggling the theme.
 - [ ] In both themes, repeat the main flows on the live site: create, edit, delete with confirmation, search/filter/sort, fix states, Python and JavaScript analyses plus **Copy code**, export download, import preview and merge, toast, joke rotation, keyboard focus, and both dialogs.
   - Expected: behaviour matches the local build; the Console still has no CSP errors, and Network still shows only the site's own origin.
 - [ ] If a violation appears, copy the complete console message (directive, blocked URL, and source file) before changing anything. Do not add `'unsafe-inline'`, `'unsafe-eval'`, or a broad external host as the first response. Identify the resource, add only the narrowest source or remove the dependency, then repeat the local checks and this section.
