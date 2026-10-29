@@ -528,6 +528,57 @@ Set **Language** to `JavaScript` for each one-line example unless a step says ot
 
 One related distinction: a plain `SyntaxError: Unexpected token '}'` still returns **Syntax error**, and `TypeError: x is not a function` still returns **Type mismatch**; the new rules supersede the generic fallbacks only when their own message families match.
 
+### JavaScript TypeError sub-signatures
+
+Set **Language** to `JavaScript` for each one-line example. Every result should show **Type mismatch**, **High confidence**, the evidence **Final exception line** with **Line 1**, and the signature printed below. These shapes share one rule and one category; only the signature and the guidance change.
+
+| Paste this line | Expected signature |
+| --- | --- |
+| `TypeError: Cannot read properties of undefined (reading 'amount')` | `TypeError: Cannot read properties of undefined (reading 'amount')` |
+| `TypeError: Cannot read properties of null (reading 'length')` | `TypeError: Cannot read properties of null (reading 'length')` |
+| `TypeError: Cannot read property 'amount' of undefined` | `TypeError: Cannot read property 'amount' of undefined` |
+| `TypeError: Cannot read property 'length' of null` | `TypeError: Cannot read property 'length' of null` |
+| `TypeError: Cannot set properties of undefined (setting 'value')` | `TypeError: Cannot set properties of undefined (setting 'value')` |
+| `TypeError: Cannot set properties of null (setting 'checked')` | `TypeError: Cannot set properties of null (setting 'checked')` |
+| `TypeError: items.map is not a function` | `TypeError: items.map is not a function` |
+| `TypeError: items is not iterable` | `TypeError: items is not iterable` |
+| `TypeError: object null is not iterable` | `TypeError: object null is not iterable` |
+| `TypeError: Assignment to constant variable.` | `TypeError: Assignment to constant variable.` |
+| `TypeError: Cart is not a constructor` | `TypeError: Cart is not a constructor` |
+| `TypeError: can't access property "name", user is undefined` | `TypeError: can't access property "name", user is undefined` |
+| `TypeError: can't access property "length", items is null` | `TypeError: can't access property "length", items is null` |
+
+- [ ] Check the guidance for the read cases: the cause mentions the object that should have provided the value, and the example guards a property read.
+- [ ] Check the modern write cases: the cause says the target was never created or was cleared, and the fix says to initialise the object.
+- [ ] Check the function case: the cause mentions a value that is not callable, and the example uses `typeof`.
+- [ ] Check the iterable cases: the cause mentions spread, destructuring, `Array.from`, or `for...of`, and the example uses `Array.isArray`.
+- [ ] Check the constant case: the example declares with `let` and does not suggest mutating an object to silence the error.
+- [ ] Check the constructor case: the cause mentions default versus named exports.
+- [ ] Check the Firefox cases: the cause names Firefox and the same property-read explanation.
+- [ ] Clear the form and paste `TypeError: Cannot use 'in' operator to search for 'name' in undefined`.
+  - Expected: **Type mismatch**, signature `TypeError: <JavaScript type mismatch>`; this shape is outside the sub-signatures.
+- [ ] Clear the form and paste `TypeError: Cannot convert undefined or null to object`.
+  - Expected: **Type mismatch**, signature `TypeError: <JavaScript value type problem>`; this existing partial shape is unchanged.
+- [ ] Clear the form and paste `TypeError: Cannot read property 'name' of object`.
+  - Expected: signature `TypeError: <JavaScript type mismatch>`; the target is not `undefined` or `null`, so no sub-signature is claimed.
+- [ ] Clear the form and paste `TypeError: can't access property "name", user is defined`.
+  - Expected: signature `TypeError: <JavaScript type mismatch>`; the receiver is not `undefined` or `null`.
+- [ ] Clear the form and paste `Error: items.map is not a function`.
+  - Expected: **Unrecognised** with no possible fix; a plain `Error:` line is not a `TypeError`.
+- [ ] Clear the form and paste `TypeError: unsupported operand type(s) for +: 'int' and 'str'`.
+  - Expected: **Unrecognised** with no possible fix; Python type wording is not claimed by the JavaScript rule.
+- [ ] Clear the form and paste `The page threw TypeError: Cannot read properties of undefined (reading 'name') yesterday`.
+  - Expected: **Unrecognised** with no possible fix; a prose mention is not the exception line.
+
+**Automatic detection without a stack**
+
+- [ ] Leave **Language** at `Auto — infer from the text` and paste `TypeError: can't access property "name", user is undefined` on its own.
+  - Expected: **Type mismatch**, the same specific signature, **Medium confidence**, and a reason that no traceback or explicit language confirms the runtime.
+- [ ] Clear the form and paste `TypeError: Assignment to constant variable.` on its own.
+  - Expected: **Type mismatch**, **Medium confidence**, and the specific signature.
+
+Older saved diagnoses keep the signature they were saved with. A diagnosis stored as `TypeError: <JavaScript value type problem>` still loads, displays that exact signature in the detail page, and exports unchanged.
+
 ### Unrecognised input
 
 - [ ] Click **Clear** and paste:
