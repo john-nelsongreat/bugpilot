@@ -487,7 +487,7 @@ Set **Language** to `JavaScript` for each one-line example unless a step says ot
   ```
   - Expected: **CORS blocked request**, **High confidence**, signature `... blocked by CORS policy: credentials mode cannot use a wildcard origin`; the fix says to return the specific origin and never combine a wildcard with credentials.
 - [ ] Clear the form and paste the first CORS example with `XMLHttpRequest` instead of `fetch`.
-  - Expected: the same **missing 'Access-Control-Allow-Origin' header** signature; the transport is reported as `XMLHttpRequest`.
+  - Expected: the same **missing 'Access-Control-Allow-Origin' header** signature (the placeholder `<transport>` stays in the signature), and the quoted evidence line keeps `XMLHttpRequest`.
 - [ ] Clear the form and paste `2026-10-28T10:00:00Z Access to fetch at 'http://x' from origin 'http://y' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.`
   - Expected: **Unrecognised** with no possible fix.
 
@@ -553,7 +553,7 @@ Set **Language** to `JavaScript` for each one-line example. Every result should 
 - [ ] Check the function case: the cause mentions a value that is not callable, and the example uses `typeof`.
 - [ ] Check the iterable cases: the cause mentions spread, destructuring, `Array.from`, or `for...of`, and the example uses `Array.isArray`.
 - [ ] Check the constant case: the example declares with `let` and does not suggest mutating an object to silence the error.
-- [ ] Check the constructor case: the cause mentions default versus named exports.
+- [ ] Check the constructor case: the fix and steps mention default versus named exports, and the example constructs `new Cart()`.
 - [ ] Check the Firefox cases: the cause names Firefox and the same property-read explanation.
 - [ ] Clear the form and paste `TypeError: Cannot use 'in' operator to search for 'name' in undefined`.
   - Expected: **Type mismatch**, signature `TypeError: <JavaScript type mismatch>`; this shape is outside the sub-signatures.
