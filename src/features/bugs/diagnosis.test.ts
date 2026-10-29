@@ -70,6 +70,23 @@ describe('validateSavedDiagnosis', () => {
     expect(expectValid(validDiagnosis())).toEqual(validDiagnosis())
   })
 
+  it('accepts an older generic JavaScript TypeError signature without migration', () => {
+    const legacy = validDiagnosis({
+      category: 'type-mismatch',
+      ruleId: 'javascript.type-error',
+      matchedSignature: 'TypeError: <JavaScript value type problem>',
+      evidence: [
+        {
+          label: 'Error text',
+          quote:
+            "TypeError: Cannot read properties of undefined (reading 'name')",
+        },
+      ],
+    })
+
+    expect(expectValid(legacy)).toEqual(legacy)
+  })
+
   it('accepts category values outside the current engine enum', () => {
     const future = validDiagnosis({ category: 'dependency-lockfile-drift' })
 

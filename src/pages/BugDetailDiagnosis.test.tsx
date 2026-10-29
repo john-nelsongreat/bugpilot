@@ -86,6 +86,30 @@ describe('Saved diagnosis section', () => {
     expect(screen.getByText('No specific signature')).toBeVisible()
   })
 
+  it('shows an older saved generic TypeError signature unchanged', () => {
+    renderDetail({
+      diagnosis: makeSavedDiagnosis({
+        category: 'type-mismatch',
+        ruleId: 'javascript.type-error',
+        matchedSignature: 'TypeError: <JavaScript value type problem>',
+        evidence: [
+          {
+            label: 'Error text',
+            quote:
+              "TypeError: Cannot read properties of undefined (reading 'name')",
+          },
+        ],
+      }),
+    })
+
+    expect(screen.getByText('Type mismatch')).toBeVisible()
+    expect(
+      screen.getByText('TypeError: <JavaScript value type problem>', {
+        selector: 'code.assistant-signature',
+      }),
+    ).toBeVisible()
+  })
+
   it('humanises a future diagnosis category without breaking the page', () => {
     renderDetail({
       diagnosis: makeSavedDiagnosis({

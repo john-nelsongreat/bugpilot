@@ -217,7 +217,9 @@ describe('diagnose', () => {
     const result = diagnose({ language: 'auto', errorText })
 
     expect(result.category).toBe('type-mismatch')
-    expect(result.matchedSignature).toContain('JavaScript')
+    expect(result.matchedSignature).toBe(
+      "TypeError: Cannot read properties of undefined (reading 'name')",
+    )
     expect(result.confidence.level).toBe('high')
     expect(result.confidence.reason).toMatch(/JavaScript/i)
   })
@@ -308,7 +310,7 @@ describe('diagnose', () => {
     })
 
     expect(result.category).toBe('type-mismatch')
-    expect(result.matchedSignature).toContain('JavaScript')
+    expect(result.matchedSignature).toBe('TypeError: items is not iterable')
     expect(result.confidence.level).toBe('medium')
     expect(result.confidence.reason).toMatch(/more specific/i)
   })

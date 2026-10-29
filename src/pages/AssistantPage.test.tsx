@@ -128,7 +128,10 @@ describe('Debug assistant', () => {
       screen.getByRole('heading', { level: 2, name: 'Type mismatch' }),
     ).toHaveFocus()
     expect(
-      screen.getByText('TypeError: <JavaScript value type problem>'),
+      screen.getByText(
+        "TypeError: Cannot read properties of undefined (reading 'map')",
+        { selector: 'code.assistant-signature' },
+      ),
     ).toBeVisible()
     expect(screen.getByText('High confidence')).toBeVisible()
     expect(

@@ -14,13 +14,22 @@ const BEFORE_INITIALIZATION =
 const TYPE_ERROR = /^TypeError:\s+(.+)$/
 const PYTHON_TYPE_ERROR =
   /(?:unsupported operand type|can only concatenate|object is not (?:subscriptable|callable|iterable)|required positional argument|takes \d+ positional arguments?|object of type .+ has no len|not supported between instances of|NoneType)/i
-const READ_PROPERTY =
-  /^Cannot read propert(?:y|ies) .+ of (?:undefined|null)/
-const WRITE_PROPERTY =
-  /^Cannot set propert(?:y|ies) .+ of (?:undefined|null)/
-const NOT_A_FUNCTION = /^.+ is not a function/
+const READ_PROPERTY_MODERN =
+  /^Cannot read properties of (undefined|null) \(reading '([^']+)'\)$/
+const READ_PROPERTY_LEGACY =
+  /^Cannot read property '([^']+)' of (undefined|null)$/
+const WRITE_PROPERTY_MODERN =
+  /^Cannot set properties of (undefined|null) \(setting '([^']+)'\)$/
+const WRITE_PROPERTY = /^Cannot set propert(?:y|ies) .+ of (?:undefined|null)/
+const NOT_A_FUNCTION = /^(.+) is not a function$/
+const NOT_ITERABLE =
+  /^(.+) is not iterable(?: \(cannot read property Symbol\(Symbol\.iterator\)\))?$/
+const ASSIGNMENT_TO_CONSTANT = /^Assignment to constant variable\.?$/
+const NOT_A_CONSTRUCTOR = /^(.+) is not a constructor$/
+const FIREFOX_PROPERTY_ACCESS =
+  /^can't access property ["']([^"']+)["'], (.+) is (undefined|null)$/
 const OTHER_JAVASCRIPT_TYPE_ERROR =
-  /(?:Assignment to constant variable|Cannot convert undefined or null|Cannot destructure|is not iterable|reading ')/i
+  /(?:Cannot convert undefined or null|Cannot destructure|reading ')/i
 
 const SYNTAX_ERROR = /^SyntaxError:\s+(.+)$/
 const PYTHON_SYNTAX_ERROR =
@@ -148,6 +157,327 @@ export const javascriptReferenceErrorRule: DiagnosticRule = {
   },
 }
 
+function propertyExample(property: string): string {
+  return `object[${JSON.stringify(property)}]`
+}
+
+function readPropertyNarrative(
+  legacy: boolean,
+  property: string,
+): RuleNarrative {
+  return {
+    likelyCause: legacy
+      ? 'The older "Cannot read property ... of undefined" wording means JavaScript read a property from a value that was undefined or null. Older engines and older bundled code still emit this form.'
+      : 'JavaScript tried to read a property from a value that was undefined or null, so the property access could not be evaluated. The object expected at that point was probably never assigned, has not loaded yet, or was replaced by an empty value.',
+    debuggingSteps: [
+      'Identify the property in the message and the stack line that belongs to your source.',
+      'Log or inspect the object immediately before the property access to confirm it is undefined or null.',
+      'Trace where the object should have been created, fetched, or passed in.',
+      legacy
+        ? 'Check older build output or transpiled bundles for the same access if the source line looks correct.'
+        : 'Check whether asynchronous data is used before it has loaded.',
+    ],
+    possibleFix: {
+      explanation:
+        'Check that the object is not undefined or null before reading the property, and fix the code or data source that should have provided it. Optional chaining can express an expected empty state, but it should not hide required data.',
+      whereItMayApply:
+        'Apply this at the property access that threw; confirm which callers can legitimately provide undefined or null.',
+      exampleCode: [
+        'function readValue(object) {',
+        '  if (object == null) {',
+        '    return undefined',
+        '  }',
+        `  return ${propertyExample(property)}`,
+        '}',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Test both a populated object and the missing-object path.',
+      'Check the caller that supplies the object, not only the failing line.',
+    ],
+    limitations: [
+      'The message does not show where the object came from or why it was empty.',
+      'This engine cannot inspect runtime values or JavaScript source.',
+    ],
+    alternativeExplanations: [
+      'Asynchronous data was used before it finished loading.',
+      'An API or state store returned a different shape than expected.',
+      'The property belongs to a different object or was misspelled.',
+    ],
+  }
+}
+
+function writePropertyNarrative(property: string): RuleNarrative {
+  return {
+    likelyCause:
+      'JavaScript tried to assign a property on a value that was undefined or null. The target object was never created, or it was replaced by an empty value before the assignment.',
+    debuggingSteps: [
+      'Read the property name and the assignment line from the message and stack.',
+      'Check where the target object is created and whether that code runs before the assignment.',
+      'Look for refs, module state, or form values that are still null when the assignment happens.',
+      'Confirm the value is not reset to null or undefined between creation and assignment.',
+    ],
+    possibleFix: {
+      explanation:
+        'Initialise the object before assigning properties to it, or guard the assignment when the target can be missing. Optional chaining cannot be used on the left side of an assignment, so create the container instead.',
+      whereItMayApply:
+        'Apply this where the object should be created, before the failing assignment; check every caller that can pass null or undefined.',
+      exampleCode: [
+        'let state = {}',
+        'if (payload != null) {',
+        '  state = payload',
+        '}',
+        `state[${JSON.stringify(property)}] = true`,
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Test both a populated target and the missing-target path.',
+      'Check the code that creates the target, not only the failing assignment.',
+    ],
+    limitations: [
+      'The message does not show whether the target was never created or was cleared later.',
+      'This engine cannot inspect runtime values or JavaScript source.',
+    ],
+    alternativeExplanations: [
+      'A ref or DOM lookup returned null because the element was not mounted yet.',
+      'Asynchronous code assigned the property before the object was created.',
+      'The receiver is a different object than the one that was initialised.',
+    ],
+  }
+}
+
+function notAFunctionNarrative(value: string): RuleNarrative {
+  return {
+    likelyCause: `The value "${value}" was called as a function, but it is not callable at that point. It may be undefined, a different type, or a property that was never defined on the receiver.`,
+    debuggingSteps: [
+      'Identify the expression that was called from the message and the stack line.',
+      'Log the value and its type immediately before the call.',
+      'Check the import: a default import in place of a named export, or the reverse, often produces this error.',
+      'Check that the method exists on the receiver and that the receiver is the object you expect.',
+    ],
+    possibleFix: {
+      explanation:
+        'Check that the value is callable before calling it, and fix the import, property name, or assignment that should provide a function. A typeof check makes the expectation explicit.',
+      whereItMayApply:
+        'Apply this at the call site or at the module import that supplies the value.',
+      exampleCode: [
+        'function callIfFunction(fn, input) {',
+        "  if (typeof fn !== 'function') {",
+        "    throw new TypeError('Expected a function')",
+        '  }',
+        '  return fn(input)',
+        '}',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Test both the working path and the missing-function path.',
+      'Confirm the import or property resolves to a function before the call.',
+    ],
+    limitations: [
+      'The message does not show what the value was, only that it could not be called.',
+      'This engine cannot inspect module exports or runtime values.',
+    ],
+    alternativeExplanations: [
+      'A named export was imported as a default export, or the reverse.',
+      'The method was renamed or removed in a dependency update.',
+      'The receiver is undefined, so the method lookup happened on the wrong object.',
+    ],
+  }
+}
+
+function notIterableNarrative(): RuleNarrative {
+  return {
+    likelyCause:
+      'A value was used where JavaScript expects an iterable, such as spread, destructuring, Array.from, or a for...of loop, but the value is not iterable.',
+    debuggingSteps: [
+      'Find the spread, destructuring, Array.from call, or for...of loop named in the stack.',
+      'Log the value and its type just before it is iterated.',
+      'Check whether the API returns an object, null, or a single value where an array was expected.',
+      'Confirm the value is not reset to null after loading.',
+    ],
+    possibleFix: {
+      explanation:
+        'Guard or convert the value so it is iterable before iterating it, for example with Array.isArray, Object.values, or a default empty array. Make the conversion match what the following code expects.',
+      whereItMayApply:
+        'Apply this where the value enters the iteration, and check the function or API that should return a collection.',
+      exampleCode: [
+        'const list = Array.isArray(value) ? value : []',
+        'for (const item of list) {',
+        '  console.log(item)',
+        '}',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Test both a real collection and the empty or invalid value.',
+      'Check the API or caller that supplies the collection.',
+    ],
+    limitations: [
+      'The message does not show which operation tried to iterate the value.',
+      'This engine cannot inspect runtime values or JavaScript source.',
+    ],
+    alternativeExplanations: [
+      'The API returned an object instead of the array the code expects.',
+      'Asynchronous data was iterated before it loaded.',
+      'A custom object is missing the iterator protocol method.',
+    ],
+  }
+}
+
+function constantAssignmentNarrative(): RuleNarrative {
+  return {
+    likelyCause:
+      'The code assigned a new value to a binding declared with const. A const binding can be initialised once and cannot be reassigned.',
+    debuggingSteps: [
+      'Find the assignment the message points to and confirm the binding was declared with const.',
+      'Decide whether the binding needs a new value or only a mutated object.',
+      'Change const to let only when reassignment is intended; otherwise compute the value once.',
+      'Recheck loop counters and accumulator variables, which are common cases.',
+    ],
+    possibleFix: {
+      explanation:
+        'Declare the binding with let when it must change, or restructure the code so the value is computed once. Mutating an object is fine; reassigning the binding is not.',
+      whereItMayApply:
+        'Apply this at the declaration or at the assignment, whichever expresses the intent more clearly.',
+      exampleCode: ['let total = 0', 'total = total + 1', 'console.log(total)'].join(
+        '\n',
+      ),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Check that the value changes where it should and stays fixed elsewhere.',
+      'Check every branch that assigns the binding.',
+    ],
+    limitations: [
+      'The message does not reveal whether a new value or a mutation was intended.',
+      'This engine cannot inspect the surrounding module or closure.',
+    ],
+    alternativeExplanations: [
+      'The declaration keyword was copied from a value that never changes.',
+      'A loop counter or accumulator was declared with const by mistake.',
+      'The code mutates an imported binding, which is also read-only.',
+    ],
+  }
+}
+
+function notAConstructorNarrative(value: string): RuleNarrative {
+  return {
+    likelyCause: `The code called new on "${value}", but that value is not a constructor. The reference is probably undefined, a plain function, or a different export than expected.`,
+    debuggingSteps: [
+      'Identify the value after new in the message and the construction line in the stack.',
+      'Log the value and its type before the new expression.',
+      'Check default versus named exports for the class or constructor function.',
+      'Look for circular imports that leave the value undefined at construction time.',
+    ],
+    possibleFix: {
+      explanation:
+        'Check what the reference resolves to and use the actual class or constructor function. With default and named exports, confirm the shape of the module before constructing the value.',
+      whereItMayApply:
+        'Apply this at the construction site or at the import that supplies the constructor.',
+      exampleCode: ['class Cart {}', 'const cart = new Cart()'].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Check that the constructed value has the expected methods.',
+      'Check the import shape in the module that defines the class.',
+    ],
+    limitations: [
+      'The message does not show what the value was, only that it cannot be constructed.',
+      'This engine cannot inspect module exports or runtime values.',
+    ],
+    alternativeExplanations: [
+      'A named export was imported as a default export, or the reverse.',
+      'The dependency changed its export shape in an update.',
+      'A circular import left the class undefined at construction time.',
+    ],
+  }
+}
+
+function firefoxPropertyNarrative(property: string): RuleNarrative {
+  return {
+    likelyCause:
+      'Firefox reports this wording when a property is read from undefined or null. The receiver named in the message was empty before the property access.',
+    debuggingSteps: [
+      'Identify the receiver and property named in the message.',
+      'Log the receiver immediately before the property access.',
+      'Trace where the receiver should have been created or passed in.',
+      'Check whether the code runs before the receiver is mounted or loaded.',
+    ],
+    possibleFix: {
+      explanation:
+        'Firefox uses this wording for the same property-read failure; check that the receiver is not undefined or null before reading the property, and fix the code that should provide the object.',
+      whereItMayApply:
+        'Apply this at the property access that threw; confirm which callers can legitimately provide undefined or null.',
+      exampleCode: [
+        'function readValue(object) {',
+        '  if (object == null) {',
+        '    return undefined',
+        '  }',
+        `  return ${propertyExample(property)}`,
+        '}',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command in Firefox.',
+      'Test both a populated object and the missing-object path.',
+      'Check the caller that supplies the object, not only the failing line.',
+    ],
+    limitations: [
+      'The wording is Firefox-specific; other browsers report the same cause differently.',
+      'This engine cannot inspect runtime values or JavaScript source.',
+    ],
+    alternativeExplanations: [
+      'Asynchronous data was used before it finished loading.',
+      'The receiver is a different object than the one that was initialised.',
+      'The property belongs to a different object or was misspelled.',
+    ],
+  }
+}
+
+function genericTypeErrorNarrative(): RuleNarrative {
+  return {
+    likelyCause:
+      'JavaScript tried to read a property, assign a property, call a value, or use a value in a way that its runtime type does not support. The value may be undefined, null, or a different type than the code expects.',
+    debuggingSteps: [
+      'Read the TypeError message to identify the property or call that failed.',
+      'Trace the failing value back to where it was fetched, parsed, or assigned.',
+      'Check whether asynchronous data has loaded yet and whether an API returned the expected shape.',
+      'Use a small reproduction to confirm the value type at the failing line before changing the wider flow.',
+    ],
+    possibleFix: {
+      explanation:
+        'Validate or default the value before using it, or correct the object or API shape that provides it. Optional chaining can express an expected empty state, but it should not hide required data.',
+      whereItMayApply:
+        'Apply this at the property access or call site; confirm which callers can legitimately provide null or undefined.',
+      exampleCode: [
+        'function readName(user) {',
+        "  if (user == null) {",
+        "    return 'Unknown'",
+        '  }',
+        '  return user.name',
+        '}',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the same interaction or command.',
+      'Test both a populated value and the missing-value case.',
+      'Check the API or caller that supplies the value, not only the failing line.',
+    ],
+    limitations: [
+      'The exception does not reveal whether the value came from an API, state store, DOM lookup, or earlier logic.',
+      'This engine cannot inspect runtime values or JavaScript source.',
+    ],
+    alternativeExplanations: [
+      'Asynchronous data was used before it finished loading.',
+      'An API or component returned a different object shape than expected.',
+      'The wrong value or receiver was used for a method call.',
+    ],
+  }
+}
+
 export const javascriptTypeErrorRule: DiagnosticRule = {
   id: 'javascript.type-error',
   language: 'javascript',
@@ -163,66 +493,152 @@ export const javascriptTypeErrorRule: DiagnosticRule = {
       return null
     }
 
-    let signature = 'TypeError: <JavaScript type mismatch>'
-    let specificity: RuleMatch['specificity'] = 'generic'
-    if (READ_PROPERTY.test(detail)) {
-      signature = 'TypeError: Cannot read properties of undefined or null'
-      specificity = 'specific'
-    } else if (WRITE_PROPERTY.test(detail)) {
-      signature = 'TypeError: Cannot set properties of undefined or null'
-      specificity = 'specific'
-    } else if (NOT_A_FUNCTION.test(detail)) {
-      signature = 'TypeError: value is not a function'
-      specificity = 'specific'
-    } else if (OTHER_JAVASCRIPT_TYPE_ERROR.test(detail)) {
-      signature = 'TypeError: <JavaScript value type problem>'
-      specificity = 'specific'
+    const modernRead = READ_PROPERTY_MODERN.exec(detail)
+    if (modernRead) {
+      return {
+        signature: `TypeError: Cannot read properties of ${modernRead[1]} (reading '${modernRead[2]}')`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'read-modern',
+          target: modernRead[1],
+          property: modernRead[2],
+        },
+      }
+    }
+
+    const legacyRead = READ_PROPERTY_LEGACY.exec(detail)
+    if (legacyRead) {
+      return {
+        signature: `TypeError: Cannot read property '${legacyRead[1]}' of ${legacyRead[2]}`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'read-legacy',
+          target: legacyRead[2],
+          property: legacyRead[1],
+        },
+      }
+    }
+
+    const modernWrite = WRITE_PROPERTY_MODERN.exec(detail)
+    if (modernWrite) {
+      return {
+        signature: `TypeError: Cannot set properties of ${modernWrite[1]} (setting '${modernWrite[2]}')`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'write',
+          target: modernWrite[1],
+          property: modernWrite[2],
+        },
+      }
+    }
+
+    if (WRITE_PROPERTY.test(detail)) {
+      return {
+        signature: 'TypeError: Cannot set properties of undefined or null',
+        specificity: 'specific',
+        captures: { detail },
+      }
+    }
+
+    const notAFunction = NOT_A_FUNCTION.exec(detail)
+    if (notAFunction) {
+      return {
+        signature: `TypeError: ${notAFunction[1]} is not a function`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'not-a-function',
+          value: notAFunction[1],
+        },
+      }
+    }
+
+    const notIterable = NOT_ITERABLE.exec(detail)
+    if (notIterable) {
+      return {
+        signature: `TypeError: ${notIterable[1]} is not iterable`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'not-iterable',
+          value: notIterable[1],
+        },
+      }
+    }
+
+    if (ASSIGNMENT_TO_CONSTANT.test(detail)) {
+      return {
+        signature: 'TypeError: Assignment to constant variable.',
+        specificity: 'specific',
+        captures: { detail, shape: 'constant' },
+      }
+    }
+
+    const notAConstructor = NOT_A_CONSTRUCTOR.exec(detail)
+    if (notAConstructor) {
+      return {
+        signature: `TypeError: ${notAConstructor[1]} is not a constructor`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'not-a-constructor',
+          value: notAConstructor[1],
+        },
+      }
+    }
+
+    const firefox = FIREFOX_PROPERTY_ACCESS.exec(detail)
+    if (firefox) {
+      return {
+        signature: `TypeError: can't access property "${firefox[1]}", ${firefox[2]} is ${firefox[3]}`,
+        specificity: 'specific',
+        captures: {
+          detail,
+          shape: 'firefox-property',
+          receiver: firefox[2],
+          property: firefox[1],
+          target: firefox[3],
+        },
+      }
+    }
+
+    if (OTHER_JAVASCRIPT_TYPE_ERROR.test(detail)) {
+      return {
+        signature: 'TypeError: <JavaScript value type problem>',
+        specificity: 'specific',
+        captures: { detail },
+      }
     }
 
     return {
-      signature,
-      specificity,
+      signature: 'TypeError: <JavaScript type mismatch>',
+      specificity: 'generic',
       captures: { detail },
     }
   },
-  explain(): RuleNarrative {
-    return {
-      likelyCause:
-        'JavaScript tried to read a property, assign a property, call a value, or use a value in a way that its runtime type does not support. The value may be undefined, null, or a different type than the code expects.',
-      debuggingSteps: [
-        'Read the TypeError message to identify the property or call that failed.',
-        'Trace the failing value back to where it was fetched, parsed, or assigned.',
-        'Check whether asynchronous data has loaded yet and whether an API returned the expected shape.',
-        'Use a small reproduction to confirm the value type at the failing line before changing the wider flow.',
-      ],
-      possibleFix: {
-        explanation:
-          'Validate or default the value before using it, or correct the object or API shape that provides it. Optional chaining can express an expected empty state, but it should not hide required data.',
-        whereItMayApply:
-          'Apply this at the property access or call site; confirm which callers can legitimately provide null or undefined.',
-        exampleCode: [
-          'function readName(user) {',
-          "  if (user == null) {",
-          "    return 'Unknown'",
-          '  }',
-          '  return user.name',
-          '}',
-        ].join('\n'),
-      },
-      verificationSteps: [
-        'Rerun the same interaction or command.',
-        'Test both a populated value and the missing-value case.',
-        'Check the API or caller that supplies the value, not only the failing line.',
-      ],
-      limitations: [
-        'The exception does not reveal whether the value came from an API, state store, DOM lookup, or earlier logic.',
-        'This engine cannot inspect runtime values or JavaScript source.',
-      ],
-      alternativeExplanations: [
-        'Asynchronous data was used before it finished loading.',
-        'An API or component returned a different object shape than expected.',
-        'The wrong value or receiver was used for a method call.',
-      ],
+  explain(match: RuleMatch): RuleNarrative {
+    switch (match.captures.shape) {
+      case 'read-modern':
+        return readPropertyNarrative(false, match.captures.property ?? '')
+      case 'read-legacy':
+        return readPropertyNarrative(true, match.captures.property ?? '')
+      case 'write':
+        return writePropertyNarrative(match.captures.property ?? '')
+      case 'not-a-function':
+        return notAFunctionNarrative(match.captures.value ?? '')
+      case 'not-iterable':
+        return notIterableNarrative()
+      case 'constant':
+        return constantAssignmentNarrative()
+      case 'not-a-constructor':
+        return notAConstructorNarrative(match.captures.value ?? '')
+      case 'firefox-property':
+        return firefoxPropertyNarrative(match.captures.property ?? '')
+      default:
+        return genericTypeErrorNarrative()
     }
   },
 }

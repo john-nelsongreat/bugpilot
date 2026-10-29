@@ -836,7 +836,7 @@ describe('Existing JavaScript rules keep their behaviour', () => {
     [
       "TypeError: Cannot read properties of undefined (reading 'name')",
       'type-mismatch',
-      'TypeError: <JavaScript value type problem>',
+      "TypeError: Cannot read properties of undefined (reading 'name')",
     ],
     [
       "SyntaxError: Unexpected token '<'",
