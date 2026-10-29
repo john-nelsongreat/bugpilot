@@ -69,6 +69,16 @@ describe('applyTheme and saveTheme', () => {
     expect(storage.entries.get(THEME_STORAGE_KEY)).toBe('dark')
   })
 
+  it('leaves no inline style on the document root when toggling', () => {
+    applyTheme('dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.hasAttribute('style')).toBe(false)
+
+    applyTheme('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.hasAttribute('style')).toBe(false)
+  })
+
   it('reports a preference write failure without throwing', () => {
     const storage: ThemeStorage = {
       getItem: () => null,
