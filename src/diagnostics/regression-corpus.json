@@ -1091,6 +1091,54 @@
       "source": "task:B9",
       "language": "auto",
       "errorText": "2026-10-28T10:00:00Z Access to fetch at 'https://api.example.com/data' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0182",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "JSON.parse: unexpected character at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0183",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "JSON.parse: unexpected end of data at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0184",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "JSON Parse error: Unrecognized token '<'"
+    },
+    {
+      "id": "case-0185",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "JSON Parse error: Unexpected EOF"
+    },
+    {
+      "id": "case-0186",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    },
+    {
+      "id": "case-0187",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "Unexpected token < in JSON at position 0"
+    },
+    {
+      "id": "case-0188",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "Unexpected end of JSON input"
+    },
+    {
+      "id": "case-0189",
+      "source": "task:JSON bare forms",
+      "language": "auto",
+      "errorText": "\"undefined\" is not valid JSON"
     }
   ]
 }

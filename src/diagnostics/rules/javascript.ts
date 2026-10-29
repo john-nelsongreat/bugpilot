@@ -1344,6 +1344,12 @@ export const javascriptJsonParseErrorRule: DiagnosticRule = {
   category: 'json-decode-error',
   supersedes: ['javascript.syntax-error'],
   match(line: string): RuleMatch | null {
+    // error.message keeps the parser wording but drops the error class prefix.
+    if (!line.startsWith('SyntaxError: ')) {
+      const match = javascriptJsonParseErrorRule.match(`SyntaxError: ${line}`)
+      return match ? { ...match, confidenceCeiling: 'medium' } : null
+    }
+
     const oldToken = JSON_V8_OLD_TOKEN.exec(line)
     if (oldToken) {
       if (oldToken[1] === '<') {

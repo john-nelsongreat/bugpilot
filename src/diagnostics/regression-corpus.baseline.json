@@ -1084,5 +1084,53 @@
     "matchedSignature": null,
     "confidence": "low",
     "ruleId": null
+  },
+  "case-0182": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected character",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0183": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected end of data",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0184": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unrecognized token '<'",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0185": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unexpected EOF",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0186": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<', ... is not valid JSON",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0187": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<' in JSON at position <position>",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0188": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected end of JSON input",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0189": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: \"undefined\" is not valid JSON",
+    "confidence": "medium",
+    "ruleId": "javascript.json-parse-error"
   }
 }
