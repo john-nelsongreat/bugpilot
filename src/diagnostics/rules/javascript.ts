@@ -1,4 +1,9 @@
-import type { DiagnosticRule, RuleMatch, RuleNarrative } from '../types'
+import type {
+  DiagnosticRule,
+  RuleContext,
+  RuleMatch,
+  RuleNarrative,
+} from '../types'
 
 const REFERENCE_ERROR = /^ReferenceError:\s+(.+)$/
 const NOT_DEFINED =
@@ -22,6 +27,39 @@ const PYTHON_SYNTAX_ERROR =
   /(?:invalid syntax|unexpected indent|was never closed|unmatched\s+'\)'|unterminated string literal|expected\s+':'|EOL while scanning string literal|missing parentheses in call|invalid decimal literal)/i
 const KNOWN_JAVASCRIPT_SYNTAX_ERROR =
   /(?:Unexpected token|Unexpected end of JSON input|Invalid or unexpected token|missing \S+ after argument list|Cannot use import statement outside a module|Unexpected identifier|Invalid left-hand side in assignment|Unexpected end of input|Unexpected number)/i
+
+const JSON_V8_OLD_TOKEN =
+  /^SyntaxError: Unexpected token (\S{1,40}) in JSON at position (\d+)$/
+const JSON_V8_NOT_VALID =
+  /^SyntaxError: Unexpected token '([^']{1,40})', .+ is not valid JSON$/
+const JSON_UNDEFINED_STRING = /^SyntaxError: "undefined" is not valid JSON$/
+const JSON_V8_EMPTY = /^SyntaxError: Unexpected end of JSON input$/
+const JSON_FIREFOX =
+  /^SyntaxError: JSON\.parse: (unexpected character|unexpected end of data)(?: at line .+)?$/
+const JSON_SAFARI =
+  /^SyntaxError: JSON Parse error: (?:Unrecognized token '([^']{1,40})'|Unexpected EOF)$/
+
+const NETWORK_CONSOLE_LINE =
+  /^(?:(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) https?:\/\/\S+ )?net::ERR_([A-Z0-9_]+)$/
+const NETWORK_NODE_CAUSE =
+  /\b(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET)\b/
+
+const CORS_MESSAGE =
+  /^Access to (fetch|XMLHttpRequest) at '([^']{1,500})' from origin '([^']{1,500})' has been blocked by CORS policy: (.+)$/
+
+const REACT_PREFIX = '^(?:Uncaught\\s+)?(?:Error:\\s+)?'
+const REACT_INVALID_HOOK = new RegExp(
+  `${REACT_PREFIX}Invalid hook call\\. Hooks can only be called inside of the body of a function component\\.`,
+)
+const REACT_TOO_MANY_RERENDERS = new RegExp(
+  `${REACT_PREFIX}Too many re-renders\\. React limits the number of renders to prevent an infinite loop\\.`,
+)
+const REACT_UPDATE_DEPTH = new RegExp(
+  `${REACT_PREFIX}Maximum update depth exceeded\\.`,
+)
+const REACT_OBJECT_CHILD = new RegExp(
+  `${REACT_PREFIX}Objects are not valid as a React child \\(found: (.+?)\\)\\.?(?: If you meant to render a collection of children, use an array instead\\.)?$`,
+)
 
 export const javascriptReferenceErrorRule: DiagnosticRule = {
   id: 'javascript.reference-error',
@@ -874,6 +912,787 @@ export const javascriptCallStackExceededRule: DiagnosticRule = {
   },
 }
 
+export const javascriptJsonParseErrorRule: DiagnosticRule = {
+  id: 'javascript.json-parse-error',
+  language: 'javascript',
+  category: 'json-decode-error',
+  supersedes: ['javascript.syntax-error'],
+  match(line: string): RuleMatch | null {
+    const oldToken = JSON_V8_OLD_TOKEN.exec(line)
+    if (oldToken) {
+      if (oldToken[1] === '<') {
+        return {
+          signature:
+            "SyntaxError: Unexpected token '<' in JSON at position <position>",
+          specificity: 'specific',
+          captures: { reason: 'html' },
+        }
+      }
+
+      if (oldToken[1] === 'u' && oldToken[2] === '0') {
+        return {
+          signature: 'SyntaxError: Unexpected token u in JSON at position 0',
+          specificity: 'specific',
+          captures: { reason: 'undefined' },
+        }
+      }
+
+      return {
+        signature: 'SyntaxError: <invalid JSON payload>',
+        specificity: 'specific',
+        captures: { reason: 'invalid' },
+      }
+    }
+
+    const notValid = JSON_V8_NOT_VALID.exec(line)
+    if (notValid) {
+      if (notValid[1] === '<') {
+        return {
+          signature: "SyntaxError: Unexpected token '<', ... is not valid JSON",
+          specificity: 'specific',
+          captures: { reason: 'html' },
+        }
+      }
+
+      return {
+        signature: 'SyntaxError: <invalid JSON payload>',
+        specificity: 'specific',
+        captures: { reason: 'invalid' },
+      }
+    }
+
+    if (JSON_UNDEFINED_STRING.test(line)) {
+      return {
+        signature: 'SyntaxError: "undefined" is not valid JSON',
+        specificity: 'specific',
+        captures: { reason: 'undefined' },
+      }
+    }
+
+    if (JSON_V8_EMPTY.test(line)) {
+      return {
+        signature: 'SyntaxError: Unexpected end of JSON input',
+        specificity: 'specific',
+        captures: { reason: 'empty' },
+      }
+    }
+
+    const firefox = JSON_FIREFOX.exec(line)
+    if (firefox) {
+      return firefox[1] === 'unexpected end of data'
+        ? {
+            signature: 'SyntaxError: JSON.parse: unexpected end of data',
+            specificity: 'specific',
+            captures: { reason: 'empty' },
+          }
+        : {
+            signature: 'SyntaxError: JSON.parse: unexpected character',
+            specificity: 'specific',
+            captures: { reason: 'invalid' },
+          }
+    }
+
+    const safari = JSON_SAFARI.exec(line)
+    if (safari) {
+      if (safari[1] === '<') {
+        return {
+          signature: "SyntaxError: JSON Parse error: Unrecognized token '<'",
+          specificity: 'specific',
+          captures: { reason: 'html' },
+        }
+      }
+
+      return safari[1] === undefined
+        ? {
+            signature: 'SyntaxError: JSON Parse error: Unexpected EOF',
+            specificity: 'specific',
+            captures: { reason: 'empty' },
+          }
+        : {
+            signature: 'SyntaxError: <invalid JSON payload>',
+            specificity: 'specific',
+            captures: { reason: 'invalid' },
+          }
+    }
+
+    return null
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    const reason = match.captures.reason
+    const commonSteps = [
+      'Log the response status, the content-type, and the first part of the raw response text before calling JSON.parse or response.json().',
+      'Check the request URL and method, and confirm the request reaches the API rather than a redirect, a login page, or the development server.',
+      'Inspect the same request in the Network tab and compare the response body with what the code expects.',
+    ]
+    const commonFix = {
+      explanation:
+        'Inspect the response before parsing it: print the status, the content-type, and the raw text, then parse only after confirming the body is JSON. Check that the URL and method reach the API, handle an empty response explicitly, and make sure a missing await does not pass a pending value.',
+      whereItMayApply:
+        'Apply this at the fetch or HTTP client call that produced the parsed value, before the JSON.parse call; the fix belongs to the request and response handling, not to the parser call itself.',
+    }
+    const commonVerification = [
+      'Rerun the same request after the change.',
+      'Check that the log shows the real response status and body, and that the body starts with JSON.',
+      'Confirm the parsed value has the expected shape before using its fields.',
+    ]
+    const commonLimitations = [
+      'The engine only sees the pasted message; it cannot inspect the network response, the URL, or the server.',
+      'The parser message shows where parsing failed but not why the body had that content.',
+    ]
+
+    if (reason === 'html') {
+      return {
+        likelyCause:
+          "The JSON parser received HTML instead of JSON. The request probably reached an HTML page such as the development server's index.html, a proxy or gateway error page, or a login page, so the API URL, a redirect, or the server routing is likely wrong.",
+        debuggingSteps: [
+          ...commonSteps,
+          'Open the response body and check whether it starts with "<!DOCTYPE" or "<html"; if it does, fix the URL or the server route so the API returns JSON.',
+        ],
+        possibleFix: {
+          ...commonFix,
+          exampleCode: [
+            "const response = await fetch('/api/data')",
+            "console.log(response.status, response.headers.get('content-type'))",
+            'const raw = await response.text()',
+            'console.log(raw.slice(0, 200))',
+            'const data = JSON.parse(raw)',
+          ].join('\n'),
+        },
+        verificationSteps: commonVerification,
+        limitations: commonLimitations,
+        alternativeExplanations: [
+          'The API URL points at the front-end development server, which answers with index.html.',
+          'A proxy, gateway, or authentication redirect returned an HTML page.',
+          'The server returned an HTML error page with a 200 status code.',
+        ],
+      }
+    }
+
+    if (reason === 'empty') {
+      return {
+        likelyCause:
+          'The response body was empty or truncated, so the parser reached the end of the input before a complete JSON value was read. A failed request, an empty 204 response, or reading the body twice can produce this.',
+        debuggingSteps: [
+          ...commonSteps,
+          'Check the response status and body: an empty body or a partial payload cannot be parsed as JSON.',
+        ],
+        possibleFix: {
+          ...commonFix,
+          exampleCode: [
+            'const raw = await response.text()',
+            "if (raw.trim() === '') {",
+            "  throw new Error('The response body was empty; check the endpoint and status ' + response.status)",
+            '}',
+            'const data = JSON.parse(raw)',
+          ].join('\n'),
+        },
+        verificationSteps: commonVerification,
+        limitations: commonLimitations,
+        alternativeExplanations: [
+          'The endpoint returned an empty body or a 204 No Content response.',
+          'The connection closed before the full payload arrived.',
+          'The body was already consumed, for example by reading response.json() and response.text() on the same response.',
+        ],
+      }
+    }
+
+    if (reason === 'undefined') {
+      return {
+        likelyCause:
+          'The value passed to the JSON parser was undefined, often because the code parsed a missing return value, a variable that was never assigned, or the string "undefined" returned by a broken endpoint.',
+        debuggingSteps: [
+          ...commonSteps,
+          'Trace the value passed to the parser and check that the function that produces it actually returns the response text.',
+        ],
+        possibleFix: {
+          ...commonFix,
+          exampleCode: [
+            '// A missing await or return can leave the value undefined.',
+            "const response = await fetch('/api/data')",
+            'const raw = await response.text()',
+            'const data = JSON.parse(raw)',
+          ].join('\n'),
+        },
+        verificationSteps: commonVerification,
+        limitations: commonLimitations,
+        alternativeExplanations: [
+          'A function forgot to return the fetched value, so the caller parsed undefined.',
+          'The response body was the text "undefined" because a template or serializer received an undefined value.',
+          'An await was missing, so a Promise was parsed instead of its result.',
+        ],
+      }
+    }
+
+    return {
+      likelyCause:
+        'The response text is not valid JSON: it contains an unexpected token where JSON expected a value. The body may be plain text, a partial payload, or JSON with a trailing comma or quote problem.',
+      debuggingSteps: [
+        ...commonSteps,
+        'Look at the character or token named in the message and compare it with the raw body around that position.',
+      ],
+      possibleFix: {
+        ...commonFix,
+        exampleCode: [
+          "const response = await fetch('/api/data')",
+          "console.log(response.status, response.headers.get('content-type'))",
+          'const raw = await response.text()',
+          'console.log(raw.slice(0, 200))',
+          'const data = JSON.parse(raw)',
+        ].join('\n'),
+      },
+      verificationSteps: commonVerification,
+      limitations: commonLimitations,
+      alternativeExplanations: [
+        'The body is plain text or an error message rather than JSON.',
+        'The JSON is truncated or has a trailing comma or single quotes.',
+        'The content-type says JSON but the server sent a different format.',
+      ],
+    }
+  },
+}
+
+export const javascriptNetworkRequestFailedRule: DiagnosticRule = {
+  id: 'javascript.network-request-failed',
+  language: 'javascript',
+  category: 'network-request-failed',
+  supersedes: ['javascript.type-error'],
+  match(line: string): RuleMatch | null {
+    if (line === 'TypeError: Failed to fetch') {
+      return {
+        signature: 'TypeError: Failed to fetch',
+        specificity: 'specific',
+        captures: { reason: 'browser' },
+      }
+    }
+
+    if (line === 'TypeError: NetworkError when attempting to fetch resource.') {
+      return {
+        signature: 'TypeError: NetworkError when attempting to fetch resource.',
+        specificity: 'specific',
+        captures: { reason: 'browser' },
+      }
+    }
+
+    if (line === 'TypeError: Load failed') {
+      return {
+        signature: 'TypeError: Load failed',
+        specificity: 'generic',
+        confidenceCeiling: 'low',
+        captures: { reason: 'generic' },
+      }
+    }
+
+    if (line === 'TypeError: fetch failed') {
+      return {
+        signature: 'TypeError: fetch failed',
+        specificity: 'specific',
+        captures: { reason: 'node' },
+      }
+    }
+
+    const consoleLine = NETWORK_CONSOLE_LINE.exec(line)
+    if (!consoleLine) {
+      return null
+    }
+
+    const code = consoleLine[1]
+    if (code.startsWith('CERT_')) {
+      return {
+        signature: 'net::ERR_CERT_<reason>',
+        specificity: 'specific',
+        captures: { reason: 'certificate' },
+      }
+    }
+
+    if (code === 'CONNECTION_REFUSED') {
+      return {
+        signature: 'net::ERR_CONNECTION_REFUSED',
+        specificity: 'specific',
+        captures: { reason: 'refused' },
+      }
+    }
+
+    if (code === 'NAME_NOT_RESOLVED') {
+      return {
+        signature: 'net::ERR_NAME_NOT_RESOLVED',
+        specificity: 'specific',
+        captures: { reason: 'dns' },
+      }
+    }
+
+    if (code === 'INTERNET_DISCONNECTED') {
+      return {
+        signature: 'net::ERR_INTERNET_DISCONNECTED',
+        specificity: 'specific',
+        captures: { reason: 'offline' },
+      }
+    }
+
+    return null
+  },
+  explain(match: RuleMatch, context: RuleContext): RuleNarrative {
+    const reason = match.captures.reason
+    const commonSteps = [
+      'Open the browser DevTools Network tab, or log the request in Node.js, and repeat the request.',
+      'Check whether the request was sent, what status came back, and whether the browser shows a blocked reason or a failed connection.',
+      'Confirm the server is running and reachable at the exact host, protocol, and port in the URL; try the same URL with curl or in a browser tab.',
+      'Check the network connection, DNS, and any TLS certificate or mixed-content warning before changing application code.',
+    ]
+    const commonFix = {
+      explanation:
+        "Make the request reachable: start or fix the server, correct the URL, protocol, or port, restore the network connection, and if the request is cross-origin configure the server's CORS response headers. A retry or a second client-side wrapper cannot fix a request the browser never completed.",
+      whereItMayApply:
+        'Apply this to the request URL, the server that should answer it, or the network in between; changing the client-side error handler only hides the failure.',
+      exampleCode: [
+        "const response = await fetch('http://localhost:3000/api/health')",
+        'console.log(response.status, response.ok)',
+        'if (!response.ok) {',
+        "  console.error('Request failed with status', response.status)",
+        '}',
+      ].join('\n'),
+    }
+    const commonVerification = [
+      'Repeat the same request and check the Network tab shows a response instead of a failed request.',
+      'Check that the status code and body match what the code expects.',
+      'Confirm no certificate, mixed-content, or CORS warning appears in the console.',
+    ]
+    const commonLimitations = [
+      'The engine only sees the pasted message; browsers hide the underlying network reason from scripts.',
+      'This rule also matches the Chrome console net::ERR_* lines, which describe a browser-level failure rather than an application error.',
+    ]
+
+    let likelyCause: string
+    let debuggingSteps = commonSteps
+    let limitations = commonLimitations
+    let alternatives: string[]
+
+    if (reason === 'browser') {
+      likelyCause =
+        'The browser could not complete the fetch request. Browsers deliberately hide the underlying reason, so the server may be down or unreachable, the URL or port may be wrong, the network may be offline, or a CORS rejection, a browser extension, or a TLS or mixed-content problem may have stopped it.'
+      alternatives = [
+        'The server is not running or the port is wrong.',
+        'The host name does not resolve, or the device is offline.',
+        'A CORS rejection, browser extension, or ad blocker stopped the request.',
+        'A TLS certificate or mixed-content problem blocked an HTTPS request.',
+      ]
+    } else if (reason === 'node') {
+      const cause = NETWORK_NODE_CAUSE.exec(context.errorText)
+      likelyCause = cause
+        ? `Node.js fetch failed before a response was received. The surrounding output reports ${cause[1]}, so the connection was refused, the host was not resolved, the request timed out, or the connection was reset; check the server, DNS, and network for that address.`
+        : 'Node.js fetch failed before a response was received. The underlying network error may be hidden in the [cause] property of this error; without that detail the server, DNS, timeout, or TLS layer may be responsible.'
+      alternatives = [
+        'The server is not running or is listening on a different port.',
+        'The host name does not resolve from this machine.',
+        'A firewall, proxy, or timeout interrupted the connection.',
+        'A TLS certificate problem stopped the HTTPS request.',
+      ]
+    } else if (reason === 'refused') {
+      likelyCause =
+        'The server refused the connection: nothing is listening on that address and port, or the development server is not running.'
+      alternatives = [
+        'The development server stopped or was never started.',
+        'The request uses a different port or protocol than the server listens on.',
+        'A firewall or container port mapping blocks the connection.',
+      ]
+    } else if (reason === 'dns') {
+      likelyCause =
+        'The browser could not resolve the host name to an address. The domain may be misspelled, DNS may be unavailable, or the host may not exist in this environment.'
+      alternatives = [
+        'The host name is misspelled or missing a subdomain.',
+        'The domain does not exist or is not registered in this environment.',
+        'A VPN, hosts file, or DNS configuration redirects or blocks the name.',
+      ]
+    } else if (reason === 'offline') {
+      likelyCause =
+        'The browser reports that this device is not connected to the internet, so the request could not leave the machine.'
+      alternatives = [
+        'The device is offline or the network connection dropped.',
+        'A captive portal or VPN requires attention before traffic can flow.',
+        'The browser has been set to offline mode in the DevTools Network tab.',
+      ]
+    } else if (reason === 'certificate') {
+      likelyCause =
+        'The HTTPS certificate for this address failed validation, for example because it is self-signed, expired, issued for another host, or signed by an authority the browser does not trust.'
+      alternatives = [
+        'The local development server uses a self-signed certificate.',
+        'The certificate expired or was issued for a different host name.',
+        'A proxy or antivirus tool replaces the certificate with an untrusted one.',
+        'The page mixes HTTPS and HTTP resources and the browser blocks the request.',
+      ]
+      debuggingSteps = [
+        ...commonSteps,
+        'Open the certificate details for the URL and check the issuer, host name, and expiry date before trusting or replacing it.',
+      ]
+      limitations = [
+        ...commonLimitations,
+        'Bypassing a certificate warning in the browser is not a fix; replace or trust the certificate properly instead.',
+      ]
+    } else {
+      likelyCause =
+        'Safari could not complete the request. This wording is generic: it does not say whether the server was unreachable, the URL or port was wrong, the network was offline, or a CORS or TLS problem blocked the request.'
+      alternatives = [
+        'The server is not running or the URL or port is wrong.',
+        'The device is offline or DNS cannot resolve the host.',
+        'A CORS rejection or a TLS certificate problem blocked the request.',
+      ]
+    }
+
+    return {
+      likelyCause,
+      debuggingSteps,
+      possibleFix: commonFix,
+      verificationSteps: commonVerification,
+      limitations,
+      alternativeExplanations: alternatives,
+    }
+  },
+}
+
+function classifyCorsReason(detail: string): string | null {
+  if (/^Response to preflight request doesn't pass access control check/.test(detail)) {
+    return 'preflight'
+  }
+
+  if (/credentials mode|must not be the wildcard/i.test(detail)) {
+    return 'credentials'
+  }
+
+  if (/is not equal to the supplied origin|does not match the supplied origin/i.test(detail)) {
+    return 'origin-mismatch'
+  }
+
+  if (/No 'Access-Control-Allow-Origin' header is present/i.test(detail)) {
+    return 'missing-header'
+  }
+
+  return null
+}
+
+const CORS_SIGNATURES: Readonly<Record<string, string>> = {
+  'missing-header':
+    "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header",
+  preflight:
+    "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: preflight request does not pass access control check",
+  'origin-mismatch':
+    "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: 'Access-Control-Allow-Origin' does not match the supplied origin",
+  credentials:
+    "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: credentials mode cannot use a wildcard origin",
+}
+
+export const javascriptCorsBlockedRule: DiagnosticRule = {
+  id: 'javascript.cors-blocked',
+  language: 'javascript',
+  category: 'cors-blocked',
+  match(line: string): RuleMatch | null {
+    const matched = CORS_MESSAGE.exec(line)
+    if (!matched) {
+      return null
+    }
+
+    const reason = classifyCorsReason(matched[4])
+    if (!reason) {
+      return null
+    }
+
+    return {
+      signature: CORS_SIGNATURES[reason],
+      specificity: 'specific',
+      captures: {
+        transport: matched[1],
+        url: matched[2],
+        origin: matched[3],
+        reason,
+      },
+    }
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    const reason = match.captures.reason
+
+    let likelyCause: string
+    if (reason === 'preflight') {
+      likelyCause =
+        "The browser sent an OPTIONS preflight request and the server's response failed the access control check. A request with custom headers or a non-simple method triggers the preflight, and the server must answer it with the right 'Access-Control-Allow-Origin', methods, and headers."
+    } else if (reason === 'origin-mismatch') {
+      likelyCause =
+        "The server returned an 'Access-Control-Allow-Origin' value that does not match the origin that sent the request, so the browser blocked the response. The header must match the exact origin, including scheme, host, and port."
+    } else if (reason === 'credentials') {
+      likelyCause =
+        "The request asked for credentials, but the server answered with the wildcard '*' origin. When credentials mode is 'include', the response must name the specific origin and allow credentials; a wildcard is not accepted."
+    } else {
+      likelyCause =
+        "The response did not include an 'Access-Control-Allow-Origin' header, so the browser blocked the JavaScript from reading it. The API answered, but the browser refused to expose the response to this origin."
+    }
+
+    let exampleCode = [
+      '// Server-side example: allow the exact calling origin.',
+      'app.use((req, res, next) => {',
+      "  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')",
+      "  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')",
+      "  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')",
+      "  if (req.method === 'OPTIONS') return res.sendStatus(204)",
+      '  next()',
+      '})',
+    ].join('\n')
+
+    let explanation =
+      "The server that answers the request must send the correct access-control headers. CORS is enforced by the browser, so the front-end cannot fix it on its own: the response needs an 'Access-Control-Allow-Origin' value that matches the calling origin, and a preflight OPTIONS request must be answered with the allowed methods and headers. During local development a dev-server proxy can forward the call so the browser sees a same-origin request. The mode: 'no-cors' option does not fix this, because it produces an opaque response your code cannot read. Turning off browser security checks is not a fix."
+
+    if (reason === 'credentials') {
+      explanation =
+        "When the request uses credentials, the server must return the specific origin in 'Access-Control-Allow-Origin' and add 'Access-Control-Allow-Credentials: true'. The wildcard '*' is not accepted with credentials mode 'include'. CORS is enforced by the browser, so the front-end cannot fix this on its own, and the mode: 'no-cors' option only produces an opaque response your code cannot read."
+      exampleCode = [
+        "// Credentials require the exact origin, not '*'.",
+        "res.setHeader('Access-Control-Allow-Origin', 'https://app.example.com')",
+        "res.setHeader('Access-Control-Allow-Credentials', 'true')",
+        "res.setHeader('Vary', 'Origin')",
+      ].join('\n')
+    }
+
+    return {
+      likelyCause,
+      debuggingSteps: [
+        'Read the blocked URL and origin in the message and compare them with the API you think you are calling.',
+        'Open the Network tab, find the failed request, and inspect the response headers (and the OPTIONS preflight, if present).',
+        'Change the server response headers so the exact origin is allowed, or route the request through a same-origin proxy during development.',
+        'Never work around this by turning off browser security checks or by hiding the error.',
+      ],
+      possibleFix: {
+        explanation,
+        whereItMayApply:
+          'Apply this on the server, gateway, or dev proxy that owns the API; a change in the component that calls fetch cannot add the missing header.',
+        exampleCode,
+      },
+      verificationSteps: [
+        'Repeat the same request from the same origin and check the browser console has no CORS message.',
+        'Check the Network tab shows the expected access-control headers on the response (and on the OPTIONS response, if a preflight is sent).',
+        'Confirm the response body is readable in the app and that no credential or cookie change was needed.',
+      ],
+      limitations: [
+        'The engine only sees the console message; it cannot inspect the server, the actual response headers, or the proxy configuration.',
+        'The browser decides what to expose; a request that is blocked can still have reached the server.',
+      ],
+      alternativeExplanations: [
+        'The API does not allow this origin because the browser and API are on different ports or domains.',
+        'The preflight is rejected because the server does not handle OPTIONS or does not allow the request headers or methods.',
+        'The API sends a wildcard origin while the client requests credentials.',
+        'A proxy, gateway, or authentication layer strips or rewrites the access-control headers.',
+      ],
+    }
+  },
+}
+
+export const javascriptReactErrorRule: DiagnosticRule = {
+  id: 'javascript.react-error',
+  language: 'javascript',
+  category: 'react-error',
+  match(line: string): RuleMatch | null {
+    if (REACT_INVALID_HOOK.test(line)) {
+      return {
+        signature:
+          'Error: Invalid hook call. Hooks can only be called inside of the body of a function component.',
+        specificity: 'specific',
+        captures: { reason: 'hooks' },
+      }
+    }
+
+    if (REACT_TOO_MANY_RERENDERS.test(line)) {
+      return {
+        signature:
+          'Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.',
+        specificity: 'specific',
+        captures: { reason: 'rerenders' },
+      }
+    }
+
+    if (REACT_UPDATE_DEPTH.test(line)) {
+      return {
+        signature: 'Error: Maximum update depth exceeded.',
+        specificity: 'specific',
+        captures: { reason: 'update-depth' },
+      }
+    }
+
+    const objectChild = REACT_OBJECT_CHILD.exec(line)
+    if (objectChild) {
+      return {
+        signature: 'Error: Objects are not valid as a React child (found: <value>)',
+        specificity: 'specific',
+        captures: { found: objectChild[1], reason: 'child-object' },
+      }
+    }
+
+    return null
+  },
+  explain(match: RuleMatch): RuleNarrative {
+    const reason = match.captures.reason
+
+    if (reason === 'hooks') {
+      return {
+        likelyCause:
+          'React found a hook call outside the body of a function component. Hooks must run in the same order on every render, so calling one inside a loop, a condition, an event handler, a class component, or a plain function breaks the Rules of Hooks.',
+        debuggingSteps: [
+          'Find the component and line named in the stack and check every hook call in that file.',
+          'Move the hook to the top level of the function component, before any early return, loop, or condition.',
+          'Check that the project uses one copy of React: run npm ls react react-dom and look for duplicate versions.',
+          'Check that react and react-dom versions match and that only one renderer is used for this tree.',
+        ],
+        possibleFix: {
+          explanation:
+            'Call hooks only at the top level of function components or custom hooks, and make sure the app resolves a single copy of react and react-dom. A duplicate copy, a mismatched version, or a hook inside a callback produces this error.',
+          whereItMayApply:
+            'Apply this to the component that calls the hook and to the dependency tree that provides React; the error usually comes from code structure or duplicate packages, not from the hook itself.',
+          exampleCode: [
+            'function Profile({ user }) {',
+            '  // Hooks run at the top level, on every render.',
+            '  const [open, setOpen] = useState(false)',
+            '  return <button onClick={() => setOpen(!open)}>{user.name}</button>',
+            '}',
+          ].join('\n'),
+        },
+        verificationSteps: [
+          'Rerun the same interaction and check the invalid hook call error is gone.',
+          'Check that npm ls react react-dom shows a single version.',
+          'Test the component through the same route or test renderer that failed.',
+        ],
+        limitations: [
+          'The message lists possible reasons but does not say which one applies.',
+          'The engine cannot inspect the component tree, the package tree, or the bundler configuration.',
+        ],
+        alternativeExplanations: [
+          'A hook runs inside a condition, loop, or event handler.',
+          'Two copies of React are installed, or react and react-dom versions do not match.',
+          'A hook is called from a class component or a plain function.',
+          'A test renderer or another renderer is mixed with react-dom in the same tree.',
+        ],
+      }
+    }
+
+    if (reason === 'rerenders') {
+      return {
+        likelyCause:
+          'A state setter ran while React was rendering the component, so React started another render immediately and stopped after too many attempts. The usual cause is calling the setter during render, such as onClick={setCount(1)} instead of passing a function.',
+        debuggingSteps: [
+          'Find the component named in the stack and look for a state update that runs during render.',
+          'Check event handler props such as onClick={setCount(1)}, which call the setter immediately instead of passing a function.',
+          'Wrap the call in an arrow function, for example onClick={() => setCount(1)}, or move the update into an effect or event handler.',
+          'Check for an early return or condition that changes which hooks run between renders.',
+        ],
+        possibleFix: {
+          explanation:
+            'Pass a function to event handlers instead of calling the state setter during render, and move updates that depend on props or state into an event handler or effect.',
+          whereItMayApply:
+            'Apply this to the JSX that wires the handler and to any update that runs while the component renders.',
+          exampleCode: [
+            'function Counter() {',
+            '  const [count, setCount] = useState(0)',
+            '  return (',
+            '    <button onClick={() => setCount(count + 1)}>',
+            '      Count: {count}',
+            '    </button>',
+            '  )',
+            '}',
+          ].join('\n'),
+        },
+        verificationSteps: [
+          'Rerun the same interaction and check the too many re-renders error is gone.',
+          'Check that clicking the control updates state once per click.',
+          'Test the component with the initial props and with updated props.',
+        ],
+        limitations: [
+          'The message does not name the setter or the component that triggered the loop.',
+          'The engine cannot inspect the component tree or React internals.',
+        ],
+        alternativeExplanations: [
+          'A state setter is called directly in JSX, such as onClick={setCount(1)}.',
+          'An update runs during render instead of inside an event handler or effect.',
+          'A parent re-renders the child with a new value that immediately triggers another update.',
+        ],
+      }
+    }
+
+    if (reason === 'update-depth') {
+      return {
+        likelyCause:
+          'A component kept scheduling its own update, so React stopped after the maximum update depth. This usually comes from an effect that sets state and depends on a value it changes, with a missing or unstable dependency array.',
+        debuggingSteps: [
+          'Find the effect or handler named in the stack and list the state it sets.',
+          'Check the dependency array: an effect that sets a value listed in its dependencies repeats forever.',
+          'Use the functional form of the setter or depend on a narrower value so the effect stops repeating.',
+          'Check for an object or array created during render and passed as a dependency, which changes identity on every render.',
+        ],
+        possibleFix: {
+          explanation:
+            'Make the effect stop depending on the value it updates, narrow the dependencies to stable values, or use the functional setter form. An effect that sets state and depends on that same state keeps scheduling updates.',
+          whereItMayApply:
+            'Apply this to the effect or update chain that keeps rescheduling itself, not to the component that happens to render last.',
+          exampleCode: [
+            'useEffect(() => {',
+            '  setCount((current) => current + 1)',
+            '  // Depend only on values that should retrigger the effect.',
+            '}, [userId])',
+          ].join('\n'),
+        },
+        verificationSteps: [
+          'Rerun the same interaction and check the maximum update depth error is gone.',
+          'Check that the effect runs only when its real dependencies change.',
+          'Watch the component for a render loop while changing the relevant props.',
+        ],
+        limitations: [
+          'The message does not name the effect or the state that keeps changing.',
+          'The engine cannot inspect the component tree or the dependency arrays.',
+        ],
+        alternativeExplanations: [
+          'An effect sets state that is part of its own dependency array.',
+          'An object or array is recreated on every render and used as a dependency.',
+          'A child calls a parent setter during render, so the parent updates repeatedly.',
+        ],
+      }
+    }
+
+    return {
+      likelyCause:
+        'A plain object was placed directly in JSX. React can render strings, numbers, elements, and arrays of those, but not objects, Promises, Dates, or arrays of objects.',
+      debuggingSteps: [
+        'Find the value named in the message and the JSX expression that renders it.',
+        'Render a field of the object, such as user.name, or map an array of objects to elements.',
+        'Convert Dates, Promises, or other non-renderable values to a string before rendering.',
+        'If the value arrives asynchronously, render a loading state until it is available.',
+      ],
+      possibleFix: {
+        explanation:
+          'Render a string or element from the object instead of the object itself: map arrays to elements with a stable key, read the fields you need, and convert Dates or Promises to text before rendering.',
+        whereItMayApply:
+          'Apply this where the object is rendered in JSX; changing the data shape is usually better than hiding the value.',
+        exampleCode: [
+          'function UserList({ users }) {',
+          '  return (',
+          '    <ul>',
+          '      {users.map((user) => (',
+          '        <li key={user.id}>{user.name}</li>',
+          '      ))}',
+          '    </ul>',
+          '  )',
+          '}',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the same render and check the React child error is gone.',
+        'Check that the screen shows the expected text or elements instead of a blank region.',
+        'Add or rerun a component test that renders the same data shape.',
+      ],
+      limitations: [
+        'The message shows the value that failed to render but not which component rendered it.',
+        'The engine cannot inspect the component tree or the data passed to it.',
+      ],
+      alternativeExplanations: [
+        'An object from state or props is rendered directly instead of one of its fields.',
+        'An array of objects is rendered without mapping each item to an element.',
+        'A Promise or Date is rendered before it is resolved or formatted.',
+      ],
+    }
+  },
+}
+
 export const javascriptRules: readonly DiagnosticRule[] = [
   javascriptReferenceErrorRule,
   javascriptTypeErrorRule,
@@ -883,4 +1702,8 @@ export const javascriptRules: readonly DiagnosticRule[] = [
   javascriptNodeFileErrorRule,
   javascriptPermissionErrorRule,
   javascriptCallStackExceededRule,
+  javascriptJsonParseErrorRule,
+  javascriptNetworkRequestFailedRule,
+  javascriptCorsBlockedRule,
+  javascriptReactErrorRule,
 ]

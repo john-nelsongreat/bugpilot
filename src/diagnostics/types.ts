@@ -20,6 +20,9 @@ export type SupportedDiagnosticCategory =
   | 'unicode-error'
   | 'json-decode-error'
   | 'port-in-use'
+  | 'network-request-failed'
+  | 'cors-blocked'
+  | 'react-error'
 
 export type DiagnosticCategory =
   | SupportedDiagnosticCategory
@@ -80,6 +83,8 @@ export interface RuleContext {
 export interface RuleMatch {
   signature: string
   specificity: 'specific' | 'generic'
+  /** Upper bound for this match when its wording cannot justify more certainty. */
+  confidenceCeiling?: ConfidenceLevel
   captures: Readonly<Record<string, string>>
 }
 
@@ -96,6 +101,8 @@ export interface DiagnosticRule {
   id: string
   language: ResolvedLanguage
   category: SupportedDiagnosticCategory
+  /** Rule ids this rule overrides when both match the same final line. */
+  supersedes?: readonly string[]
   match(line: string): RuleMatch | null
   explain(match: RuleMatch, context: RuleContext): RuleNarrative
 }

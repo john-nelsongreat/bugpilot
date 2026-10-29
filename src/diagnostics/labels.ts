@@ -18,6 +18,9 @@ export const DIAGNOSTIC_CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
   'unicode-error': 'Unicode error',
   'json-decode-error': 'JSON decode error',
   'port-in-use': 'Port already in use',
+  'network-request-failed': 'Network request failed',
+  'cors-blocked': 'CORS blocked request',
+  'react-error': 'React error',
   unrecognized: 'Unrecognised',
 }
 

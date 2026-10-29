@@ -176,6 +176,27 @@ const LANGUAGE_SIGNALS: ReadonlyArray<{
     weight: 2,
     pattern: /^Require stack:\s*$/m,
   },
+  {
+    language: 'javascript',
+    label: 'a network error message',
+    weight: 2,
+    pattern:
+      /(?:TypeError: (?:Failed to fetch|NetworkError when attempting to fetch resource|Load failed|fetch failed)\b|net::ERR_|has been blocked by CORS policy)/,
+  },
+  {
+    language: 'javascript',
+    label: 'a JSON parser error message',
+    weight: 2,
+    pattern:
+      /(?:is not valid JSON|JSON\.parse|JSON Parse error|in JSON at position|Unexpected end of JSON input)/,
+  },
+  {
+    language: 'javascript',
+    label: 'a React error message',
+    weight: 2,
+    pattern:
+      /(?:Invalid hook call|Objects are not valid as a React child|Too many re-renders|Maximum update depth exceeded)/,
+  },
 ]
 
 export function diagnose(input: DiagnosticInput): DiagnosticResult {
@@ -288,10 +309,13 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
   const competingLanguage = oppositeLanguage(selection.language)
   const hasCompetingCandidate =
     candidatesByLanguage[competingLanguage].length > 0
-  const confidence = buildConfidence(
-    selection,
-    signals,
-    hasCompetingCandidate ? competingLanguage : null,
+  const confidence = applyConfidenceCeiling(
+    buildConfidence(
+      selection,
+      signals,
+      hasCompetingCandidate ? competingLanguage : null,
+    ),
+    selection.candidate.match,
   )
 
   return {
@@ -318,7 +342,28 @@ function collectCandidates(primaryLine: string): CandidateGroups {
     }
   }
 
+  groups.python = applySupersedes(groups.python)
+  groups.javascript = applySupersedes(groups.javascript)
+
   return groups
+}
+
+function applySupersedes(
+  candidates: EvaluatedCandidate[],
+): EvaluatedCandidate[] {
+  const superseded = new Set<string>()
+
+  for (const candidate of candidates) {
+    for (const id of candidate.rule.supersedes ?? []) {
+      if (candidates.some((other) => other.rule.id === id)) {
+        superseded.add(id)
+      }
+    }
+  }
+
+  return superseded.size === 0
+    ? candidates
+    : candidates.filter((candidate) => !superseded.has(candidate.rule.id))
 }
 
 function chooseSelection(
@@ -530,6 +575,31 @@ function buildConfidence(
       selection.candidate.match.specificity === 'specific'
         ? `The final exception line contains a specific ${languageLabel} signature, but no traceback or explicit language setting confirms the runtime.${competingNote}`
         : `The final exception line is a generic ${languageLabel} error shape, and no traceback or explicit language setting confirms the runtime.${competingNote}`,
+  }
+}
+
+const CONFIDENCE_ORDER: readonly DiagnosticConfidence['level'][] = [
+  'low',
+  'medium',
+  'high',
+]
+
+function applyConfidenceCeiling(
+  confidence: DiagnosticConfidence,
+  match: RuleMatch,
+): DiagnosticConfidence {
+  const ceiling = match.confidenceCeiling
+  if (
+    !ceiling ||
+    CONFIDENCE_ORDER.indexOf(confidence.level) <=
+      CONFIDENCE_ORDER.indexOf(ceiling)
+  ) {
+    return confidence
+  }
+
+  return {
+    level: ceiling,
+    reason: `${confidence.reason} The matched wording is generic, so the confidence is capped at ${ceiling}.`,
   }
 }
 

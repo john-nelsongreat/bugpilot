@@ -922,7 +922,7 @@ describe('Registered Node rules', () => {
       'javascript.type-error',
       'javascript.syntax-error',
     ])
-    expect(javascriptRules.slice(3).map((rule) => rule.id)).toEqual([
+    expect(javascriptRules.slice(3, 8).map((rule) => rule.id)).toEqual([
       'javascript.node-module-not-found',
       'javascript.port-in-use',
       'javascript.node-file-error',

@@ -48,6 +48,28 @@ const BATCH_B1_RULES = [
   ],
 ] as const
 
+const BATCH_B2_RULES = [
+  [
+    'javascript.json-parse-error',
+    'javascript',
+    'json-decode-error',
+    'JSON decode error',
+  ],
+  [
+    'javascript.network-request-failed',
+    'javascript',
+    'network-request-failed',
+    'Network request failed',
+  ],
+  [
+    'javascript.cors-blocked',
+    'javascript',
+    'cors-blocked',
+    'CORS blocked request',
+  ],
+  ['javascript.react-error', 'javascript', 'react-error', 'React error'],
+] as const
+
 describe('diagnostic rule registry', () => {
   it('registers every batch-A rule once with a stable id and category', () => {
     for (const [id, category] of NEW_RULES) {
@@ -99,6 +121,28 @@ describe('diagnostic rule registry', () => {
   })
 
   it.each(BATCH_B1_RULES)(
+    'labels %s with %s on the detail page',
+    (_id, _language, category, label) => {
+      expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
+      expect(diagnosticCategoryLabel(category)).toBe(label)
+    },
+  )
+
+  it('registers every batch-B2 rule once in the JavaScript array', () => {
+    for (const [id, language, category] of BATCH_B2_RULES) {
+      const rules = javascriptRules.filter((rule) => rule.id === id)
+
+      expect(rules).toHaveLength(1)
+      expect(rules[0].language).toBe(language)
+      expect(rules[0].category).toBe(category)
+    }
+
+    expect(javascriptRules.slice(8).map((rule) => rule.id)).toEqual(
+      BATCH_B2_RULES.map(([id]) => id),
+    )
+  })
+
+  it.each(BATCH_B2_RULES)(
     'labels %s with %s on the detail page',
     (_id, _language, category, label) => {
       expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
