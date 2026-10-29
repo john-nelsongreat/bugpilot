@@ -507,7 +507,7 @@ Set **Language** to `JavaScript` for each one-line example unless a step says ot
 - [ ] Clear the form and paste `Error: Objects are not valid as a React child (found: object with keys {name, age}). If you meant to render a collection of children, use an array instead.`
   - Expected: **React error**, **High confidence**, signature `Error: Objects are not valid as a React child (found: <value>)`; the advice mentions mapping objects to elements or rendering a string.
 - [ ] Clear the form and paste `Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.`
-  - Expected: **Unrecognised** with no possible fix; `Warning:` is not the runtime error line.
+  - Expected: **React error**, **Medium confidence**, signature `Error: Invalid hook call. Hooks can only be called inside of the body of a function component.` The exact React sentence may carry the `Warning:` prefix; a timestamp or any other prefix is still not accepted (see the context-line section below).
 
 **Automatic detection and precedence**
 
@@ -527,6 +527,68 @@ Set **Language** to `JavaScript` for each one-line example unless a step says ot
   - Expected: **JSON decode error**, not **Syntax error**. The JSON rule takes precedence over the generic parser fallback for JSON wording only.
 
 One related distinction: a plain `SyntaxError: Unexpected token '}'` still returns **Syntax error**, and `TypeError: x is not a function` still returns **Type mismatch**; the new rules supersede the generic fallbacks only when their own message families match.
+
+### Context lines and React trailers
+
+Set **Language** to `Auto — infer from the text` for every example in this section. Paste each block exactly as shown, one per analysis.
+
+- [ ] **B1 Chrome CORS triple.** Clear the form and paste:
+  ```text
+  Access to fetch at 'https://api.example.com/data' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+  GET https://api.example.com/data net::ERR_FAILED 200 (OK)
+  Uncaught (in promise) TypeError: Failed to fetch
+  ```
+  - Expected: **CORS blocked request**, **High confidence**, signature `Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header`.
+  - Expected: the evidence shows **Final exception line** at **Line 3** and **Matched context line** at **Line 1** quoting the CORS message. The result is not **Network request failed**.
+- [ ] **B2 CORS preflight.** Clear the form and paste:
+  ```text
+  Access to fetch at 'https://api.example.com/v1/items' from origin 'http://localhost:3000' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+  TypeError: Failed to fetch
+  ```
+  - Expected: **CORS blocked request**, **High confidence**, signature `Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: preflight request does not pass access control check`; the cause mentions the preflight request.
+- [ ] **B3 Plain network failure.** Clear the form and paste:
+  ```text
+  GET http://localhost:9999/api/users net::ERR_CONNECTION_REFUSED
+  Uncaught (in promise) TypeError: Failed to fetch
+  ```
+  - Expected: **Network request failed**, **High confidence**, signature `TypeError: Failed to fetch`; the likely cause names `net::ERR_CONNECTION_REFUSED`. The result is not **CORS blocked request**.
+- [ ] **B4 React hooks warning with the resulting error.** Clear the form and paste:
+  ```text
+  Warning: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons: 1. You might have mismatching versions of React and the renderer (such as React DOM) 2. You might be breaking the Rules of Hooks 3. You might have more than one copy of React in the same app
+  Uncaught TypeError: Cannot read properties of null (reading 'useState')
+  ```
+  - Expected: **React error**, **Medium confidence**, signature `Error: Invalid hook call. Hooks can only be called inside of the body of a function component.`
+  - Expected: the evidence shows **Final exception line** at **Line 2** and **Matched context line** at **Line 1** quoting the warning. The result is not a bare **Type mismatch** about `null`.
+- [ ] **B5 Lone warning line.** Clear the form and paste:
+  ```text
+  Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.
+  ```
+  - Expected: **React error**, **Medium confidence**, the same signature. Only this exact React sentence may carry the `Warning:` prefix, anchored at the start of the line.
+- [ ] **B6 React render error with the component trailer.** Clear the form and paste:
+  ```text
+  Uncaught Error: Objects are not valid as a React child (found: object with keys {id, name}). If you meant to render a collection of children, use an array instead.
+      at throwOnInvalidObjectType (react-dom.development.js:3500:13)
+  The above error occurred in the <App> component:
+      at App (App.jsx:5:3)
+  Consider adding an error boundary to your tree to customize error handling behavior.
+  ```
+  - Expected: **React error**, **High confidence**, signature `Error: Objects are not valid as a React child (found: <value>)`. The trailer lines do not hide the render error.
+- [ ] **B7 React too many re-renders with the same trailer.** Clear the form and paste:
+  ```text
+  Uncaught Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.
+      at App (App.jsx:5:3)
+  The above error occurred in the <App> component:
+      at App (App.jsx:5:3)
+  Consider adding an error boundary to your tree to customize error handling behavior.
+  ```
+  - Expected: **React error**, **High confidence**, signature `Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.`
+- [ ] **B8 Prose mentions.** Clear the form and paste `TODO: fix the CORS error before release`, then in a separate analysis paste `see the docs about Invalid hook call`.
+  - Expected each time: **Unrecognised**, **Low confidence**, **No rule matched**, and no possible fix. No cause is invented.
+- [ ] **B9 Timestamped CORS copy.** Clear the form and paste:
+  ```text
+  2026-10-28T10:00:00Z Access to fetch at 'https://api.example.com/data' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+  ```
+  - Expected: **Unrecognised**. A timestamp before the message prevents the match.
 
 ### JavaScript TypeError sub-signatures
 
