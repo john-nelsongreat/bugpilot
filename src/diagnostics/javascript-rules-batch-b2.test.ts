@@ -544,7 +544,7 @@ describe('CORS rule boundaries', () => {
 describe('React rule boundaries', () => {
   it.each([
     'The console showed Invalid hook call while loading the page.',
-    'Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.',
+    '2026-10-28T10:00:00Z Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.',
     'Error: Objects are not valid as a React child',
     'Error: Something else in a React component failed.',
   ])('does not claim a React mention without the exact message: %s', (line) => {
@@ -552,6 +552,17 @@ describe('React rule boundaries', () => {
 
     const result = diagnose({ language: 'javascript', errorText: line })
     expect(result.category).not.toBe('react-error')
+  })
+
+  it('accepts the exact Invalid hook call sentence with a Warning prefix', () => {
+    const result = diagnose({
+      language: 'javascript',
+      errorText:
+        'Warning: Invalid hook call. Hooks can only be called inside of the body of a function component.',
+    })
+
+    expect(result.category).toBe('react-error')
+    expect(result.confidence.level).toBe('medium')
   })
 
   it('mentions the Rules of Hooks and duplicate React copies', () => {

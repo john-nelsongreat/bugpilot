@@ -36,6 +36,11 @@ const EXCEPTION_LINE =
 const NODE_ERROR_LINE =
   /^(?:Uncaught\s+(?:\(in promise\)\s+)?)?Error(?:\s+\[[A-Z][A-Z0-9_]*\])?:\s+\S/
 
+const REACT_COMPONENT_TRAILER = /^The above error occurred in the <.+> component:$/
+
+const REACT_BOUNDARY_TRAILER =
+  /^Consider adding an error boundary to your tree to customize error handling behavior\.$/
+
 const SAFETY_LIMITATION =
   'This is local, rule-based guidance based only on the pasted text; it has not inspected or executed your project.'
 
@@ -60,6 +65,7 @@ interface SelectedLine {
 interface EvaluatedCandidate {
   rule: DiagnosticRule
   match: RuleMatch
+  contextLine?: SelectedLine
 }
 
 type CandidateGroups = Record<ResolvedLanguage, EvaluatedCandidate[]>
@@ -259,6 +265,10 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
 
   const primaryLine = stripConsolePrefix(selectedLine.text)
   const candidatesByLanguage = collectCandidates(primaryLine)
+  mergeContextCandidates(
+    candidatesByLanguage,
+    collectContextCandidates(primaryLine, errorText, selectedLine),
+  )
   const signals = collectLanguageSignals(errorText, reproductionDetails)
   const outcome = chooseSelection(language, candidatesByLanguage, signals)
 
@@ -322,7 +332,12 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     category: selection.candidate.rule.category,
     matchedSignature: selection.candidate.match.signature,
     likelyCause: narrative.likelyCause,
-    evidence: buildEvidence(selectedLine, selection.candidate.match, codeSnippet),
+    evidence: buildEvidence(
+      selectedLine,
+      selection.candidate.match,
+      codeSnippet,
+      selection.candidate.contextLine,
+    ),
     debuggingSteps: narrative.debuggingSteps,
     possibleFix: narrative.possibleFix,
     verificationSteps: narrative.verificationSteps,
@@ -364,6 +379,72 @@ function applySupersedes(
   return superseded.size === 0
     ? candidates
     : candidates.filter((candidate) => !superseded.has(candidate.rule.id))
+}
+
+function collectContextCandidates(
+  primaryLine: string,
+  errorText: string,
+  selectedLine: SelectedLine,
+): CandidateGroups {
+  const groups: CandidateGroups = { python: [], javascript: [] }
+  const lines = errorText.split(/\r?\n/)
+
+  for (const rule of ALL_RULES) {
+    if (
+      !rule.contextSymptoms ||
+      !rule.contextSymptoms.some((symptom) => symptom.test(primaryLine))
+    ) {
+      continue
+    }
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (index === selectedLine.lineNumber - 1) {
+        continue
+      }
+
+      const text = stripConsolePrefix(lines[index].trim())
+      if (text === '') {
+        continue
+      }
+
+      const match = rule.match(text)
+      if (!match) {
+        continue
+      }
+
+      groups[rule.language].push({
+        rule,
+        match,
+        contextLine: { text: lines[index].trim(), lineNumber: index + 1 },
+      })
+      break
+    }
+  }
+
+  return groups
+}
+
+function mergeContextCandidates(
+  groups: CandidateGroups,
+  contextGroups: CandidateGroups,
+): void {
+  for (const language of ['python', 'javascript'] as const) {
+    for (const contextCandidate of contextGroups[language]) {
+      const index = groups[language].findIndex(
+        (candidate) => candidate.rule.id === contextCandidate.rule.id,
+      )
+      if (index === -1) {
+        groups[language].push(contextCandidate)
+        continue
+      }
+      if (
+        groups[language][index].match.signature !==
+        contextCandidate.match.signature
+      ) {
+        groups[language][index] = contextCandidate
+      }
+    }
+  }
 }
 
 function chooseSelection(
@@ -527,6 +608,13 @@ function buildConfidence(
     otherLabel && selection.certainty !== 'specificity'
       ? ` A competing ${otherLabel} signature was also considered.`
       : ''
+  const contextLine = selection.candidate.contextLine
+  const specificSignatureText = contextLine
+    ? `A specific ${languageLabel} message on line ${contextLine.lineNumber} explains the final line`
+    : `The final exception line contains a specific ${languageLabel} signature`
+  const genericSignatureText = contextLine
+    ? `A ${languageLabel} message on line ${contextLine.lineNumber} explains the final line, but it is a generic error shape`
+    : `The final exception line is a generic ${languageLabel} error shape`
 
   if (selection.certainty === 'conflict') {
     return {
@@ -541,11 +629,11 @@ function buildConfidence(
     return selection.candidate.match.specificity === 'specific'
       ? {
           level: 'high',
-          reason: `The final exception line contains a specific ${languageLabel} signature, and ${languageLabel} was selected explicitly.${competingNote}`,
+          reason: `${specificSignatureText}, and ${languageLabel} was selected explicitly.${competingNote}`,
         }
       : {
           level: 'medium',
-          reason: `The final exception line is a generic ${languageLabel} error shape. The explicit language narrows the runtime, but the message has fewer identifying details.${competingNote}`,
+          reason: `${genericSignatureText}. The explicit language narrows the runtime, but the message has fewer identifying details.${competingNote}`,
         }
   }
 
@@ -553,11 +641,11 @@ function buildConfidence(
     return selection.candidate.match.specificity === 'specific'
       ? {
           level: 'high',
-          reason: `The final exception line contains a specific ${languageLabel} signature, and ${matchingSignals} support the ${languageLabel} runtime.${competingNote}`,
+          reason: `${specificSignatureText}, and ${matchingSignals} support the ${languageLabel} runtime.${competingNote}`,
         }
       : {
           level: 'medium',
-          reason: `The final exception line is a generic ${languageLabel} error shape. ${matchingSignals} support ${languageLabel}, but the specific cause remains less certain.${competingNote}`,
+          reason: `${genericSignatureText}. ${matchingSignals} support ${languageLabel}, but the specific cause remains less certain.${competingNote}`,
         }
   }
 
@@ -565,7 +653,9 @@ function buildConfidence(
     return {
       level:
         selection.candidate.match.specificity === 'specific' ? 'medium' : 'low',
-      reason: `The final exception line has a more specific ${languageLabel} signature than the competing ${otherLabel ?? 'other'} match, but no traceback or explicit language confirms the runtime.`,
+      reason: contextLine
+        ? `A ${languageLabel} message on line ${contextLine.lineNumber} explains the final line more specifically than the competing ${otherLabel ?? 'other'} match, but no traceback or explicit language confirms the runtime.`
+        : `The final exception line has a more specific ${languageLabel} signature than the competing ${otherLabel ?? 'other'} match, but no traceback or explicit language confirms the runtime.`,
     }
   }
 
@@ -573,8 +663,8 @@ function buildConfidence(
     level: selection.candidate.match.specificity === 'specific' ? 'medium' : 'low',
     reason:
       selection.candidate.match.specificity === 'specific'
-        ? `The final exception line contains a specific ${languageLabel} signature, but no traceback or explicit language setting confirms the runtime.${competingNote}`
-        : `The final exception line is a generic ${languageLabel} error shape, and no traceback or explicit language setting confirms the runtime.${competingNote}`,
+        ? `${specificSignatureText}, but no traceback or explicit language setting confirms the runtime.${competingNote}`
+        : `${genericSignatureText}, and no traceback or explicit language setting confirms the runtime.${competingNote}`,
   }
 }
 
@@ -619,6 +709,7 @@ function buildEvidence(
   selectedLine: SelectedLine,
   match: RuleMatch,
   codeSnippet: string,
+  contextLine?: SelectedLine,
 ): DiagnosticEvidence[] {
   const evidence: DiagnosticEvidence[] = [
     {
@@ -628,6 +719,15 @@ function buildEvidence(
       lineNumber: selectedLine.lineNumber,
     },
   ]
+
+  if (contextLine) {
+    evidence.push({
+      source: 'error text',
+      label: 'Matched context line',
+      quote: contextLine.text,
+      lineNumber: contextLine.lineNumber,
+    })
+  }
 
   if (codeSnippet.trim() === '') {
     return evidence
@@ -718,12 +818,20 @@ function bestCandidate(
 ): EvaluatedCandidate | undefined {
   return candidates.reduce<EvaluatedCandidate | undefined>(
     (best, candidate) =>
-      !best ||
-      specificityScore(candidate.match) > specificityScore(best.match)
+      !best || candidateScore(candidate) > candidateScore(best)
         ? candidate
         : best,
     undefined,
   )
+}
+
+function candidateScore(candidate: EvaluatedCandidate): number {
+  const contextBonus =
+    candidate.contextLine !== undefined &&
+    candidate.match.specificity === 'specific'
+      ? 2
+      : 0
+  return contextBonus + specificityScore(candidate.match)
 }
 
 function specificityScore(match: RuleMatch): number {
@@ -739,11 +847,29 @@ function selectExceptionLine(errorText: string): SelectedLine | null {
   let lastNonEmpty: SelectedLine | null = null
   let lastException: SelectedLine | null = null
   let lastNodeError: SelectedLine | null = null
+  let insideReactTrailer = false
 
   lines.forEach((line, index) => {
     const text = line.trim()
     if (text === '') {
       return
+    }
+
+    if (REACT_COMPONENT_TRAILER.test(text)) {
+      insideReactTrailer = true
+      return
+    }
+
+    if (REACT_BOUNDARY_TRAILER.test(text)) {
+      insideReactTrailer = false
+      return
+    }
+
+    if (insideReactTrailer) {
+      if (/^\s/.test(line)) {
+        return
+      }
+      insideReactTrailer = false
     }
 
     lastNonEmpty = { text, lineNumber: index + 1 }

@@ -69,6 +69,16 @@ const REACT_UPDATE_DEPTH = new RegExp(
 const REACT_OBJECT_CHILD = new RegExp(
   `${REACT_PREFIX}Objects are not valid as a React child \\(found: (.+?)\\)\\.?(?: If you meant to render a collection of children, use an array instead\\.)?$`,
 )
+const REACT_INVALID_HOOK_WARNING =
+  /^Warning: Invalid hook call\. Hooks can only be called inside of the body of a function component\./
+
+const FETCH_FAILURE_SYMPTOMS = [
+  /^TypeError: Failed to fetch$/,
+  /^(?:(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) https?:\/\/\S+ )?net::ERR_FAILED$/,
+] as const
+
+const REACT_HOOK_SYMPTOM =
+  /^TypeError: Cannot read propert(?:y|ies) of null \(reading 'use[A-Z][A-Za-z]*'\)$/
 
 export const javascriptReferenceErrorRule: DiagnosticRule = {
   id: 'javascript.reference-error',
@@ -1683,8 +1693,10 @@ export const javascriptNetworkRequestFailedRule: DiagnosticRule = {
     let alternatives: string[]
 
     if (reason === 'browser') {
-      likelyCause =
-        'The browser could not complete the fetch request. Browsers deliberately hide the underlying reason, so the server may be down or unreachable, the URL or port may be wrong, the network may be offline, or a CORS rejection, a browser extension, or a TLS or mixed-content problem may have stopped it.'
+      const consoleCode = /net::ERR_([A-Z0-9_]+)/.exec(context.errorText)
+      likelyCause = consoleCode
+        ? `The browser could not complete the fetch request. The pasted output reports net::ERR_${consoleCode[1]}, which is the browser's own reason for the failure; check the server, URL, port, network, certificate, and CORS settings for that address.`
+        : 'The browser could not complete the fetch request. Browsers deliberately hide the underlying reason, so the server may be down or unreachable, the URL or port may be wrong, the network may be offline, or a CORS rejection, a browser extension, or a TLS or mixed-content problem may have stopped it.'
       alternatives = [
         'The server is not running or the port is wrong.',
         'The host name does not resolve, or the device is offline.',
@@ -1799,6 +1811,7 @@ export const javascriptCorsBlockedRule: DiagnosticRule = {
   id: 'javascript.cors-blocked',
   language: 'javascript',
   category: 'cors-blocked',
+  contextSymptoms: FETCH_FAILURE_SYMPTOMS,
   match(line: string): RuleMatch | null {
     const matched = CORS_MESSAGE.exec(line)
     if (!matched) {
@@ -1901,7 +1914,18 @@ export const javascriptReactErrorRule: DiagnosticRule = {
   id: 'javascript.react-error',
   language: 'javascript',
   category: 'react-error',
+  contextSymptoms: [REACT_HOOK_SYMPTOM],
   match(line: string): RuleMatch | null {
+    if (REACT_INVALID_HOOK_WARNING.test(line)) {
+      return {
+        signature:
+          'Error: Invalid hook call. Hooks can only be called inside of the body of a function component.',
+        specificity: 'specific',
+        confidenceCeiling: 'medium',
+        captures: { reason: 'hooks' },
+      }
+    }
+
     if (REACT_INVALID_HOOK.test(line)) {
       return {
         signature:

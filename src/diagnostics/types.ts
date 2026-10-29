@@ -103,6 +103,13 @@ export interface DiagnosticRule {
   category: SupportedDiagnosticCategory
   /** Rule ids this rule overrides when both match the same final line. */
   supersedes?: readonly string[]
+  /**
+   * Generic final lines this rule can explain from another line in the paste.
+   * When the selected final line matches one of these symptoms, the engine
+   * also applies `match` to the other lines and lets this rule represent the
+   * more specific message it finds there.
+   */
+  contextSymptoms?: readonly RegExp[]
   match(line: string): RuleMatch | null
   explain(match: RuleMatch, context: RuleContext): RuleNarrative
 }

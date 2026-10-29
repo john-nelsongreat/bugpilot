@@ -420,10 +420,10 @@
     "ruleId": "javascript.react-error"
   },
   "case-0071": {
-    "category": "unrecognized",
-    "matchedSignature": null,
-    "confidence": "low",
-    "ruleId": null
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "medium",
+    "ruleId": "javascript.react-error"
   },
   "case-0072": {
     "category": "json-decode-error",
@@ -1032,16 +1032,16 @@
     "ruleId": "python.indentation-error"
   },
   "case-0173": {
-    "category": "network-request-failed",
-    "matchedSignature": "TypeError: Failed to fetch",
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header",
     "confidence": "high",
-    "ruleId": "javascript.network-request-failed"
+    "ruleId": "javascript.cors-blocked"
   },
   "case-0174": {
-    "category": "network-request-failed",
-    "matchedSignature": "TypeError: Failed to fetch",
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: preflight request does not pass access control check",
     "confidence": "high",
-    "ruleId": "javascript.network-request-failed"
+    "ruleId": "javascript.cors-blocked"
   },
   "case-0175": {
     "category": "network-request-failed",
@@ -1050,10 +1050,10 @@
     "ruleId": "javascript.network-request-failed"
   },
   "case-0176": {
-    "category": "type-mismatch",
-    "matchedSignature": "TypeError: Cannot read properties of null (reading 'useState')",
-    "confidence": "high",
-    "ruleId": "javascript.type-error"
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "medium",
+    "ruleId": "javascript.react-error"
   },
   "case-0177": {
     "category": "react-error",

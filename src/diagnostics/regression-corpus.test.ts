@@ -63,15 +63,31 @@ function ruleIdFor(
   entry: CorpusCase,
   result: DiagnosticResult,
 ): string | null {
-  const primary = primaryLineOf(entry.errorText)
-  if (result.matchedSignature === null || primary === null) {
+  if (result.matchedSignature === null) {
     return null
   }
+
+  const lines = new Set<string>()
+  const primary = primaryLineOf(entry.errorText)
+  if (primary !== null) {
+    lines.add(primary)
+  }
+  for (const line of entry.errorText.split(/\r?\n/)) {
+    const text = line
+      .trim()
+      .replace(/^Uncaught\s+(?:\(in promise\)\s+)?/, '')
+    if (text !== '') {
+      lines.add(text)
+    }
+  }
+
   const ids = rules
     .filter(
       (rule) =>
         rule.category === result.category &&
-        rule.match(primary)?.signature === result.matchedSignature,
+        [...lines].some(
+          (line) => rule.match(line)?.signature === result.matchedSignature,
+        ),
     )
     .map((rule) => rule.id)
   return ids.length === 1 ? ids[0] : null
