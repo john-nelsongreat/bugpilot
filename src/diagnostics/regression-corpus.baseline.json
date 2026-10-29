@@ -1,0 +1,1088 @@
+{
+  "case-0001": {
+    "category": "missing-module",
+    "matchedSignature": "ModuleNotFoundError: No module named '<module>'",
+    "confidence": "high",
+    "ruleId": "python.module-not-found"
+  },
+  "case-0002": {
+    "category": "undefined-name",
+    "matchedSignature": "NameError: name '<name>' is not defined",
+    "confidence": "medium",
+    "ruleId": "python.name-error"
+  },
+  "case-0003": {
+    "category": "undefined-name",
+    "matchedSignature": "ReferenceError: <name> is not defined",
+    "confidence": "high",
+    "ruleId": "javascript.reference-error"
+  },
+  "case-0004": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of undefined (reading 'name')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0005": {
+    "category": "division-by-zero",
+    "matchedSignature": "ZeroDivisionError: division by zero",
+    "confidence": "high",
+    "ruleId": "python.zero-division-error"
+  },
+  "case-0006": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: invalid literal for int() with base <base>: '<value>'",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0007": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: could not convert string to float: '<value>'",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0008": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: not enough values to unpack (expected <expected>, got <got>)",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0009": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: too many values to unpack (expected <expected>)",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0010": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: math domain error",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0011": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: '<value>' is not in list",
+    "confidence": "high",
+    "ruleId": "python.value-error"
+  },
+  "case-0012": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: <unclassified value error>",
+    "confidence": "medium",
+    "ruleId": "python.value-error"
+  },
+  "case-0013": {
+    "category": "recursion-error",
+    "matchedSignature": "RecursionError: maximum recursion depth exceeded",
+    "confidence": "high",
+    "ruleId": "python.recursion-error"
+  },
+  "case-0014": {
+    "category": "unicode-error",
+    "matchedSignature": "UnicodeDecodeError: '<codec>' codec cannot decode the input",
+    "confidence": "high",
+    "ruleId": "python.unicode-error"
+  },
+  "case-0015": {
+    "category": "json-decode-error",
+    "matchedSignature": "JSONDecodeError: <invalid JSON payload>",
+    "confidence": "high",
+    "ruleId": "python.json-decode-error"
+  },
+  "case-0016": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0017": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0018": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0019": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0020": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0021": {
+    "category": "missing-module",
+    "matchedSignature": "Error: Cannot find module '<package>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0022": {
+    "category": "missing-module",
+    "matchedSignature": "Error: Cannot find module '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0023": {
+    "category": "missing-module",
+    "matchedSignature": "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '<package>' imported from <path>",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0024": {
+    "category": "missing-module",
+    "matchedSignature": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<path>' imported from <path>",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0025": {
+    "category": "port-in-use",
+    "matchedSignature": "Error: listen EADDRINUSE: address already in use <address>",
+    "confidence": "high",
+    "ruleId": "javascript.port-in-use"
+  },
+  "case-0026": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0027": {
+    "category": "missing-file",
+    "matchedSignature": "Error: spawn <command> ENOENT",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0028": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EACCES: permission denied, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0029": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: listen EACCES: permission denied <address>",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0030": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EPERM: operation not permitted",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0031": {
+    "category": "recursion-error",
+    "matchedSignature": "RangeError: Maximum call stack size exceeded",
+    "confidence": "high",
+    "ruleId": "javascript.call-stack-exceeded"
+  },
+  "case-0032": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0033": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0034": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0035": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0036": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0037": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<' in JSON at position <position>",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0038": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<', ... is not valid JSON",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0039": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token u in JSON at position 0",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0040": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: \"undefined\" is not valid JSON",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0041": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected end of JSON input",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0042": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected character",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0043": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected character",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0044": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected end of data",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0045": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected end of data",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0046": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unrecognized token '<'",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0047": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unexpected EOF",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0048": {
+    "category": "syntax-error",
+    "matchedSignature": "SyntaxError: <JavaScript parser error>",
+    "confidence": "medium",
+    "ruleId": "javascript.syntax-error"
+  },
+  "case-0049": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0050": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Failed to fetch",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0051": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: NetworkError when attempting to fetch resource.",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0052": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Load failed",
+    "confidence": "low",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0053": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: fetch failed",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0054": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: fetch failed",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0055": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_CONNECTION_REFUSED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0056": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_CONNECTION_REFUSED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0057": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_NAME_NOT_RESOLVED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0058": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_INTERNET_DISCONNECTED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0059": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_CERT_<reason>",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0060": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: x is not a function",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0061": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0062": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0063": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: preflight request does not pass access control check",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0064": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: 'Access-Control-Allow-Origin' does not match the supplied origin",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0065": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: credentials mode cannot use a wildcard origin",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0066": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0067": {
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0068": {
+    "category": "react-error",
+    "matchedSignature": "Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0069": {
+    "category": "react-error",
+    "matchedSignature": "Error: Maximum update depth exceeded.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0070": {
+    "category": "react-error",
+    "matchedSignature": "Error: Objects are not valid as a React child (found: <value>)",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0071": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0072": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<' in JSON at position <position>",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0073": {
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0074": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of undefined (reading 'amount')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0075": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of null (reading 'length')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0076": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read property 'amount' of undefined",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0077": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read property 'length' of null",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0078": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot set properties of undefined (setting 'value')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0079": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot set properties of null (setting 'checked')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0080": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: items.map is not a function",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0081": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: items is not iterable",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0082": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: object null is not iterable",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0083": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Assignment to constant variable.",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0084": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cart is not a constructor",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0085": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: can't access property \"name\", user is undefined",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0086": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: can't access property \"length\", items is null",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0087": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <JavaScript type mismatch>",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0088": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <JavaScript value type problem>",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0089": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <JavaScript type mismatch>",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0090": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <JavaScript type mismatch>",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0091": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0092": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0093": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: can't access property \"name\", user is undefined",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0094": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Assignment to constant variable.",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0095": {
+    "category": "missing-module",
+    "matchedSignature": "ModuleNotFoundError: No module named '<module>'",
+    "confidence": "medium",
+    "ruleId": "python.module-not-found"
+  },
+  "case-0096": {
+    "category": "missing-attribute",
+    "matchedSignature": "AttributeError: module has no attribute '<attribute>'",
+    "confidence": "medium",
+    "ruleId": "python.attribute-error"
+  },
+  "case-0097": {
+    "category": "missing-file",
+    "matchedSignature": "FileNotFoundError: No such file or directory",
+    "confidence": "medium",
+    "ruleId": "python.file-not-found"
+  },
+  "case-0098": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0099": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0100": {
+    "category": "undefined-name",
+    "matchedSignature": "ReferenceError: <name> is not defined",
+    "confidence": "medium",
+    "ruleId": "javascript.reference-error"
+  },
+  "case-0101": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: items is not iterable",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0102": {
+    "category": "import-failure",
+    "matchedSignature": "ImportError: <import failure>",
+    "confidence": "low",
+    "ruleId": "python.import-error"
+  },
+  "case-0103": {
+    "category": "undefined-name",
+    "matchedSignature": "ReferenceError: <name> is not defined",
+    "confidence": "medium",
+    "ruleId": "javascript.reference-error"
+  },
+  "case-0104": {
+    "category": "missing-module",
+    "matchedSignature": "Error: Cannot find module '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0105": {
+    "category": "missing-module",
+    "matchedSignature": "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '<package>' imported from <path>",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0106": {
+    "category": "missing-module",
+    "matchedSignature": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<path>' imported from <path>",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0107": {
+    "category": "port-in-use",
+    "matchedSignature": "Error: listen EADDRINUSE: address already in use <address>",
+    "confidence": "high",
+    "ruleId": "javascript.port-in-use"
+  },
+  "case-0108": {
+    "category": "port-in-use",
+    "matchedSignature": "Error: listen EADDRINUSE: address already in use <address>",
+    "confidence": "high",
+    "ruleId": "javascript.port-in-use"
+  },
+  "case-0109": {
+    "category": "port-in-use",
+    "matchedSignature": "Error: listen EADDRINUSE: address already in use <address>",
+    "confidence": "high",
+    "ruleId": "javascript.port-in-use"
+  },
+  "case-0110": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0111": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0112": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0113": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0114": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EACCES: permission denied, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0115": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EACCES: permission denied, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0116": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EPERM: operation not permitted",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0117": {
+    "category": "missing-file",
+    "matchedSignature": "FileNotFoundError: No such file or directory",
+    "confidence": "high",
+    "ruleId": "python.file-not-found"
+  },
+  "case-0118": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0119": {
+    "category": "permission-denied",
+    "matchedSignature": "PermissionError: Permission denied",
+    "confidence": "high",
+    "ruleId": "python.permission-error"
+  },
+  "case-0120": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0121": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0122": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0123": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<' in JSON at position <position>",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0124": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token '<', ... is not valid JSON",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0125": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected character",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0126": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unrecognized token '<'",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0127": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected token u in JSON at position 0",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0128": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: \"undefined\" is not valid JSON",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0129": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: Unexpected end of JSON input",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0130": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON.parse: unexpected end of data",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0131": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: JSON Parse error: Unexpected EOF",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0132": {
+    "category": "json-decode-error",
+    "matchedSignature": "SyntaxError: <invalid JSON payload>",
+    "confidence": "high",
+    "ruleId": "javascript.json-parse-error"
+  },
+  "case-0133": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Failed to fetch",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0134": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: NetworkError when attempting to fetch resource.",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0135": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: fetch failed",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0136": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_CONNECTION_REFUSED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0137": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_NAME_NOT_RESOLVED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0138": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_INTERNET_DISCONNECTED",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0139": {
+    "category": "network-request-failed",
+    "matchedSignature": "net::ERR_CERT_<reason>",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0140": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: preflight request does not pass access control check",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0141": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: 'Access-Control-Allow-Origin' does not match the supplied origin",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0142": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: credentials mode cannot use a wildcard origin",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0143": {
+    "category": "cors-blocked",
+    "matchedSignature": "Access to <transport> at '<url>' from origin '<origin>' blocked by CORS policy: missing 'Access-Control-Allow-Origin' header",
+    "confidence": "high",
+    "ruleId": "javascript.cors-blocked"
+  },
+  "case-0144": {
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0145": {
+    "category": "react-error",
+    "matchedSignature": "Error: Invalid hook call. Hooks can only be called inside of the body of a function component.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0146": {
+    "category": "react-error",
+    "matchedSignature": "Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0147": {
+    "category": "react-error",
+    "matchedSignature": "Error: Maximum update depth exceeded.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0148": {
+    "category": "react-error",
+    "matchedSignature": "Error: Objects are not valid as a React child (found: <value>)",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0149": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Load failed",
+    "confidence": "low",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0150": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0151": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0152": {
+    "category": "react-error",
+    "matchedSignature": "Error: Maximum update depth exceeded.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0153": {
+    "category": "react-error",
+    "matchedSignature": "Error: Objects are not valid as a React child (found: <value>)",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0154": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0155": {
+    "category": "undefined-name",
+    "matchedSignature": "ReferenceError: <name> is not defined",
+    "confidence": "high",
+    "ruleId": "javascript.reference-error"
+  },
+  "case-0156": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of undefined (reading 'name')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0157": {
+    "category": "syntax-error",
+    "matchedSignature": "SyntaxError: <JavaScript parser error>",
+    "confidence": "high",
+    "ruleId": "javascript.syntax-error"
+  },
+  "case-0158": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <JavaScript type mismatch>",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0159": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: <unclassified value error>",
+    "confidence": "low",
+    "ruleId": "python.value-error"
+  },
+  "case-0160": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: invalid literal for int() with base <base>: '<value>'",
+    "confidence": "medium",
+    "ruleId": "python.value-error"
+  },
+  "case-0161": {
+    "category": "unicode-error",
+    "matchedSignature": "UnicodeDecodeError: '<codec>' codec cannot decode the input",
+    "confidence": "high",
+    "ruleId": "python.unicode-error"
+  },
+  "case-0162": {
+    "category": "unicode-error",
+    "matchedSignature": "UnicodeDecodeError: '<codec>' codec cannot decode the input",
+    "confidence": "high",
+    "ruleId": "python.unicode-error"
+  },
+  "case-0163": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: <unclassified value error>",
+    "confidence": "medium",
+    "ruleId": "python.value-error"
+  },
+  "case-0164": {
+    "category": "import-failure",
+    "matchedSignature": "ImportError: cannot import name '<name>' from '<module>'",
+    "confidence": "high",
+    "ruleId": "python.import-error"
+  },
+  "case-0165": {
+    "category": "undefined-name",
+    "matchedSignature": "NameError: name '<name>' is not defined",
+    "confidence": "high",
+    "ruleId": "python.name-error"
+  },
+  "case-0166": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: <Python type mismatch>",
+    "confidence": "high",
+    "ruleId": "python.type-error"
+  },
+  "case-0167": {
+    "category": "missing-attribute",
+    "matchedSignature": "AttributeError: object has no attribute '<attribute>'",
+    "confidence": "high",
+    "ruleId": "python.attribute-error"
+  },
+  "case-0168": {
+    "category": "missing-key",
+    "matchedSignature": "KeyError: <missing key>",
+    "confidence": "high",
+    "ruleId": "python.key-error"
+  },
+  "case-0169": {
+    "category": "index-out-of-range",
+    "matchedSignature": "IndexError: sequence index out of range",
+    "confidence": "high",
+    "ruleId": "python.index-error"
+  },
+  "case-0170": {
+    "category": "permission-denied",
+    "matchedSignature": "PermissionError: Permission denied",
+    "confidence": "high",
+    "ruleId": "python.permission-error"
+  },
+  "case-0171": {
+    "category": "syntax-error",
+    "matchedSignature": "SyntaxError: <Python parser error>",
+    "confidence": "high",
+    "ruleId": "python.syntax-error"
+  },
+  "case-0172": {
+    "category": "indentation-error",
+    "matchedSignature": "IndentationError: <indentation problem>",
+    "confidence": "high",
+    "ruleId": "python.indentation-error"
+  },
+  "case-0173": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Failed to fetch",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0174": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Failed to fetch",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0175": {
+    "category": "network-request-failed",
+    "matchedSignature": "TypeError: Failed to fetch",
+    "confidence": "high",
+    "ruleId": "javascript.network-request-failed"
+  },
+  "case-0176": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of null (reading 'useState')",
+    "confidence": "high",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0177": {
+    "category": "react-error",
+    "matchedSignature": "Error: Objects are not valid as a React child (found: <value>)",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0178": {
+    "category": "react-error",
+    "matchedSignature": "Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.",
+    "confidence": "high",
+    "ruleId": "javascript.react-error"
+  },
+  "case-0179": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0180": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0181": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  }
+}

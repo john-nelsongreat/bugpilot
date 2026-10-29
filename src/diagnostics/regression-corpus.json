@@ -1,0 +1,1096 @@
+{
+  "version": 1,
+  "generatedFrom": [
+    "docs/MANUAL_TEST_CHECKLIST.md (section 7 pasteable examples)",
+    "src/diagnostics/*.test.ts (static rule-test inputs)",
+    "task Part B/B8/B9 inputs"
+  ],
+  "cases": [
+    {
+      "id": "case-0001",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:198",
+      "language": "python",
+      "errorText": "ModuleNotFoundError: No module named 'requests'"
+    },
+    {
+      "id": "case-0002",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:211",
+      "language": "auto",
+      "errorText": "NameError: name 'total' is not defined"
+    },
+    {
+      "id": "case-0003",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:228",
+      "language": "javascript",
+      "errorText": "ReferenceError: userCount is not defined"
+    },
+    {
+      "id": "case-0004",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:247",
+      "language": "auto",
+      "errorText": "TypeError: Cannot read properties of undefined (reading 'name')\n      at showUser (src/user.js:10:5)"
+    },
+    {
+      "id": "case-0005",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:258",
+      "language": "python",
+      "errorText": "ZeroDivisionError: division by zero"
+    },
+    {
+      "id": "case-0006",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:268",
+      "language": "python",
+      "errorText": "ValueError: invalid literal for int() with base 10: 'abc'"
+    },
+    {
+      "id": "case-0007",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:269",
+      "language": "python",
+      "errorText": "ValueError: could not convert string to float: '1,234.5'"
+    },
+    {
+      "id": "case-0008",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:270",
+      "language": "python",
+      "errorText": "ValueError: not enough values to unpack (expected 2, got 1)"
+    },
+    {
+      "id": "case-0009",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:271",
+      "language": "python",
+      "errorText": "ValueError: too many values to unpack (expected 2)"
+    },
+    {
+      "id": "case-0010",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:272",
+      "language": "python",
+      "errorText": "ValueError: math domain error"
+    },
+    {
+      "id": "case-0011",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:273",
+      "language": "python",
+      "errorText": "ValueError: 'apple' is not in list"
+    },
+    {
+      "id": "case-0012",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:274",
+      "language": "python",
+      "errorText": "ValueError: something unusual happened"
+    },
+    {
+      "id": "case-0013",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:278",
+      "language": "python",
+      "errorText": "RecursionError: maximum recursion depth exceeded"
+    },
+    {
+      "id": "case-0014",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:286",
+      "language": "python",
+      "errorText": "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+    },
+    {
+      "id": "case-0015",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:299",
+      "language": "python",
+      "errorText": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "id": "case-0016",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:310",
+      "language": "python",
+      "errorText": "ArithmeticError: division by zero"
+    },
+    {
+      "id": "case-0017",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:311",
+      "language": "python",
+      "errorText": "2026-10-28 12:00:00 ERROR ValueError: math domain error"
+    },
+    {
+      "id": "case-0018",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:312",
+      "language": "python",
+      "errorText": "RuntimeError: maximum recursion depth exceeded"
+    },
+    {
+      "id": "case-0019",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:313",
+      "language": "python",
+      "errorText": "2026-10-28 12:00:00 WARNING UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff"
+    },
+    {
+      "id": "case-0020",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:314",
+      "language": "python",
+      "errorText": "json.decoder.JSONDecodeError: something unusual happened"
+    },
+    {
+      "id": "case-0021",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:323",
+      "language": "javascript",
+      "errorText": "Error: Cannot find module 'express'"
+    },
+    {
+      "id": "case-0022",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:330",
+      "language": "javascript",
+      "errorText": "Error: Cannot find module './missing-handler'"
+    },
+    {
+      "id": "case-0023",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:335",
+      "language": "javascript",
+      "errorText": "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'date-fns' imported from /home/ana/app/src/index.mjs"
+    },
+    {
+      "id": "case-0024",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:340",
+      "language": "javascript",
+      "errorText": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module './utils' imported from /home/ana/app/src/index.mjs"
+    },
+    {
+      "id": "case-0025",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:346",
+      "language": "javascript",
+      "errorText": "Error: listen EADDRINUSE: address already in use :::3000"
+    },
+    {
+      "id": "case-0026",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:353",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, open '/home/ana/app/config.json'"
+    },
+    {
+      "id": "case-0027",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:358",
+      "language": "javascript",
+      "errorText": "Error: spawn ffmpeg ENOENT"
+    },
+    {
+      "id": "case-0028",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:364",
+      "language": "javascript",
+      "errorText": "Error: EACCES: permission denied, open '/var/app/config.json'"
+    },
+    {
+      "id": "case-0029",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:369",
+      "language": "javascript",
+      "errorText": "Error: listen EACCES: permission denied 0.0.0.0:80"
+    },
+    {
+      "id": "case-0030",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:374",
+      "language": "javascript",
+      "errorText": "Error: EPERM: operation not permitted"
+    },
+    {
+      "id": "case-0031",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:380",
+      "language": "javascript",
+      "errorText": "RangeError: Maximum call stack size exceeded"
+    },
+    {
+      "id": "case-0032",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:401",
+      "language": "javascript",
+      "errorText": "2026-10-28 12:00:00 WARN Cannot find module 'express'"
+    },
+    {
+      "id": "case-0033",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:402",
+      "language": "javascript",
+      "errorText": "2026-10-28 12:00:00 WARN EADDRINUSE: address already in use :::3000"
+    },
+    {
+      "id": "case-0034",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:403",
+      "language": "javascript",
+      "errorText": "2026-10-28 12:00:00 WARN ENOENT: no such file or directory, open '/app/x.json'"
+    },
+    {
+      "id": "case-0035",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:404",
+      "language": "javascript",
+      "errorText": "2026-10-28 12:00:00 ERROR EACCES: permission denied, open '/app/x'"
+    },
+    {
+      "id": "case-0036",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:405",
+      "language": "javascript",
+      "errorText": "2026-10-28 12:00:00 WARN RangeError: Maximum call stack size exceeded"
+    },
+    {
+      "id": "case-0037",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:418",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected token < in JSON at position 0"
+    },
+    {
+      "id": "case-0038",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:419",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    },
+    {
+      "id": "case-0039",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:420",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected token u in JSON at position 0"
+    },
+    {
+      "id": "case-0040",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:421",
+      "language": "auto",
+      "errorText": "SyntaxError: \"undefined\" is not valid JSON"
+    },
+    {
+      "id": "case-0041",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:422",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected end of JSON input"
+    },
+    {
+      "id": "case-0042",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:423",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0043",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:423",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON.parse: unexpected character"
+    },
+    {
+      "id": "case-0044",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:424",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON.parse: unexpected end of data at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0045",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:424",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON.parse: unexpected end of data"
+    },
+    {
+      "id": "case-0046",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:425",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON Parse error: Unrecognized token '<'"
+    },
+    {
+      "id": "case-0047",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:426",
+      "language": "auto",
+      "errorText": "SyntaxError: JSON Parse error: Unexpected EOF"
+    },
+    {
+      "id": "case-0048",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:430",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected token '}'"
+    },
+    {
+      "id": "case-0049",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:432",
+      "language": "auto",
+      "errorText": "2026-10-28T10:00:00Z SyntaxError: Unexpected token < in JSON at position 0"
+    },
+    {
+      "id": "case-0050",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:437",
+      "language": "auto",
+      "errorText": "TypeError: Failed to fetch"
+    },
+    {
+      "id": "case-0051",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:439",
+      "language": "auto",
+      "errorText": "TypeError: NetworkError when attempting to fetch resource."
+    },
+    {
+      "id": "case-0052",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:441",
+      "language": "auto",
+      "errorText": "TypeError: Load failed"
+    },
+    {
+      "id": "case-0053",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:443",
+      "language": "auto",
+      "errorText": "TypeError: fetch failed"
+    },
+    {
+      "id": "case-0054",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:446",
+      "language": "auto",
+      "errorText": "TypeError: fetch failed\n      at node:internal/deps/undici/undici:12345:11\n    [cause]: Error: connect ECONNREFUSED 127.0.0.1:3000"
+    },
+    {
+      "id": "case-0055",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:455",
+      "language": "auto",
+      "errorText": "GET http://localhost:3000/api net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "id": "case-0056",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:455",
+      "language": "auto",
+      "errorText": "net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "id": "case-0057",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:456",
+      "language": "auto",
+      "errorText": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "id": "case-0058",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:457",
+      "language": "auto",
+      "errorText": "net::ERR_INTERNET_DISCONNECTED"
+    },
+    {
+      "id": "case-0059",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:458",
+      "language": "auto",
+      "errorText": "GET https://localhost:3000/api net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "id": "case-0060",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:460",
+      "language": "auto",
+      "errorText": "TypeError: x is not a function"
+    },
+    {
+      "id": "case-0061",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:462",
+      "language": "auto",
+      "errorText": "net::ERR_CONNECTION_REFUSED was printed in the build log"
+    },
+    {
+      "id": "case-0062",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:468",
+      "language": "auto",
+      "errorText": "Access to fetch at 'http://localhost:3000/api' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0063",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:475",
+      "language": "auto",
+      "errorText": "Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0064",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:480",
+      "language": "auto",
+      "errorText": "Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a value 'https://other.example.com' that is not equal to the supplied origin."
+    },
+    {
+      "id": "case-0065",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:485",
+      "language": "auto",
+      "errorText": "Access to fetch at 'https://api.example.com/me' from origin 'https://app.example.com' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'."
+    },
+    {
+      "id": "case-0066",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:491",
+      "language": "auto",
+      "errorText": "2026-10-28T10:00:00Z Access to fetch at 'http://x' from origin 'http://y' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0067",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:497",
+      "language": "auto",
+      "errorText": "Uncaught Error: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:"
+    },
+    {
+      "id": "case-0068",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:503",
+      "language": "auto",
+      "errorText": "Error: Too many re-renders. React limits the number of renders to prevent an infinite loop."
+    },
+    {
+      "id": "case-0069",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:505",
+      "language": "auto",
+      "errorText": "Uncaught Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate."
+    },
+    {
+      "id": "case-0070",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:507",
+      "language": "auto",
+      "errorText": "Error: Objects are not valid as a React child (found: object with keys {name, age}). If you meant to render a collection of children, use an array instead."
+    },
+    {
+      "id": "case-0071",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:509",
+      "language": "auto",
+      "errorText": "Warning: Invalid hook call. Hooks can only be called inside of the body of a function component."
+    },
+    {
+      "id": "case-0072",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:515",
+      "language": "auto",
+      "errorText": "SyntaxError: Unexpected token < in JSON at position 0\n      at getData (src/api/client.js:10:5)"
+    },
+    {
+      "id": "case-0073",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:522",
+      "language": "auto",
+      "errorText": "Uncaught Error: Invalid hook call. Hooks can only be called inside of the body of a function component."
+    },
+    {
+      "id": "case-0074",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:537",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read properties of undefined (reading 'amount')"
+    },
+    {
+      "id": "case-0075",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:538",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read properties of null (reading 'length')"
+    },
+    {
+      "id": "case-0076",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:539",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read property 'amount' of undefined"
+    },
+    {
+      "id": "case-0077",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:540",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read property 'length' of null"
+    },
+    {
+      "id": "case-0078",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:541",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot set properties of undefined (setting 'value')"
+    },
+    {
+      "id": "case-0079",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:542",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot set properties of null (setting 'checked')"
+    },
+    {
+      "id": "case-0080",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:543",
+      "language": "javascript",
+      "errorText": "TypeError: items.map is not a function"
+    },
+    {
+      "id": "case-0081",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:544",
+      "language": "javascript",
+      "errorText": "TypeError: items is not iterable"
+    },
+    {
+      "id": "case-0082",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:545",
+      "language": "javascript",
+      "errorText": "TypeError: object null is not iterable"
+    },
+    {
+      "id": "case-0083",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:546",
+      "language": "javascript",
+      "errorText": "TypeError: Assignment to constant variable."
+    },
+    {
+      "id": "case-0084",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:547",
+      "language": "javascript",
+      "errorText": "TypeError: Cart is not a constructor"
+    },
+    {
+      "id": "case-0085",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:548",
+      "language": "javascript",
+      "errorText": "TypeError: can't access property \"name\", user is undefined"
+    },
+    {
+      "id": "case-0086",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:549",
+      "language": "javascript",
+      "errorText": "TypeError: can't access property \"length\", items is null"
+    },
+    {
+      "id": "case-0087",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:558",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot use 'in' operator to search for 'name' in undefined"
+    },
+    {
+      "id": "case-0088",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:560",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot convert undefined or null to object"
+    },
+    {
+      "id": "case-0089",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:562",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read property 'name' of object"
+    },
+    {
+      "id": "case-0090",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:564",
+      "language": "javascript",
+      "errorText": "TypeError: can't access property \"name\", user is defined"
+    },
+    {
+      "id": "case-0091",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:568",
+      "language": "javascript",
+      "errorText": "TypeError: unsupported operand type(s) for +: 'int' and 'str'"
+    },
+    {
+      "id": "case-0092",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:570",
+      "language": "javascript",
+      "errorText": "The page threw TypeError: Cannot read properties of undefined (reading 'name') yesterday"
+    },
+    {
+      "id": "case-0093",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:575",
+      "language": "auto",
+      "errorText": "TypeError: can't access property \"name\", user is undefined"
+    },
+    {
+      "id": "case-0094",
+      "source": "docs/MANUAL_TEST_CHECKLIST.md:577",
+      "language": "auto",
+      "errorText": "TypeError: Assignment to constant variable."
+    },
+    {
+      "id": "case-0095",
+      "source": "src/diagnostics/engine.test.ts:61",
+      "language": "auto",
+      "errorText": "ModuleNotFoundError: No module named 'requests'"
+    },
+    {
+      "id": "case-0096",
+      "source": "src/diagnostics/engine.test.ts:149",
+      "language": "auto",
+      "errorText": "AttributeError: module 'pkg.sub' has no attribute 'load'"
+    },
+    {
+      "id": "case-0097",
+      "source": "src/diagnostics/engine.test.ts:170",
+      "language": "auto",
+      "errorText": "FileNotFoundError: [Errno 2] No such file or directory: 'data/input(1).csv'"
+    },
+    {
+      "id": "case-0098",
+      "source": "src/diagnostics/engine.test.ts:228",
+      "language": "auto",
+      "errorText": "TypeError: a value was not what the function expected"
+    },
+    {
+      "id": "case-0099",
+      "source": "src/diagnostics/engine.test.ts:255",
+      "language": "python",
+      "errorText": "ReferenceError: cart is not defined"
+    },
+    {
+      "id": "case-0100",
+      "source": "src/diagnostics/engine.test.ts:257",
+      "language": "auto",
+      "errorText": "ReferenceError: cart is not defined"
+    },
+    {
+      "id": "case-0101",
+      "source": "src/diagnostics/engine.test.ts:307",
+      "language": "auto",
+      "errorText": "TypeError: items is not iterable"
+    },
+    {
+      "id": "case-0102",
+      "source": "src/diagnostics/engine.test.ts:319",
+      "language": "auto",
+      "errorText": "ImportError: something unusual happened"
+    },
+    {
+      "id": "case-0103",
+      "source": "src/diagnostics/engine.test.ts:376",
+      "language": "auto",
+      "errorText": "ReferenceError: value is not defined"
+    },
+    {
+      "id": "case-0104",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:54",
+      "language": "javascript",
+      "errorText": "Error: Cannot find module 'C:\\Users\\ana\\app\\dist\\missing.js'"
+    },
+    {
+      "id": "case-0105",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:67",
+      "language": "javascript",
+      "errorText": "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@scope/toolkit' imported from C:\\Users\\ana\\app\\src\\index.mjs"
+    },
+    {
+      "id": "case-0106",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:81",
+      "language": "javascript",
+      "errorText": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/home/ana/app/lib/missing.js' imported from /home/ana/app/src/index.mjs"
+    },
+    {
+      "id": "case-0107",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:97",
+      "language": "javascript",
+      "errorText": "Error: listen EADDRINUSE: address already in use 0.0.0.0:3000"
+    },
+    {
+      "id": "case-0108",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:103",
+      "language": "javascript",
+      "errorText": "Error: listen EADDRINUSE: address already in use 127.0.0.1:8080"
+    },
+    {
+      "id": "case-0109",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:109",
+      "language": "javascript",
+      "errorText": "Error: listen EADDRINUSE: address already in use localhost:3000"
+    },
+    {
+      "id": "case-0110",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:124",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, stat 'C:\\Users\\ana\\app\\data\\input.csv'"
+    },
+    {
+      "id": "case-0111",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:130",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, scandir '/home/ana/app/uploads'"
+    },
+    {
+      "id": "case-0112",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:136",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, mkdir '/home/ana/app/cache/tmp'"
+    },
+    {
+      "id": "case-0113",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:142",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, readFile './package.json'"
+    },
+    {
+      "id": "case-0114",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:163",
+      "language": "javascript",
+      "errorText": "Error: EACCES: permission denied, mkdir 'C:\\ProgramData\\app\\cache'"
+    },
+    {
+      "id": "case-0115",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:169",
+      "language": "javascript",
+      "errorText": "Error: EACCES: permission denied, scandir '/root/private'"
+    },
+    {
+      "id": "case-0116",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:187",
+      "language": "javascript",
+      "errorText": "Error: EPERM: operation not permitted, open 'C:\\Users\\ana\\AppData\\Local\\app\\cache.db'"
+    },
+    {
+      "id": "case-0117",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:486",
+      "language": "python",
+      "errorText": "FileNotFoundError: [Errno 2] No such file or directory: 'data/input.csv'"
+    },
+    {
+      "id": "case-0118",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:488",
+      "language": "javascript",
+      "errorText": "FileNotFoundError: [Errno 2] No such file or directory: 'data/input.csv'"
+    },
+    {
+      "id": "case-0119",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:579",
+      "language": "python",
+      "errorText": "PermissionError: [Errno 13] Permission denied: '/var/app/config.json'"
+    },
+    {
+      "id": "case-0120",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:581",
+      "language": "javascript",
+      "errorText": "PermissionError: [Errno 13] Permission denied: '/var/app/config.json'"
+    },
+    {
+      "id": "case-0121",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:725",
+      "language": "auto",
+      "errorText": "Error: ENOENT: no such file or directory, open '/app/config.json'"
+    },
+    {
+      "id": "case-0122",
+      "source": "src/diagnostics/javascript-rules-batch-b1.test.ts:727",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, open '/app/config.json'"
+    },
+    {
+      "id": "case-0123",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:34",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected token < in JSON at position 0"
+    },
+    {
+      "id": "case-0124",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:41",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+    },
+    {
+      "id": "case-0125",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:48",
+      "language": "javascript",
+      "errorText": "SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0126",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:56",
+      "language": "javascript",
+      "errorText": "SyntaxError: JSON Parse error: Unrecognized token '<'"
+    },
+    {
+      "id": "case-0127",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:63",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected token u in JSON at position 0"
+    },
+    {
+      "id": "case-0128",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:70",
+      "language": "javascript",
+      "errorText": "SyntaxError: \"undefined\" is not valid JSON"
+    },
+    {
+      "id": "case-0129",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:77",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected end of JSON input"
+    },
+    {
+      "id": "case-0130",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:84",
+      "language": "javascript",
+      "errorText": "SyntaxError: JSON.parse: unexpected end of data at line 1 column 1 of the JSON data"
+    },
+    {
+      "id": "case-0131",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:92",
+      "language": "javascript",
+      "errorText": "SyntaxError: JSON Parse error: Unexpected EOF"
+    },
+    {
+      "id": "case-0132",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:99",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected token '}', ... is not valid JSON"
+    },
+    {
+      "id": "case-0133",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:109",
+      "language": "javascript",
+      "errorText": "TypeError: Failed to fetch"
+    },
+    {
+      "id": "case-0134",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:116",
+      "language": "javascript",
+      "errorText": "TypeError: NetworkError when attempting to fetch resource."
+    },
+    {
+      "id": "case-0135",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:123",
+      "language": "javascript",
+      "errorText": "TypeError: fetch failed"
+    },
+    {
+      "id": "case-0136",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:130",
+      "language": "javascript",
+      "errorText": "GET http://localhost:3000/api net::ERR_CONNECTION_REFUSED"
+    },
+    {
+      "id": "case-0137",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:137",
+      "language": "javascript",
+      "errorText": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "id": "case-0138",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:144",
+      "language": "javascript",
+      "errorText": "net::ERR_INTERNET_DISCONNECTED"
+    },
+    {
+      "id": "case-0139",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:151",
+      "language": "javascript",
+      "errorText": "GET https://localhost:3000/api net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "id": "case-0140",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:174",
+      "language": "javascript",
+      "errorText": "Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0141",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:183",
+      "language": "javascript",
+      "errorText": "Access to fetch at 'https://api.example.com/data' from origin 'https://app.example.com' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a value 'https://other.example.com' that is not equal to the supplied origin."
+    },
+    {
+      "id": "case-0142",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:192",
+      "language": "javascript",
+      "errorText": "Access to fetch at 'https://api.example.com/me' from origin 'https://app.example.com' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'."
+    },
+    {
+      "id": "case-0143",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:201",
+      "language": "javascript",
+      "errorText": "Access to XMLHttpRequest at 'http://localhost:3000/api' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    },
+    {
+      "id": "case-0144",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:213",
+      "language": "javascript",
+      "errorText": "Uncaught Error: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:"
+    },
+    {
+      "id": "case-0145",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:222",
+      "language": "javascript",
+      "errorText": "Invalid hook call. Hooks can only be called inside of the body of a function component."
+    },
+    {
+      "id": "case-0146",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:231",
+      "language": "javascript",
+      "errorText": "Error: Too many re-renders. React limits the number of renders to prevent an infinite loop."
+    },
+    {
+      "id": "case-0147",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:240",
+      "language": "javascript",
+      "errorText": "Uncaught Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate."
+    },
+    {
+      "id": "case-0148",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:248",
+      "language": "javascript",
+      "errorText": "Error: Objects are not valid as a React child (found: object with keys {name, age}). If you meant to render a collection of children, use an array instead."
+    },
+    {
+      "id": "case-0149",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:323",
+      "language": "javascript",
+      "errorText": "TypeError: Load failed"
+    },
+    {
+      "id": "case-0150",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:497",
+      "language": "python",
+      "errorText": "requests.exceptions.ConnectionError: HTTPSConnectionPool(host='api.example.com', port=443)"
+    },
+    {
+      "id": "case-0151",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:499",
+      "language": "javascript",
+      "errorText": "requests.exceptions.ConnectionError: HTTPSConnectionPool(host='api.example.com', port=443)"
+    },
+    {
+      "id": "case-0152",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:584",
+      "language": "javascript",
+      "errorText": "Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate."
+    },
+    {
+      "id": "case-0153",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:596",
+      "language": "javascript",
+      "errorText": "Error: Objects are not valid as a React child (found: object with keys {name, age})."
+    },
+    {
+      "id": "case-0154",
+      "source": "src/diagnostics/javascript-rules-batch-b2.test.ts:717",
+      "language": "javascript",
+      "errorText": "ModuleNotFoundError: No module named 'requests'"
+    },
+    {
+      "id": "case-0155",
+      "source": "src/diagnostics/javascript-rules.test.ts:24",
+      "language": "javascript",
+      "errorText": "ReferenceError: cart is not defined"
+    },
+    {
+      "id": "case-0156",
+      "source": "src/diagnostics/javascript-rules.test.ts:30",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot read properties of undefined (reading 'name')"
+    },
+    {
+      "id": "case-0157",
+      "source": "src/diagnostics/javascript-rules.test.ts:36",
+      "language": "javascript",
+      "errorText": "SyntaxError: Unexpected token '<'"
+    },
+    {
+      "id": "case-0158",
+      "source": "src/diagnostics/javascript-type-error-subtypes.test.ts:154",
+      "language": "javascript",
+      "errorText": "TypeError: Cannot use 'in' operator to search for 'x' in null"
+    },
+    {
+      "id": "case-0159",
+      "source": "src/diagnostics/python-rules-batch-a.test.ts:255",
+      "language": "auto",
+      "errorText": "ValueError: something unusual happened"
+    },
+    {
+      "id": "case-0160",
+      "source": "src/diagnostics/python-rules-batch-a.test.ts:328",
+      "language": "auto",
+      "errorText": "ValueError: invalid literal for int() with base 10: 'abc'"
+    },
+    {
+      "id": "case-0161",
+      "source": "src/diagnostics/python-rules-batch-a.test.ts:422",
+      "language": "python",
+      "errorText": "UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d in position 12: character maps to <undefined>"
+    },
+    {
+      "id": "case-0162",
+      "source": "src/diagnostics/python-rules-batch-a.test.ts:430",
+      "language": "python",
+      "errorText": "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 2-3: invalid continuation byte"
+    },
+    {
+      "id": "case-0163",
+      "source": "src/diagnostics/python-rules-batch-a.test.ts:625",
+      "language": "python",
+      "errorText": "ValueError: Expecting value: line 1 column 1 (char 0)"
+    },
+    {
+      "id": "case-0164",
+      "source": "src/diagnostics/python-rules.test.ts:43",
+      "language": "python",
+      "errorText": "ImportError: cannot import name 'Client' from 'api'"
+    },
+    {
+      "id": "case-0165",
+      "source": "src/diagnostics/python-rules.test.ts:49",
+      "language": "python",
+      "errorText": "NameError: name 'user_count' is not defined"
+    },
+    {
+      "id": "case-0166",
+      "source": "src/diagnostics/python-rules.test.ts:55",
+      "language": "python",
+      "errorText": "TypeError: unsupported operand type(s) for +: 'int' and 'str'"
+    },
+    {
+      "id": "case-0167",
+      "source": "src/diagnostics/python-rules.test.ts:61",
+      "language": "python",
+      "errorText": "AttributeError: 'NoneType' object has no attribute 'strip'"
+    },
+    {
+      "id": "case-0168",
+      "source": "src/diagnostics/python-rules.test.ts:67",
+      "language": "python",
+      "errorText": "KeyError: 'user_id'"
+    },
+    {
+      "id": "case-0169",
+      "source": "src/diagnostics/python-rules.test.ts:73",
+      "language": "python",
+      "errorText": "IndexError: list index out of range"
+    },
+    {
+      "id": "case-0170",
+      "source": "src/diagnostics/python-rules.test.ts:85",
+      "language": "python",
+      "errorText": "PermissionError: [Errno 13] Permission denied: 'reports/output.csv'"
+    },
+    {
+      "id": "case-0171",
+      "source": "src/diagnostics/python-rules.test.ts:91",
+      "language": "python",
+      "errorText": "SyntaxError: invalid syntax"
+    },
+    {
+      "id": "case-0172",
+      "source": "src/diagnostics/python-rules.test.ts:97",
+      "language": "python",
+      "errorText": "IndentationError: unexpected indent"
+    },
+    {
+      "id": "case-0173",
+      "source": "task:B1",
+      "language": "auto",
+      "errorText": "Access to fetch at 'https://api.example.com/data' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.\nGET https://api.example.com/data net::ERR_FAILED 200 (OK)\nUncaught (in promise) TypeError: Failed to fetch"
+    },
+    {
+      "id": "case-0174",
+      "source": "task:B2",
+      "language": "auto",
+      "errorText": "Access to fetch at 'https://api.example.com/v1/items' from origin 'http://localhost:3000' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.\nTypeError: Failed to fetch"
+    },
+    {
+      "id": "case-0175",
+      "source": "task:B3",
+      "language": "auto",
+      "errorText": "GET http://localhost:9999/api/users net::ERR_CONNECTION_REFUSED\nUncaught (in promise) TypeError: Failed to fetch"
+    },
+    {
+      "id": "case-0176",
+      "source": "task:B4",
+      "language": "auto",
+      "errorText": "Warning: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons: 1. You might have mismatching versions of React and the renderer (such as React DOM) 2. You might be breaking the Rules of Hooks 3. You might have more than one copy of React in the same app\nUncaught TypeError: Cannot read properties of null (reading 'useState')"
+    },
+    {
+      "id": "case-0177",
+      "source": "task:B6",
+      "language": "auto",
+      "errorText": "Uncaught Error: Objects are not valid as a React child (found: object with keys {id, name}). If you meant to render a collection of children, use an array instead.\n    at throwOnInvalidObjectType (react-dom.development.js:3500:13)\nThe above error occurred in the <App> component:\n    at App (App.jsx:5:3)\nConsider adding an error boundary to your tree to customize error handling behavior."
+    },
+    {
+      "id": "case-0178",
+      "source": "task:B7",
+      "language": "auto",
+      "errorText": "Uncaught Error: Too many re-renders. React limits the number of renders to prevent an infinite loop.\n    at throwOnInvalidObjectType (react-dom.development.js:3500:13)\nThe above error occurred in the <App> component:\n    at App (App.jsx:5:3)\nConsider adding an error boundary to your tree to customize error handling behavior."
+    },
+    {
+      "id": "case-0179",
+      "source": "task:B8a",
+      "language": "auto",
+      "errorText": "TODO: fix the CORS error before release"
+    },
+    {
+      "id": "case-0180",
+      "source": "task:B8b",
+      "language": "auto",
+      "errorText": "see the docs about Invalid hook call"
+    },
+    {
+      "id": "case-0181",
+      "source": "task:B9",
+      "language": "auto",
+      "errorText": "2026-10-28T10:00:00Z Access to fetch at 'https://api.example.com/data' from origin 'http://localhost:5173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource."
+    }
+  ]
+}
