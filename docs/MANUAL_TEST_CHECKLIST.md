@@ -449,7 +449,7 @@ These are the same distinctive browser messages pasted without the error class, 
   | `"undefined" is not valid JSON` | `SyntaxError: "undefined" is not valid JSON` |
 - [ ] Expected: the confidence reason says the error class was missing and the result was capped at Medium; the cause, steps, fix, and verification guidance match the prefixed form of the same message.
 - [ ] Paste `Unexpected token }` alone.
-  - Expected: **Syntax error** at **High confidence** with signature `SyntaxError: <JavaScript parser error>`. The JSON rule must not claim a generic parser message.
+  - Expected: **Unrecognised** at **Low confidence** with no possible fix. A bare generic parser message is not a JSON message, and without the `SyntaxError:` class the generic parser rule does not claim it either.
 - [ ] Paste `2026-10-29T10:00:00Z JSON.parse: unexpected character at line 1 column 1 of the JSON data` and separately `The log said JSON Parse error: Unexpected EOF while loading.`
   - Expected: **Unrecognised** with no possible fix both times; a timestamped or prose mention is not treated as the final exception line.
 - [ ] Set **Language** to `Python` and paste `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`.
