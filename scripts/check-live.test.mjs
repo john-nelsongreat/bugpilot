@@ -1,19 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CRASH_TITLE,
   DEFAULT_LIVE_URL,
+  GUARD_TITLE,
   MAX_RETRIES,
   REQUIRED_HEADERS,
   SLOW_REQUEST_MS,
+  WORKFLOW_MESSAGE_LIMIT,
+  buildStepSummary,
   classifyAssetResponse,
   classifyRouteResponse,
   classifyTiming,
   compareRequiredHeaders,
+  crashMessage,
+  describeUrlSource,
+  escapeWorkflowData,
+  escapeWorkflowProperty,
   extractAssetUrls,
   extractGlobalHeaders,
+  failureAnnotation,
+  formatRunHeader,
+  formatSummaryCell,
+  formatWorkflowError,
+  guardResult,
   isHtmlContentType,
   isTimeoutError,
   normalizeBaseUrl,
+  readRepositoryCommit,
+  resolveStepSummaryPath,
   shouldRetry,
+  truncateWorkflowMessage,
 } from './check-live.mjs'
 
 const VALID_HTML = [
@@ -419,5 +435,170 @@ describe('retry and timeout classification', () => {
     expect(isTimeoutError({ name: 'TimeoutError' })).toBe(true)
     expect(isTimeoutError({ name: 'TypeError', cause: { name: 'TimeoutError' } })).toBe(true)
     expect(isTimeoutError(new Error('fetch failed'))).toBe(false)
+  })
+})
+
+describe('workflow command escaping', () => {
+  it('escapes percent, carriage return and line feed in message data', () => {
+    expect(escapeWorkflowData('100% done')).toBe('100%25 done')
+    expect(escapeWorkflowData('a\nb')).toBe('a%0Ab')
+    expect(escapeWorkflowData('a\r\nb')).toBe('a%0D%0Ab')
+    expect(escapeWorkflowData('already %25 escaped')).toBe('already %2525 escaped')
+  })
+
+  it('additionally escapes the property separators', () => {
+    expect(escapeWorkflowProperty('a:b=c')).toBe('a%3Ab%3Dc')
+    expect(escapeWorkflowProperty('50%: x=1')).toBe('50%25%3A x%3D1')
+  })
+
+  it('truncates a long message and keeps it recognisable', () => {
+    const short = truncateWorkflowMessage('short message')
+    expect(short).toBe('short message')
+
+    const long = truncateWorkflowMessage('x'.repeat(WORKFLOW_MESSAGE_LIMIT * 3))
+    expect(long.length).toBeLessThanOrEqual(WORKFLOW_MESSAGE_LIMIT)
+    expect(long.endsWith('[truncated]')).toBe(true)
+  })
+
+  it('builds a single-line error command with an escaped title', () => {
+    const line = formatWorkflowError({
+      title: 'Headers /: path=1',
+      message: 'HTTP 500\nsecond line 100%',
+    })
+
+    expect(line.includes('\n')).toBe(false)
+    expect(line.startsWith('::error title=Headers /%3A path%3D1::')).toBe(true)
+    expect(line.endsWith('HTTP 500%0Asecond line 100%25')).toBe(true)
+  })
+
+  it('folds the observed value and every failing detail into one annotation', () => {
+    const line = failureAnnotation({
+      label: 'GET /bugs',
+      pass: false,
+      observed: 'HTTP 503; text/html; 412 ms',
+      details: ['HTTP 503 (expected 200)', 'body does not contain the app root element (#root)'],
+    })
+
+    expect(line).toBe(
+      '::error title=GET /bugs::HTTP 503; text/html; 412 ms | HTTP 503 (expected 200) | body does not contain the app root element (#root)',
+    )
+  })
+
+  it('keeps the guard and crash titles stable', () => {
+    expect(GUARD_TITLE).toBe('Live check guard')
+    expect(CRASH_TITLE).toBe('Live check crash')
+    expect(formatWorkflowError({ title: GUARD_TITLE, message: 'LIVE_URL: bad' })).toBe(
+      '::error title=Live check guard::LIVE_URL: bad',
+    )
+  })
+})
+
+describe('guard results', () => {
+  it('records a guard failure as a failing check', () => {
+    expect(guardResult('vercel.json', 'cannot read or parse /tmp/x: ENOENT')).toEqual({
+      label: 'Guard vercel.json',
+      pass: false,
+      observed: 'cannot read or parse /tmp/x: ENOENT',
+      details: [],
+    })
+  })
+
+  it('names the URL source as LIVE_URL only when a value was supplied', () => {
+    expect(describeUrlSource('https://example.test')).toBe('LIVE_URL')
+    expect(describeUrlSource('   ')).toBe('default')
+    expect(describeUrlSource(undefined)).toBe('default')
+  })
+
+  it('prints the run context as one line with the defaults marked', () => {
+    const line = formatRunHeader({
+      nodeVersion: 'v24.18.0',
+      baseUrl: DEFAULT_LIVE_URL,
+      urlSource: 'default',
+      commit: null,
+      utcTime: '2026-10-31T03:04:05.000Z',
+    })
+
+    expect(line.includes('\n')).toBe(false)
+    expect(line).toBe(
+      `run node=v24.18.0 url=${DEFAULT_LIVE_URL} urlSource=default commit=unknown time=2026-10-31T03:04:05.000Z`,
+    )
+  })
+
+  it('describes an unexpected error with its name, message and stack', () => {
+    const error = new RangeError('bad offset')
+    const described = crashMessage(error)
+
+    expect(described.startsWith('RangeError: bad offset\n')).toBe(true)
+    expect(described).toContain(error.stack.split('\n')[1].trim())
+    expect(crashMessage('plain string')).toContain('plain string')
+  })
+
+  it('only resolves a step summary path when the variable is set', () => {
+    expect(resolveStepSummaryPath({})).toBe(null)
+    expect(resolveStepSummaryPath({ GITHUB_STEP_SUMMARY: '  ' })).toBe(null)
+    expect(typeof resolveStepSummaryPath({ GITHUB_STEP_SUMMARY: '/tmp/step.md' })).toBe('string')
+  })
+
+  it('returns null instead of throwing when the commit cannot be read', () => {
+    expect(readRepositoryCommit(process.cwd())).toMatch(/^[0-9a-f]{4,40}$/i)
+    expect(readRepositoryCommit('/definitely/not/a/directory')).toBe(null)
+  })
+})
+
+describe('step summary markdown', () => {
+  const results = [
+    { label: 'GET /', pass: true, observed: 'HTTP 200; text/html; 41 ms', details: [] },
+    {
+      label: 'Headers /',
+      pass: false,
+      observed: '4/5 match vercel.json',
+      details: ['X-Frame-Options: missing from the response; expected "DENY", observed null'],
+    },
+    { label: 'GET /bugs', pass: false, observed: 'network error after 3 attempt(s)', details: [] },
+  ]
+
+  it('escapes pipes and newlines in a cell', () => {
+    expect(formatSummaryCell('a | b')).toBe('a \\| b')
+    expect(formatSummaryCell('line1\nline2')).toBe('line1<br>line2')
+    expect(formatSummaryCell('line1\r\nline2')).toBe('line1<br>line2')
+  })
+
+  it('writes one row per check plus a heading and counts', () => {
+    const text = buildStepSummary({ baseUrl: 'https://example.test', commit: 'abc1234', results })
+    const lines = text.split('\n')
+
+    expect(lines[0]).toBe('## BugPilot live site check — FAIL')
+    expect(text).toContain('- Base URL: `https://example.test`')
+    expect(text).toContain('- Commit: `abc1234`')
+    expect(text).toContain('- Checks: 1 passed, 2 failed')
+    expect(text).toContain('| Check | Result | Observed | Failing details |')
+    expect(text).toContain('| GET / | PASS | HTTP 200; text/html; 41 ms |  |')
+    expect(text).toContain('| Headers / | FAIL | 4/5 match vercel.json | X-Frame-Options: missing')
+    expect(text).toContain('| GET /bugs | FAIL | network error after 3 attempt(s) | network error after 3 attempt(s) |')
+  })
+
+  it('marks a clean run as PASS and uses unknown for a missing commit', () => {
+    const text = buildStepSummary({
+      baseUrl: 'https://example.test',
+      commit: null,
+      results: [results[0]],
+    })
+
+    expect(text).toContain('## BugPilot live site check — PASS')
+    expect(text).toContain('- Commit: `unknown`')
+    expect(text).toContain('- Checks: 1 passed, 0 failed')
+  })
+
+  it('keeps every summary line free of raw newlines in the table', () => {
+    const text = buildStepSummary({
+      baseUrl: 'https://example.test',
+      commit: 'abc1234',
+      results: [guardResult('LIVE_URL', 'line one\nline two | three')],
+    })
+
+    for (const line of text.split('\n')) {
+      if (line.startsWith('| Guard')) expect(line).toContain('<br>')
+    }
+    expect(text).toContain('| Guard LIVE_URL | FAIL | line one<br>line two \\| three | line one<br>line two \\| three |')
   })
 })

@@ -217,9 +217,22 @@ Run it locally with:
 node scripts/check-live.mjs
 ```
 
-A red run means at least one route, header, asset or timing check failed. It is a basic health check, not an uptime guarantee, and it does not exercise any interactive feature.
+The first line of every run prints the Node version, the base URL actually used, whether it came from the `LIVE_URL` environment variable or from the built-in default, the short commit of the checkout when `git` can report one, and the UTC time — so a run can be identified without digging through the log.
 
-GitHub can delay or skip scheduled runs. Scheduled workflows in a public repository are disabled automatically after 60 days without repository activity; if that happens, re-enable the workflow in the Actions tab. The workflow had not run on GitHub when this section was written; the badge will show its first completed run only after it is pushed and run.
+Inside GitHub Actions (`GITHUB_ACTIONS=true`) every failure is also published where the Actions UI shows it without a login:
+
+- Every failed check produces one `::error title=<check>::<observed value and every failing detail>` workflow command, so it appears as a red **annotation** on the run summary page and beside the failing step.
+- Every early-exit guard produces one annotation titled `Live check guard`: an invalid `LIVE_URL`, a `vercel.json` that cannot be read or parsed, a configuration without the global `/(.*)` header block, and a configuration missing one of the required headers. These guards exit before any request is made, which previously left a red run with no visible reason.
+- An unexpected exception is caught at the top level and annotated as `Live check crash` with the error name, message and stack.
+- When `GITHUB_STEP_SUMMARY` is set, the same checks are appended as a markdown table (check, result, observed value, failing details) with the base URL, commit and pass/fail counts, so the whole result is readable on the run page.
+
+Percent signs, carriage returns and line feeds are percent-encoded in the workflow commands as the format requires, and a message longer than 1800 characters is truncated with a `[truncated]` marker. Console output and exit codes are otherwise unchanged: `0` only when every check passed, `1` for any failed check, failed guard or crash.
+
+Verified locally on 2026-10-31 by running the script with `GITHUB_ACTIONS=true` and a temporary `GITHUB_STEP_SUMMARY` file against the live site (0 annotations, summary marked PASS), a non-existent host (11 annotations, one per failed check), `LIVE_URL` set to `not a url` and a `VERCEL_JSON_PATH` pointing at a missing file (one guard annotation each, exit code 1 in all three failing cases).
+
+A red run means at least one route, header, asset or timing check failed, and the reason now appears in the run page itself rather than only in the job log. It is a basic health check, not an uptime guarantee, and it does not exercise any interactive feature.
+
+GitHub can delay or skip scheduled runs. Scheduled workflows in a public repository are disabled automatically after 60 days without repository activity; if that happens, re-enable the workflow in the Actions tab. Run history read from the public GitHub API on 2026-10-31: five runs, **#1** (2026-10-27, manual) **failed** and **#2–#5** (one manual, three scheduled) **succeeded**; the scheduled runs started around 12:58–13:05 UTC even though the cron reads 06:17, which is GitHub's own scheduling delay rather than a second timezone in the file. Run #1's only annotation was the generic `Process completed with exit code 1`, and its step finished in under a second — locally measured, the script's own retried network path takes about 17 s for an unreachable host, so that failure did not come from inside the request loop, and without an authenticated job log nothing more can be said about it. The annotations and step summary above exist so that the next red run explains itself in the Actions UI.
 
 ## Routes
 
