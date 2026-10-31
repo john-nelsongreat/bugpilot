@@ -783,6 +783,257 @@ Set **Language** to `JavaScript` unless a step says otherwise. Every result here
 
 One related distinction: `npm install failed with a dependency conflict` and `The build log mentioned ERESOLVE earlier.` stay **Unrecognised**, and a Python traceback that ends in `ValueError: … TS2322` still returns **Invalid value** from the Python rule — the new signals only add evidence for JavaScript, they never claim another language's exception line.
 
+### Batch C2 Git rules
+
+Git writes these lines itself and they belong to no programming language, so the whole batch reads the same whatever **Language** says. Set **Language** to `Auto — infer from the text` for every example below, then repeat the three examples marked **[all modes]** with `Python` and with `JavaScript` selected: the result is identical in all three modes — same category, confidence, signature, and evidence. Paste each block exactly as shown, one per analysis.
+
+Every result in this section names the line the failing command wrote and never the words Python, JavaScript, or runtime.
+
+**Repository, remote, and push**
+
+- [ ] **C2-1 No repository here.** Clear the form and paste:
+  ```text
+  PS C:\Users\dev\project> git status
+  fatal: not a git repository (or any of the parent directories): .git
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: not a git repository (or any of the parent directories): .git`.
+  - Expected: one evidence item — **Final exception line** at **Line 2** quoting the `fatal:` line. The prompt line is not quoted.
+  - Expected: the fix starts with a `cd` command and re-runs `git status`; the likely cause quotes the `fatal:` line. The only write the advice offers is a `git clone`, and its explanation says plainly that cloning writes a new folder, so it needs a target that is not already in use. Nothing in the result changes an existing repository.
+  - Expected: the confidence reason reads **The final line is a message the failing command wrote itself, and a specific signature recognises it, so no language evidence was needed.** **[all modes]**
+- [ ] **C2-2 Remote name already taken.** Clear the form and paste:
+  ```text
+  $ git remote add origin https://github.com/dev/app.git
+  error: remote origin already exists.
+  ```
+  - Expected: **Git error**, **High confidence**, signature `error: remote origin already exists.` — the real `error:` prefix, not `fatal:`.
+  - Expected: **Final exception line** at **Line 2**, and the fix reads `git remote -v` before `git remote set-url`.
+- [ ] **C2-3 Push refused (fetch first).** Clear the form and paste the whole block:
+  ```text
+  PS C:\Users\dev\app> git push
+  To https://github.com/dev/app.git
+   ! [rejected]        main -> main (fetch first)
+  error: failed to push some refs to 'https://github.com/dev/app.git'
+  hint: Updates were rejected because the remote contains work that you do not
+  hint: have locally. This is usually caused by another repository pushing to
+  hint: the same ref. If you want to integrate the remote changes, use
+  hint: 'git pull' before pushing again.
+  hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+  ```
+  - Expected: **Git error**, **High confidence**, signature `! [rejected] <ref> -> <ref> (fetch first)` — the `hint:` block and the `To …` line do not hide it.
+  - Expected: evidence is **Final exception line** at **Line 4** (`error: failed to push some refs to …`) and **Matched context line** at **Line 3** (the `! [rejected]` marker). Neither `hint:` line nor the `To …` line is quoted.
+  - Expected: the debugging steps tell you to read the `hint:` lines. In the fix, `git pull --rebase` appears **before** `--force-with-lease`; the bare `--force` form does not appear anywhere, and the overwriting option is labelled as a last resort that can lose other people's commits.
+  - Expected: the confidence reason reads **A message the failing command wrote itself appears on line 3, and a specific signature recognises it, so no language evidence was needed.** **[all modes]**
+- [ ] **C2-4 Push refused (non-fast-forward) with shell prompts.** Clear the form and paste:
+  ```text
+  dev@workstation:~/app$ git push
+  To https://github.com/dev/app.git
+   ! [rejected]        main -> main (non-fast-forward)
+  error: failed to push some refs to 'https://github.com/dev/app.git'
+  dev@workstation:~/app$
+  ```
+  - Expected: **Git error**, **High confidence**, signature `! [rejected] <ref> -> <ref> (non-fast-forward)`.
+  - Expected: **Matched context line** at **Line 3**. The trailing prompt line is selected as **Final exception line** at **Line 5**, but the prompt text never appears in the signature or the likely cause.
+- [ ] **C2-5 Push summary on its own.** Clear the form and paste `error: failed to push some refs to 'https://github.com/dev/app.git'`.
+  - Expected: **Git error** at **Low confidence**, signature `error: failed to push some refs to '<url>'`, one evidence item at **Line 1**, and the reason **The final line is an error line from the failing command, but no specific signature covers it, so it is quoted rather than explained.** This summary is a weaker result than C2-3 above, where a specific line is present in the same paste.
+
+**Branches and merging**
+
+- [ ] **C2-6 Unrelated histories.** Clear the form and paste:
+  ```text
+  $ git pull origin main --rebase
+  fatal: refusing to merge unrelated histories
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: refusing to merge unrelated histories`, **Final exception line** at **Line 2**.
+  - Expected: `--allow-unrelated-histories` appears in the fix, described as a deliberate choice rather than the obvious one.
+- [ ] **C2-7 Merge conflict.** Clear the form and paste:
+  ```text
+  PS C:\Users\dev\app> git merge feature/login
+  Auto-merging src/App.tsx
+  CONFLICT (content): Merge conflict in src/App.tsx
+  Automatic merge failed; fix conflicts and then commit the result.
+  ```
+  - Expected: **Git error**, **High confidence**, signature `CONFLICT (<type>): Merge conflict in <file>`.
+  - Expected: evidence is **Final exception line** at **Line 4** and **Matched context line** at **Line 3** quoting `CONFLICT (content): Merge conflict in src/App.tsx`.
+  - Expected: the fix names the `<<<<<<<`, `=======`, and `>>>>>>>` marker lines, stages the resolved file with `git add` before `git commit`, and offers `git merge --abort` as the reversible exit while saying plainly that it discards the edits already made while resolving. **[all modes]**
+- [ ] **C2-8 Merge summary on its own.** Clear the form and paste `Automatic merge failed; fix conflicts and then commit the result.`
+  - Expected: **Git error** at **Low confidence**, signature `Automatic merge failed; fix conflicts and then commit the result.`, one evidence item at **Line 1**, and the reason **The final line is an error line from the failing command, but no specific signature covers it, so it is quoted rather than explained.** The cause points at the `CONFLICT` lines above it instead of inventing a file name.
+- [ ] **C2-9 Work would be overwritten.** Clear the form and paste:
+  ```text
+  PS C:\Users\dev\app> git checkout main
+  error: Your local changes to the following files would be overwritten by checkout:
+  	src/App.tsx
+  Please commit your changes or stash them before you switch branches.
+  Aborting
+  ```
+  - Expected: **Git error**, **High confidence**, signature `error: Your local changes to the following files would be overwritten by checkout:`.
+  - Expected: evidence is **Final exception line** at **Line 5** (`Aborting`) and **Matched context line** at **Line 2**.
+  - Expected: the fix says Git aborted so nothing changed yet, and offers a commit or `git stash push` / `git stash pop`. The words `reset --hard` and `git clean` do not appear anywhere in the result — not in the cause, steps, fix, or limitations.
+
+**Identity, credentials, and access**
+
+- [ ] **C2-10 No author identity.** Clear the form and paste the full block Git prints:
+  ```text
+  PS C:\Users\dev\app> git commit -m "fix login"
+  Author identity unknown
+
+  *** Please tell me who you are.
+
+  Run
+
+    git config --global user.email "<you@example.com>"
+    git config --global user.name "<Your Name>"
+
+  to set your account's default identity.
+  Omit --global to set the identity only in this repository.
+
+  fatal: unable to auto-detect email address (got 'dev@PC.(none)')
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: unable to auto-detect email address (got '<value>')`, one evidence item — **Final exception line** at **Line 14**.
+  - Expected: the fix sets `user.email` and `user.name`, and says plainly that commits already made keep the identity they were written with and that rewriting history on a shared branch is not the fix.
+- [ ] **C2-11 Identity banner on its own.** Clear the form and paste `*** Please tell me who you are.`
+  - Expected: **Git error** at **Low confidence**, signature `*** Please tell me who you are.` Then paste `Author identity unknown`.
+  - Expected: **Git error** at **High confidence**, signature `Author identity unknown`.
+- [ ] **C2-12 Password no longer accepted.** Clear the form and paste:
+  ```text
+  remote: Support for password authentication was removed on August 13, 2021.
+  fatal: Authentication failed for 'https://github.com/dev/app.git/'
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: Authentication failed for '<url>'` — the specific `fatal:` line wins over the `remote:` line above it.
+  - Expected: **Final exception line** at **Line 2** only. The fix names a token or an SSH key and says never to paste a token into a file, a commit, a chat, or a screenshot.
+- [ ] **C2-13 Credential refused, HTTPS 403.** Clear the form and paste:
+  ```text
+  remote: Permission to dev/app.git denied to dev.
+  error: The requested URL returned error: 403
+  fatal: unable to access 'https://github.com/dev/app.git/': The requested URL returned error: 403
+  ```
+  - Expected: **Git error**, **High confidence**, signature `error: The requested URL returned error: 403`.
+  - Expected: evidence is **Final exception line** at **Line 3** and **Matched context line** at **Line 2**. The result still says a token is a secret and must never be pasted anywhere.
+- [ ] **C2-14 Account lacks access, one line.** Clear the form and paste `remote: Permission to dev/app.git denied to dev.`
+  - Expected: **Git error**, **High confidence**, signature `remote: Permission to <owner>/<repo>.git denied to <user>.`, one evidence item at **Line 1**. The advice is to switch account or ask for access, not to change the code.
+- [ ] **C2-15 SSH key refused.** Clear the form and paste:
+  ```text
+  $ git clone git@github.com:dev/app.git
+  Cloning into app...
+  git@github.com: Permission denied (publickey).
+  fatal: Could not read from remote repository.
+  ```
+  - Expected: **Git error**, **High confidence**, signature `Permission denied (publickey).`
+  - Expected: evidence is **Final exception line** at **Line 4** and **Matched context line** at **Line 3**, and the result mentions an SSH key or `ssh -T`.
+- [ ] **C2-16 Branch does not exist locally.** Clear the form and paste:
+  ```text
+  error: src refspec main does not match any
+  error: failed to push some refs to 'https://github.com/dev/app.git'
+  ```
+  - Expected: **Git error**, **High confidence**, signature `error: src refspec <branch> does not match any` — the specific line at **Line 1** beats the generic push summary at **Line 2**, which is selected as **Final exception line**.
+  - Expected: the fix lists branches and makes the first commit before `git push -u origin <branch>`.
+
+**Ownership, locks, and the network**
+
+- [ ] **C2-17 Doubtful folder ownership.** Clear the form and paste:
+  ```text
+  fatal: detected dubious ownership in repository at 'C:/Users/dev/project'
+  To add an exception for this directory, call:
+
+  	git config --global --add safe.directory C:/Users/dev/project
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: detected dubious ownership in repository at '<path>'`.
+  - Expected: evidence is **Final exception line** at **Line 4** (the command Git suggests) and **Matched context line** at **Line 1**.
+  - Expected: the fix shows `git config --global --add safe.directory` for this one path, says plainly that it must not be used for untrusted, downloaded, or mounted folders, and warns that `*` turns the check off everywhere.
+- [ ] **C2-18 Index lock held.** Clear the form and paste:
+  ```text
+  fatal: Unable to create 'C:/Users/dev/project/.git/index.lock': File exists.
+
+  Another git process seems to be running in this repository, e.g.
+  an editor opened by `git commit`, or if two `git` processes were started
+  at the same time. If you make sure no processes are running then
+  remove the file manually to continue.
+  ```
+  - Expected: **Git error**, **High confidence**, signature `fatal: Unable to create '<path>': File exists.`
+  - Expected: evidence is **Final exception line** at **Line 6** and **Matched context line** at **Line 1**; the likely cause quotes the whole `fatal:` line and names `index.lock`.
+  - Expected: the fix closes the other Git processes and retries first, says to delete the lock only when no Git process is running, and warns that removing it mid-write can damage the index. The Windows `del` command is listed **before** the macOS and Linux `rm` command.
+- [ ] **C2-19 Line-ending notice.** Clear the form and paste:
+  ```text
+  warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+  ```
+  - Expected: **Git error**, **High confidence**, signature `warning: in the working copy of '<file>', LF will be replaced by CRLF the next time Git touches it`, one evidence item at **Line 1**.
+  - Expected: the cause says nothing is broken, and the fix offers `core.autocrlf` or a `.gitattributes` with `* text=auto` as the choice that applies to every clone. Then paste the older short form `warning: LF will be replaced by CRLF in src/App.tsx.`
+  - Expected: **Git error**, **High confidence**, signature `warning: LF will be replaced by CRLF in <file>.`
+- [ ] **C2-20 Remote unreachable.** Clear the form and paste `fatal: unable to access 'https://github.com/dev/app.git/': Could not resolve host: github.com`
+  - Expected: **Git error**, **High confidence**, signature `fatal: unable to access '<url>': <network detail>`, one evidence item at **Line 1**, and the likely cause quotes `Could not resolve host: github.com`.
+  - Expected: nothing suggests the code or the repository is at fault. Then paste:
+  ```text
+  PS C:\Users\dev\app> git clone https://github.com/dev/app.git
+  fatal: unable to access 'https://github.com/dev/app.git/': Failed to connect to github.com port 443 after 21062 ms: Could not connect to server
+  ```
+  - Expected: the same category and signature at **High confidence**, **Final exception line** at **Line 2**, and the cause names `Failed to connect to github.com`.
+
+**Any other `fatal:` line**
+
+- [ ] **C2-21 Generic fallback.** Clear the form and paste `fatal: bad object 0123456789abcdef`.
+  - Expected: **Git error** at **Low confidence**, signature `fatal: <message Git reported>`, one evidence item at **Line 1**, and the reason **The final line is an error line from the failing command, but no specific signature covers it, so it is quoted rather than explained.**
+  - Expected: the possible-fix panel opens by saying no fix is offered, because no sub-signature recognises that wording, and the commands it lists are read-only (`git status`). The result quotes the line, states that no sub-signature covers that wording, and claims no cause.
+- [ ] **C2-22 Generic fallback under a trailer-heavy paste.** Clear the form and paste:
+  ```text
+  PS C:\Users\dev\app> git fetch
+  To https://github.com/dev/app.git
+  hint: some explanatory hint
+  fatal: bad object 0123456789abcdef
+  hint: another explanatory hint
+  PS C:\Users\dev\app>
+  ```
+  - Expected: **Git error** at **Low confidence**, signature `fatal: <message Git reported>`.
+  - Expected: evidence is **Final exception line** at **Line 6** and **Matched context line** at **Line 4**. Neither `hint:` line nor the `To …` line is quoted, and a paste this long still resolves to the `fatal:` line.
+  - Expected: the confidence reason reads **An error line from the failing command appears on line 4, but no specific signature covers it, so it is quoted rather than explained.**
+
+**Batch C2 lookalikes**
+
+For each line below, clear the form and click **Analyze** in **Auto — infer from the text**. Expected every time: **Unrecognised**, **Low confidence**, **No rule matched**, and no possible fix. A line that carries a timestamp or any other prefix before `fatal:`, `error:`, `warning:`, `remote:`, or `hint:` is not Git writing its own message, so it is not read as one.
+
+- [ ] `2026-10-31T10:00:00Z fatal: not a git repository (or any of the parent directories): .git`
+- [ ] `[2026-10-31 10:00:00] error: remote origin already exists.`
+- [ ] `In my notes I wrote that the remote origin already exists in my repo.`
+- [ ] `run git push to publish your branch`
+- [ ] `It was fatal that the deployment script removed the whole folder.`
+- [ ] `remote:  ! [rejected] main -> main (fetch first) reported by the mirror`
+- [ ] ` ! [rejected]        main -> main (stale info)` — an unlisted rejection reason is not claimed.
+- [ ] `hint: Updates were rejected because the remote contains work` — a `hint:` line alone.
+- [ ] `To https://github.com/dev/app.git` — the `To …` line alone.
+- [ ] `PS C:\Users\dev\app> git status` — a prompt with its command alone.
+- [ ] `warning: too many files; consider using a sparse checkout`
+- [ ] `Merge made by the ort strategy.`
+- [ ] `ERROR: Permission to "dev/app.git" denied to "dev".` — the uppercase form another tool writes is not claimed.
+
+**Batch C2 against the existing rules**
+
+- [ ] Clear the form, set **Language** to `Auto — infer from the text`, and paste:
+  ```text
+  Traceback (most recent call last):
+    File "app.py", line 4, in load
+  fatal: not a git repository (or any of the parent directories): .git
+  ModuleNotFoundError: No module named 'requests'
+  ```
+  - Expected: **Missing module** at **High confidence** from `python.module-not-found`, evidence **Final exception line** at **Line 4**. The Git line is in the paste but the Python rule keeps its own exception line.
+- [ ] Clear the form and paste the same traceback without the `ModuleNotFoundError` line:
+  ```text
+  Traceback (most recent call last):
+    File "app.py", line 4, in load
+  fatal: not a git repository (or any of the parent directories): .git
+  ```
+  - Expected: **Git error** at **High confidence**, signature `fatal: not a git repository (or any of the parent directories): .git`, **Final exception line** at **Line 3**. A traceback header alone is not an exception line, so the neutral rule reads it.
+- [ ] Clear the form and paste:
+  ```text
+  PS C:\Users\dev\app> git push
+  error: failed to push some refs to 'https://github.com/dev/app.git'
+  TypeError: Cannot read properties of undefined (reading 'name')
+  ```
+  - Expected: **Type mismatch** at **Medium confidence** from `javascript.type-error`. The generic Git summary must not outscore a specific JavaScript match.
+- [ ] **Category label on the result.** Go to `/assistant?bugId=sample-checkout-nan`, clear the prefilled **Error message**, paste the C2-1 block, and click **Analyze**.
+  - Expected: the completion status line and the result card both read **Git error**. The raw id `git-error` never appears in the interface.
+- [ ] **Category label in a saved diagnosis.** On the same result, with the **Loaded from bug: Checkout total shows NaN after a promo code** chip still attached, click **Save diagnosis to this bug**.
+  - Expected: the dialog's Category row reads **Git error**, and the preview shows the matched Git signature and **High confidence**. Save it and click **View bug**.
+  - Expected: the detail's **Saved diagnosis** section reads **Git error**, and **Fix tracking** shows **Proposed**. When you finish, click **Remove saved diagnosis** — that keeps the composed proposed fix and the **Proposed** state, so run this check on a fresh profile or expect the checkout report to keep that fix.
+- [ ] Expected throughout this section: the Console stays free of errors, the Network tab shows no request to any host (the analysis is local text), and no Git command was run by the app.
+
 ### Context lines and React trailers
 
 Set **Language** to `Auto — infer from the text` for every example in this section. Paste each block exactly as shown, one per analysis.
