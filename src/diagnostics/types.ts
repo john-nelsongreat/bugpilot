@@ -23,6 +23,8 @@ export type SupportedDiagnosticCategory =
   | 'network-request-failed'
   | 'cors-blocked'
   | 'react-error'
+  | 'typescript-error'
+  | 'npm-error'
 
 export type DiagnosticCategory =
   | SupportedDiagnosticCategory
@@ -110,6 +112,13 @@ export interface DiagnosticRule {
    * more specific message it finds there.
    */
   contextSymptoms?: readonly RegExp[]
+  /**
+   * Read the paste from the top instead of the bottom when this rule explains
+   * another line. Compiler and package manager output prints the identifying
+   * line first and repeats details below it, so the first match is the one to
+   * report.
+   */
+  firstMatchWins?: boolean
   match(line: string): RuleMatch | null
   explain(match: RuleMatch, context: RuleContext): RuleNarrative
 }

@@ -41,6 +41,25 @@ const REACT_COMPONENT_TRAILER = /^The above error occurred in the <.+> component
 const REACT_BOUNDARY_TRAILER =
   /^Consider adding an error boundary to your tree to customize error handling behavior\.$/
 
+/**
+ * Tool-written summary lines that follow the real error. They are never
+ * selected as the line to diagnose, so an earlier recognised error still wins.
+ * Lines that carry their own meaning, such as the npm lifecycle line that names
+ * the failed script, are not listed here: the context-line mechanism resolves
+ * those instead.
+ */
+const SUMMARY_TRAILERS: readonly RegExp[] = [
+  /^Found \d+ errors?\b/,
+  /^Errors\s+Files$/,
+  /^\d+\s+\S+\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs):\d+$/,
+  /^npm (?:ERR!|error)\s*$/,
+  /^npm (?:ERR!|error)\s*>/,
+  /^npm (?:ERR!|error)\s+A complete log\b/i,
+  /^npm (?:ERR!|error)\s+This is probably not a problem\b/i,
+  /^npm (?:ERR!|error)\s+command failed\b/i,
+  /^(?:npm (?:ERR!|error)\s*)?\S*(?:\.npm|npm-cache)[\\/]_logs[\\/]\S+\.log$/i,
+]
+
 const SAFETY_LIMITATION =
   'This is local, rule-based guidance based only on the pasted text; it has not inspected or executed your project.'
 
@@ -202,6 +221,25 @@ const LANGUAGE_SIGNALS: ReadonlyArray<{
     weight: 2,
     pattern:
       /(?:Invalid hook call|Objects are not valid as a React child|Too many re-renders|Maximum update depth exceeded)/,
+  },
+  {
+    language: 'javascript',
+    label: 'a TypeScript compiler error code',
+    weight: 2,
+    pattern: /(?:^|\s)error TS\d{3,5}:/,
+  },
+  {
+    language: 'javascript',
+    label: 'an editor TypeScript marker',
+    weight: 2,
+    pattern: /\.[cm]?[jt]sx?\((?:\d{3,5})\)\s*$/i,
+  },
+  {
+    language: 'javascript',
+    label: 'an npm log line',
+    weight: 2,
+    // "ERR!" ends on punctuation, so the boundary has to be the whitespace.
+    pattern: /^npm (?:ERR!|error)(?:\s|$)/m,
   },
 ]
 
@@ -397,7 +435,12 @@ function collectContextCandidates(
       continue
     }
 
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const step = rule.firstMatchWins ? 1 : -1
+    for (
+      let index = rule.firstMatchWins ? 0 : lines.length - 1;
+      index >= 0 && index < lines.length;
+      index += step
+    ) {
       if (index === selectedLine.lineNumber - 1) {
         continue
       }
@@ -439,7 +482,8 @@ function mergeContextCandidates(
       }
       if (
         groups[language][index].match.signature !==
-        contextCandidate.match.signature
+          contextCandidate.match.signature ||
+        contextCandidate.rule.firstMatchWins
       ) {
         groups[language][index] = contextCandidate
       }
@@ -862,6 +906,10 @@ function selectExceptionLine(errorText: string): SelectedLine | null {
 
     if (REACT_BOUNDARY_TRAILER.test(text)) {
       insideReactTrailer = false
+      return
+    }
+
+    if (SUMMARY_TRAILERS.some((trailer) => trailer.test(text))) {
       return
     }
 

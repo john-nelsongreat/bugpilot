@@ -21,6 +21,8 @@ export const DIAGNOSTIC_CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
   'network-request-failed': 'Network request failed',
   'cors-blocked': 'CORS blocked request',
   'react-error': 'React error',
+  'typescript-error': 'TypeScript compiler error',
+  'npm-error': 'NPM install or run error',
   unrecognized: 'Unrecognised',
 }
 
