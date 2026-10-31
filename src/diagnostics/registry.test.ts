@@ -70,6 +70,21 @@ const BATCH_B2_RULES = [
   ['javascript.react-error', 'javascript', 'react-error', 'React error'],
 ] as const
 
+const BATCH_C1_RULES = [
+  [
+    'javascript.typescript-error',
+    'javascript',
+    'typescript-error',
+    'TypeScript compiler error',
+  ],
+  [
+    'javascript.npm-error',
+    'javascript',
+    'npm-error',
+    'NPM install or run error',
+  ],
+] as const
+
 describe('diagnostic rule registry', () => {
   it('registers every batch-A rule once with a stable id and category', () => {
     for (const [id, category] of NEW_RULES) {
@@ -137,12 +152,34 @@ describe('diagnostic rule registry', () => {
       expect(rules[0].category).toBe(category)
     }
 
-    expect(javascriptRules.slice(8).map((rule) => rule.id)).toEqual(
+    expect(javascriptRules.slice(8, 12).map((rule) => rule.id)).toEqual(
       BATCH_B2_RULES.map(([id]) => id),
     )
   })
 
   it.each(BATCH_B2_RULES)(
+    'labels %s with %s on the detail page',
+    (_id, _language, category, label) => {
+      expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
+      expect(diagnosticCategoryLabel(category)).toBe(label)
+    },
+  )
+
+  it('registers every batch-C1 rule once after the existing JavaScript rules', () => {
+    for (const [id, language, category] of BATCH_C1_RULES) {
+      const rules = javascriptRules.filter((rule) => rule.id === id)
+
+      expect(rules).toHaveLength(1)
+      expect(rules[0].language).toBe(language)
+      expect(rules[0].category).toBe(category)
+    }
+
+    expect(javascriptRules.slice(12).map((rule) => rule.id)).toEqual(
+      BATCH_C1_RULES.map(([id]) => id),
+    )
+  })
+
+  it.each(BATCH_C1_RULES)(
     'labels %s with %s on the detail page',
     (_id, _language, category, label) => {
       expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)

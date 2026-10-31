@@ -80,6 +80,129 @@ const FETCH_FAILURE_SYMPTOMS = [
 const REACT_HOOK_SYMPTOM =
   /^TypeError: Cannot read propert(?:y|ies) of null \(reading 'use[A-Z][A-Za-z]*'\)$/
 
+/**
+ * A TypeScript location is only accepted in the exact shapes the compiler
+ * prints: a file path with a source extension, then (line,column) or
+ * line:column. The character class deliberately excludes spaces so a
+ * timestamp or a sentence in front of the path can never match.
+ */
+const TS_LOCATION_PATH = String.raw`([\w.\-:~\\/]*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))`
+const TS_CLASSIC_LOCATION = new RegExp(
+  `^${TS_LOCATION_PATH}\\((\\d{1,7}),(\\d{1,7})\\): error TS(\\d{3,5}): (.+)$`,
+)
+const TS_PRETTY_LOCATION = new RegExp(
+  `^${TS_LOCATION_PATH}:(\\d{1,7}):(\\d{1,7})(?:\\s+-\\s+|:\\s+)error TS(\\d{3,5}): (.+)$`,
+)
+const TS_BARE = /^error TS(\d{3,5}): (.+)$/
+const TS_EDITOR = /^([^\\/]{5,300}?)\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)\((\d{3,5})\)$/
+const TS_ERROR_MENTION = /error TS(\d{3,5}): /
+
+/** Every message shape this rule explains by itself, keyed by error code. */
+const TYPESCRIPT_SHAPES: ReadonlyArray<{
+  code: string
+  shape: string
+  pattern: RegExp
+  signature: string
+  capture?: 'name' | 'module' | 'property'
+}> = [
+  {
+    code: '2322',
+    shape: 'assignable',
+    pattern: /^Type '[^']*' is not assignable to type '[^']*'\.$/,
+    signature: "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+  },
+  {
+    code: '2339',
+    shape: 'property',
+    pattern: /^Property '([^']*)' does not exist on type '[^']*'\.$/,
+    signature: "error TS2339: Property '<name>' does not exist on type '<type>'.",
+    capture: 'property',
+  },
+  {
+    code: '2345',
+    shape: 'argument',
+    pattern:
+      /^Argument of type '[^']*' is not assignable to parameter of type '[^']*'\.$/,
+    signature:
+      "error TS2345: Argument of type '<type>' is not assignable to parameter of type '<type>'.",
+  },
+  {
+    code: '2304',
+    shape: 'name',
+    pattern: /^Cannot find name '([^']*)'\.$/,
+    signature: "error TS2304: Cannot find name '<name>'.",
+    capture: 'name',
+  },
+  {
+    code: '2307',
+    shape: 'module',
+    pattern:
+      /^Cannot find module '([^']*)' or its corresponding type declarations\.$/,
+    signature:
+      "error TS2307: Cannot find module '<module>' or its corresponding type declarations.",
+    capture: 'module',
+  },
+  {
+    code: '7006',
+    shape: 'implicit-any',
+    pattern: /^Parameter '([^']*)' implicitly has an 'any' type\.$/,
+    signature: "error TS7006: Parameter '<name>' implicitly has an 'any' type.",
+    capture: 'name',
+  },
+  {
+    code: '2532',
+    shape: 'object-possibly',
+    pattern: /^Object is possibly '[^']*'\.$/,
+    signature: "error TS2532: Object is possibly '<value>'.",
+  },
+  {
+    code: '18048',
+    shape: 'name-possibly',
+    pattern: /^'([^']*)' is possibly '[^']*'\.$/,
+    signature: "error TS18048: '<name>' is possibly '<value>'.",
+    capture: 'name',
+  },
+  {
+    code: '2554',
+    shape: 'argument-count',
+    pattern: /^Expected \d+ arguments?, but got \d+\.$/,
+    signature: 'error TS2554: Expected <count> arguments, but got <count>.',
+  },
+  {
+    code: '2769',
+    shape: 'overload',
+    pattern: /^No overload matches this call\.$/,
+    signature: 'error TS2769: No overload matches this call.',
+  },
+]
+
+const NPM_LOG_LINE = /^npm (ERR!|error)\s+(\S.*)$/
+const NPM_CODE_LINE = /^code\s+(\S+)$/
+const NPM_NETWORK_CODES = new Set([
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'EAI_AGAIN',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+])
+const NPM_SCRIPT_LINE = /Failed at the (?:\S+@\S+\s+)?(\S+) script\b/
+const NPM_PEER_LINE =
+  /^npm (?:ERR!|error)\s+peer (\S+?)@"([^"]+)" from (\S+?)@(\S+)$/m
+const NPM_FOUND_LINE = /^npm (?:ERR!|error)\s+Found: (\S+?)@(\S+)$/m
+const NPM_LOG_SYMPTOM = /^npm (?:ERR!|error)(?:\s|$)/
+const NPM_LOG_FILE_SYMPTOM =
+  /^(?:npm (?:ERR!|error)\s*)?\S*(?:\.npm|npm-cache)[\\/]_logs[\\/]/i
+const STACK_FRAME_SYMPTOM = /^at\s+\S/
+
 export const javascriptReferenceErrorRule: DiagnosticRule = {
   id: 'javascript.reference-error',
   language: 'javascript',
@@ -2139,6 +2262,1075 @@ export const javascriptReactErrorRule: DiagnosticRule = {
   },
 }
 
+function countTypeScriptErrorLines(errorText: string): number {
+  return errorText.split(/\r?\n/).filter((line) => TS_ERROR_MENTION.test(line))
+    .length
+}
+
+/**
+ * Each branch reads only the message the compiler printed. The location, when
+ * the paste carried one, is already inside `reported`.
+ */
+function typeScriptNarrative(
+  code: string,
+  shape: string,
+  message: string,
+  reported: string,
+): RuleNarrative {
+  if (shape === 'assignable') {
+    return {
+      likelyCause: `The TypeScript compiler found a value whose type does not match the type the target expects: ${reported}. The message names the two types but not the variable, property, or call that produced the mismatch, so the assignment itself is the only thing this rule can point at.`,
+      debuggingSteps: [
+        'Open the file and position in the message and look at what is assigned, returned, or passed there.',
+        'Find the declared type of the target: an annotation, an interface property, a parameter, or a return type.',
+        'Log the value just before that line and compare what it actually holds with the type in the message.',
+        'If the value comes from state, props, or a response, check the type that produces it rather than the line that reads it.',
+      ],
+      possibleFix: {
+        explanation:
+          'Make the two sides agree: convert or build the value so it has the type the target expects, or widen the declared type when the extra shape is intended. A type assertion or cast only silences the check; use it after you have confirmed the runtime value really has that shape.',
+        whereItMayApply:
+          'Apply it at the position named in the message, or at the declaration that gives the target its type; the value and the annotation are often in different files.',
+        exampleCode: [
+          '// Convert the value to the type the target declares.',
+          'const total: number = Number(count)',
+          '',
+          '// Or declare the target with the type the value really has.',
+          "const total: string = `${count}`",
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler on the same file and check whether this message is gone.',
+        'Exercise the same code path and confirm the value still behaves as the type claims.',
+        'Check whether the error moved to another assignment, which means the type is fixed one level up.',
+      ],
+      limitations: [
+        'The message does not name the variable or property involved, only the two types.',
+        'An inferred, generic, or union type can make the reported types look different from what the source says.',
+      ],
+      alternativeExplanations: [
+        'The value is correct and the target annotation is too narrow.',
+        'Two declarations with the same name are in scope, for example one from a package and one local.',
+        'The mismatch is on a nested property rather than on the value quoted in the message.',
+      ],
+    }
+  }
+
+  if (shape === 'property') {
+    return {
+      likelyCause: `The code reads a property that the type the compiler resolved for that value does not have: ${reported}. That usually means a misspelled name, a property that is optional and needs a check, a value whose declared type is narrower than what is there at runtime, or a missing declaration.`,
+      debuggingSteps: [
+        'Compare the spelling and letter case of the property with the type it should come from.',
+        'Open the declaration of that type and list the properties it really has.',
+        'Check whether the property is optional; reading it directly on an optional value is a separate error from a missing one.',
+        'If the value comes from an API response, a JSON file, or state, compare the real shape with the declared type.',
+      ],
+      possibleFix: {
+        explanation:
+          'Use a property the declared type has: correct a typo, add the missing property to the interface or type, or narrow the value before reading it. Optional chaining (value?.name) is the right shape when the property really can be absent.',
+        whereItMayApply:
+          'Apply it to the expression at the position in the message, or to the type declaration that should describe the value; the type is usually defined elsewhere.',
+        exampleCode: [
+          'interface Counter {',
+          '  count: number',
+          '}',
+          '',
+          'function show(counter: Counter) {',
+          '  return counter.count // not counter.countt',
+          '}',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the message no longer names that property.',
+        'Log the value at runtime and confirm the property exists with the expected type.',
+        'If the type was widened, check the places that read it still compile.',
+      ],
+      limitations: [
+        'The message names the property and the type, not where the value was created.',
+        'A union, an index signature, or a type from another package can make a valid property look missing.',
+      ],
+      alternativeExplanations: [
+        'The property exists at runtime but the declared type does not list it.',
+        'The value is a union and the property only exists on one member.',
+        'An import brought in a different type with the same name.',
+        'The object is one level deeper than the expression in the message.',
+      ],
+    }
+  }
+
+  if (shape === 'argument') {
+    return {
+      likelyCause: `A value passed to a function does not match the parameter type the compiler expects: ${reported}. The call site and the signature disagree, and the message does not say which argument or which call it is.`,
+      debuggingSteps: [
+        'Open the file and position in the message and list the arguments at that call.',
+        'Read the parameter types of the function or method being called.',
+        'Match the arguments by position, not by name, and find the one whose type differs.',
+        'If the argument comes from a response or state, check the type that produces it.',
+      ],
+      possibleFix: {
+        explanation:
+          'Pass the type the parameter declares, or change the parameter to the type the callers really have. Wrapping the argument in a cast only hides the mismatch, so confirm the runtime value first.',
+        whereItMayApply:
+          'Apply it at the call position in the message or at the function declaration; when a shared function changes signature, every caller of it is affected.',
+        exampleCode: [
+          "function setLabel(text: string) {}",
+          '',
+          'setLabel(String(count)) // was setLabel(count)',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the message is gone from that call.',
+        'Call the function with the same input and confirm the result is unchanged.',
+        'Check the other callers still compile after any signature change.',
+      ],
+      limitations: [
+        'The message does not say which argument position failed.',
+        'Overloads and default parameters can make the expected signature hard to read from the call.',
+      ],
+      alternativeExplanations: [
+        'The argument order changed and two parameters were swapped.',
+        'An optional parameter was passed where the signature expects the next one.',
+        'The function comes from a package version with a different signature.',
+      ],
+    }
+  }
+
+  if (shape === 'name') {
+    return {
+      likelyCause: `The compiler cannot resolve the name it was asked about: ${reported}. A name it cannot find is normally not imported or not declared in this file, or it only exists under different compiler settings.`,
+      debuggingSteps: [
+        'Search the file for a declaration or an import that provides that name.',
+        'Check the letter case and the spelling, and check that the file that declares it is part of the compilation.',
+        'If the name comes from a package, confirm the package is installed and its types are available.',
+        'If the name is a built-in such as fetch, Promise, or a DOM type, check the "lib" and "target" settings in tsconfig.json.',
+      ],
+      possibleFix: {
+        explanation:
+          'Add the import or declaration that provides the name, install the matching @types package for a library, or raise "target" and "lib" in tsconfig.json so the built-in name belongs to the compilation.',
+        whereItMayApply:
+          'Apply it to the file named in the message; when the name is provided by configuration, the change belongs in tsconfig.json instead of the source file.',
+        exampleCode: [
+          '# Windows (PowerShell)',
+          'npm install --save-dev @types/lodash',
+          'Get-Content tsconfig.json',
+          '',
+          '# macOS or Linux',
+          'npm install --save-dev @types/lodash',
+          'cat tsconfig.json',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the message about that name is gone.',
+        'Jump to the definition of the name to confirm it resolves to the file you expect.',
+        'Check that the tsconfig change did not add new errors elsewhere.',
+      ],
+      limitations: [
+        'The message gives the name but not the scope it was searched in.',
+        'A name can also be missing because the file that declares it is excluded from the compilation.',
+      ],
+      alternativeExplanations: [
+        'The import exists but uses a different local name.',
+        'The declaration is inside another module or block and not exported.',
+        'The "lib" setting does not include the environment that provides the built-in.',
+      ],
+    }
+  }
+
+  if (shape === 'module') {
+    const moduleName = message.replace(
+      /^Cannot find module '([^']*)'.*$/s,
+      '$1',
+    )
+    return {
+      likelyCause: `The compiler cannot resolve the module the code imports: ${reported}. What it points at may be missing from the install, unreachable through the configured resolution rules, or written in a form the resolver does not accept.`,
+      debuggingSteps: [
+        `Check the spelling and letter case of '${moduleName}' and the path the import uses.`,
+        'Look in package.json, or run npm ls, to see whether the package is actually installed.',
+        'For a JavaScript package with no bundled types, check whether a matching @types package is missing.',
+        'Check "paths" and "moduleResolution" in tsconfig.json when the import is a local file or an alias.',
+        'Check the extension the resolver expects; with node16 or nodenext a relative import needs the exact file name.',
+      ],
+      possibleFix: {
+        explanation:
+          'Install the package or its type declarations, correct the path or alias so the resolver can find it, and when importing a local ES module use the extension and casing that "moduleResolution" expects.',
+        whereItMayApply:
+          'Apply it to the import statement in the file named in the message, to the dependency list, or to tsconfig.json; the file that fails to compile is not always the place that needs the change.',
+        exampleCode: [
+          '# Windows (PowerShell)',
+          'npm install lodash',
+          'npm install --save-dev @types/lodash',
+          'Get-ChildItem src/App.tsx',
+          '',
+          '# macOS or Linux',
+          'npm install lodash',
+          'npm install --save-dev @types/lodash',
+          'ls src/App.tsx',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the module resolves.',
+        'Run the app or the test that imports it, because a type-only resolution does not prove the runtime import works.',
+        'If the alias was changed, check the other files that use the same alias.',
+      ],
+      limitations: [
+        'The message does not say which of the resolution rules was tried.',
+        'A package can resolve for TypeScript and still fail at runtime, or the other way round.',
+        'The engine cannot read package.json, tsconfig.json, or the installed tree.',
+      ],
+      alternativeExplanations: [
+        'The package is a devDependency and the build runs where it is not installed.',
+        'The types are bundled under a different entry point than the runtime file.',
+        'The import is a directory that only has an ESM entry for the configured module mode.',
+        'A bundler alias exists in the app but not in tsconfig.json "paths".',
+      ],
+    }
+  }
+
+  if (shape === 'implicit-any') {
+    return {
+      likelyCause: `The compiler could not infer a type for a parameter and "noImplicitAny" is on, so it reports one instead: ${reported}. The parameter normally has no annotation and the value arrives from a place the compiler cannot read a type from.`,
+      debuggingSteps: [
+        'Open the file and position in the message and look at the parameter that has no type.',
+        'Check how the function is called or passed; an untyped callback, a JSON parse, or an event handler left the parameter unknown.',
+        'Check whether the surrounding tsconfig enables "noImplicitAny" directly or through "strict".',
+        'Decide whether the real fix is a type annotation or a type on the value that feeds it.',
+      ],
+      possibleFix: {
+        explanation:
+          'Annotate the parameter with the type it receives, or type the value that is passed in so inference works. Turning "noImplicitAny" off removes the check for the whole project, so treat that as a deliberate choice rather than a fix.',
+        whereItMayApply:
+          'Apply it at the parameter in the message; when the function is a callback, the type usually belongs to the caller or to the event that provides it.',
+        exampleCode: [
+          'function format(value: string) {',
+          "  return value.trim()",
+          '}',
+          '',
+          'list.map((item: Product) => item.price)',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the parameter no longer reports an implicit any.',
+        'Check the annotation against what the call sites really pass.',
+        'Confirm no new errors appeared where the value is used.',
+      ],
+      limitations: [
+        'The message does not show what the argument is at runtime.',
+        'The annotation that fits depends on the caller, which the pasted text may not include.',
+      ],
+      alternativeExplanations: [
+        'The value comes from JSON.parse or an untyped API response.',
+        'A generic parameter was not supplied, so inference fell back to any.',
+        'The project turned on "strict" recently and several older files now report this.',
+      ],
+    }
+  }
+
+  if (shape === 'object-possibly' || shape === 'name-possibly') {
+    const subject = shape === 'name-possibly' ? 'the name' : 'the object'
+    return {
+      likelyCause: `The compiler knows ${subject} can be missing on the path that reaches this line, and the code uses it as though it were always present: ${reported}. The value is optional, comes from a lookup that can return nothing, or is narrowed away in another branch.`,
+      debuggingSteps: [
+        'Open the file and position in the message and find where the value is produced.',
+        'Read its type and look for ?, undefined, or null in it.',
+        'Check whether a guard exists earlier in the block but does not apply to this line.',
+        'Look at the runtime path that reached the line, especially array lookups, Map.get, and optional properties.',
+      ],
+      possibleFix: {
+        explanation:
+          'Check for the missing value before using it, or reach it with optional chaining, so the compiler narrows the type for the rest of the block. A non-null assertion (value!) only silences the compiler and is defensible only after you have already guaranteed the value exists; it does not make the value defined at runtime.',
+        whereItMayApply:
+          'Apply it at the expression in the message, or at the point where the value is produced if that is where the optionality should be removed.',
+        exampleCode: [
+          'if (value === undefined) {',
+          '  return 0',
+          '}',
+          '',
+          'return value.length',
+          '',
+          '// Or without a branch:',
+          'return value?.length ?? 0',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the possibly-undefined report is gone.',
+        'Test the input that produced the missing value, not only the happy path.',
+        'If you used a non-null assertion, confirm the guard that makes it true still runs first.',
+      ],
+      limitations: [
+        'The message says the value can be missing but not which path made it so.',
+        'A guard the compiler cannot see, such as one inside a callback, still reports this error.',
+      ],
+      alternativeExplanations: [
+        'The type is honest and the runtime value really can be undefined.',
+        'A lookup such as find or Map.get returns undefined for this input.',
+        'The property is optional in the interface but always set by the code that builds it.',
+      ],
+    }
+  }
+
+  if (shape === 'argument-count') {
+    return {
+      likelyCause: `The number of arguments at the call does not match the signature: ${reported}. The message gives both counts but not which parameter is missing or extra.`,
+      debuggingSteps: [
+        'Open the file and position in the message and count the arguments in that call.',
+        'Read the signature and count the required parameters, noting defaults and optional ones.',
+        'Check whether the function came from a different version or package than the code was written against.',
+        'Check for a spread or an array passed where separate arguments were expected.',
+      ],
+      possibleFix: {
+        explanation:
+          'Pass the arguments the signature asks for, or give the parameter a default or make it optional when callers legitimately leave it out. Adding a placeholder value only matches the count, so check what the parameter is used for.',
+        whereItMayApply:
+          'Apply it at the call in the message, or at the declaration when the signature changed and several callers still use the old shape.',
+        exampleCode: [
+          'function sum(a: number, b: number = 0) {',
+          '  return a + b',
+          '}',
+          '',
+          'sum(1) // with the default, or sum(1, 2)',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and check the counts agree.',
+        'Run the call with the same input and confirm the extra or missing argument does not change the result.',
+        'Check the other call sites of that function.',
+      ],
+      limitations: [
+        'The message reports the two counts, not which argument is wrong.',
+        'Rest parameters, defaults, and overloads change what "expected" means.',
+      ],
+      alternativeExplanations: [
+        'A refactor added a parameter and this caller was missed.',
+        'A dependency updated and its function signature changed.',
+        'Arguments were spread from an array that is shorter than intended.',
+      ],
+    }
+  }
+
+  if (shape === 'overload') {
+    return {
+      likelyCause: `None of the accepted call shapes matched what the code passes: ${reported}. This is a general failure, so the useful detail is normally in the indented lines the compiler prints under this message.`,
+      debuggingSteps: [
+        'Read the continuation lines below the message; each one names an overload and why it did not match.',
+        'Compare the argument types at the call with each signature in the declaration or the .d.ts file.',
+        'Check whether an argument is a union or a broad type that no single overload accepts.',
+        'Check whether the generic parameters were inferred from a weaker argument than intended.',
+      ],
+      possibleFix: {
+        explanation:
+          'Make the call match one overload exactly: fix the argument type, cast the argument to the member the overload expects, or add an overload for the shape your code genuinely needs. Reading the continuation lines first avoids changing the wrong call.',
+        whereItMayApply:
+          'Apply it to the call at the position in the message; when a package owns the overloads, the change may belong in your wrapper instead.',
+        exampleCode: [
+          "declare function on(name: 'save'): void",
+          "declare function on(name: 'load', cb: () => void): void",
+          '',
+          "on('load', () => refresh()) // matched second overload",
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the compiler and read whether a different overload is now reported.',
+        'Call the function with the same arguments at runtime and confirm the intended branch runs.',
+        'Check the other calls of the same function still resolve.',
+      ],
+      limitations: [
+        'This message on its own does not identify the failing argument.',
+        'The per-overload reasons are printed in continuation lines that a copied message often loses.',
+      ],
+      alternativeExplanations: [
+        'One argument is a wider type than any overload accepts.',
+        'A generic call inferred a weaker type than the argument really has.',
+        'The overload list changed in a package update.',
+      ],
+    }
+  }
+
+  return {
+    likelyCause: `The compiler reported ${code} with the message "${message}". This engine does not have a specific rule for ${code}, so it names the code and repeats what the compiler said without claiming a cause.`,
+    debuggingSteps: [
+      'Copy the error code and the first message line; the detail is in the lines printed after it.',
+      'Read the indented continuation lines under the message, which name the property, module, or call the compiler compared.',
+      'Search the TypeScript documentation for that error code to read what the check means.',
+      'Reproduce it with the smallest file that still reports it so the remaining lines point at one place.',
+    ],
+    possibleFix: {
+      explanation:
+        `Look ${code} up in the TypeScript documentation and read the indented continuation lines that follow the message; that is where TypeScript explains the comparison it made and names the exact property, module, or signature involved. This engine does not guess a fix for a code it has no rule for.`,
+      whereItMayApply:
+        'Apply it to the file and position quoted in the message; the code tells you which compiler check failed, which is where the explanation starts.',
+      exampleCode: [
+        'npx tsc --noEmit',
+        '',
+        '# Or show the full message with its continuation lines:',
+        'npx tsc --pretty false',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the compiler after one focused change and check whether the code and its continuation lines still appear.',
+      'Check whether the error count in the summary changes.',
+      'If the message changes, diagnose the new code instead of the old one.',
+    ],
+    limitations: [
+      `There is no specific rule for ${code} here, so nothing beyond the pasted message is inferred.`,
+      'The continuation lines that carry the explanation are often left out of a copied error.',
+    ],
+    alternativeExplanations: [
+      'This message may be a follow-on from an earlier error in the same file.',
+      'A type from a package may not match the version that is installed.',
+      'A compiler setting may have changed how the same code is checked.',
+    ],
+  }
+}
+
+export const javascriptTypeScriptErrorRule: DiagnosticRule = {
+  id: 'javascript.typescript-error',
+  language: 'javascript',
+  category: 'typescript-error',
+  firstMatchWins: true,
+  contextSymptoms: [
+    TS_ERROR_MENTION,
+    NPM_LOG_SYMPTOM,
+    NPM_LOG_FILE_SYMPTOM,
+    STACK_FRAME_SYMPTOM,
+  ],
+  match(line: string): RuleMatch | null {
+    const located = TS_CLASSIC_LOCATION.exec(line) ?? TS_PRETTY_LOCATION.exec(line)
+    const bare = located === null ? TS_BARE.exec(line) : null
+    const editor =
+      located === null && bare === null ? TS_EDITOR.exec(line) : null
+
+    let code: string
+    let rawMessage: string
+    let location: string | undefined
+    let form: 'located' | 'bare' | 'editor'
+
+    if (located) {
+      code = located[4]
+      rawMessage = located[5]
+      location = `${located[1]}, line ${located[2]}, column ${located[3]}`
+      form = 'located'
+    } else if (bare) {
+      code = bare[1]
+      rawMessage = bare[2]
+      form = 'bare'
+    } else if (editor) {
+      // The editor marker only means something attached to a readable message.
+      if (!/\s/.test(editor[1])) {
+        return null
+      }
+      code = editor[2]
+      rawMessage = editor[1]
+      form = 'editor'
+    } else {
+      return null
+    }
+
+    const message = /[.?!]$/.test(rawMessage) ? rawMessage : `${rawMessage}.`
+    const shape = TYPESCRIPT_SHAPES.find(
+      (entry) => entry.code === code && entry.pattern.test(message),
+    )
+    const captures: Record<string, string> = {
+      reason: `TS${code}:${shape === undefined ? 'generic' : shape.shape}`,
+      detail: message,
+    }
+    if (location !== undefined) {
+      captures.where = location
+    }
+    if (shape?.capture !== undefined) {
+      const quoted = shape.pattern.exec(message)?.[1]
+      if (quoted !== undefined) {
+        captures[shape.capture] = quoted
+      }
+    }
+
+    const specificity: RuleMatch['specificity'] =
+      shape === undefined ? 'generic' : 'specific'
+    const ruleMatch: RuleMatch = {
+      signature:
+        shape === undefined ? `error TS${code}: <message>` : shape.signature,
+      specificity,
+      captures,
+    }
+
+    const ceiling =
+      form === 'editor'
+        ? 'low'
+        : form === 'bare'
+          ? specificity === 'generic'
+            ? 'low'
+            : 'medium'
+          : specificity === 'generic'
+            ? 'medium'
+            : undefined
+
+    if (ceiling !== undefined) {
+      ruleMatch.confidenceCeiling = ceiling
+    }
+
+    return ruleMatch
+  },
+  explain(match: RuleMatch, context: RuleContext): RuleNarrative {
+    const [code, shape] = match.captures.reason.split(':')
+    const message = match.captures.detail
+    const location = match.captures.where
+    const reported =
+      location === undefined
+        ? `"${message}"`
+        : `"${message}" at ${location}`
+    const narrative = typeScriptNarrative(code, shape, message, reported)
+    const errorLines = countTypeScriptErrorLines(context.errorText)
+    const limitations = [...narrative.limitations]
+
+    if (errorLines > 1) {
+      limitations.push(
+        `The paste contains ${errorLines} TypeScript error lines, so this result covers one of them and the compiler may report further problems once it is resolved.`,
+      )
+    }
+    limitations.push(
+      'The engine reads only the text you pasted; it cannot open the file named in the message or run the compiler.',
+    )
+
+    return { ...narrative, limitations }
+  },
+}
+
+function npmNarrative(
+  shape: string,
+  code: string,
+  reported: string,
+  errorText: string,
+): RuleNarrative {
+  if (shape === 'resolve') {
+    const peer = NPM_PEER_LINE.exec(errorText)
+    const found = NPM_FOUND_LINE.exec(errorText)
+    const likelyCause = peer
+      ? `npm could not build a single dependency tree: ${reported}. ${peer[3]}@${peer[4]} asks for ${peer[1]} "${peer[2]}", and ${
+          found
+            ? `${found[1]}@${found[2]} is what the tree already has`
+            : 'the version already in the tree does not satisfy that range'
+        }. Two packages that need incompatible versions of the same peer dependency stop the install before anything is written.`
+      : `npm could not build a single dependency tree: ${reported}. Two packages in the install ask for incompatible versions of the same peer dependency, and npm refuses to choose one silently.`
+    const peerName = peer ? peer[1] : '<peer-package>'
+
+    return {
+      likelyCause,
+      debuggingSteps: [
+        'Read the lines between "Could not resolve dependency" and "Conflicting peer dependency": they name the package that wants which version.',
+        `Run npm ls ${peerName} to see the version you have and every package that depends on it.`,
+        'Check whether a newer release of the package that wants the older peer supports the version you already use.',
+        'If it does not, decide which side you can move: the shared dependency, the package that constrains it, or the range in your own package.json.',
+      ],
+      possibleFix: {
+        explanation: `Work out which package owns the conflict first: run npm ls ${peerName}, read the peer range quoted in the message, then upgrade the package that wants the older peer or replace it with one that supports the version you have. npm also offers --legacy-peer-deps and --force; treat those as informed last resorts rather than fixes, because they install a tree the packages declared incompatible, which can fail at runtime and hides the mismatch from every later install.`,
+        whereItMayApply:
+          'Apply it to the package that declares the incompatible peer range, or to the shared dependency in your own package.json; the block npm prints is a report, not the place to change.',
+        exampleCode: [
+          `npm ls ${peerName}`,
+          'npm view <package> peerDependencies',
+          'npm install <package>@<version-that-supports-your-peer>',
+          '',
+          '# Only as a last resort, and not a fix: accept the tree npm refused',
+          'npm install --legacy-peer-deps',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun npm install and check the ERESOLVE block is gone.',
+        `Run npm ls ${peerName} again and confirm one version is installed where you expected it.`,
+        'Run the app or the test suite, because a forced tree can still break at runtime.',
+      ],
+      limitations: [
+        'The block names one conflict between two packages; a longer install can report several.',
+        'The engine cannot see the whole dependency tree, so it cannot say which side is safer to move.',
+      ],
+      alternativeExplanations: [
+        'A lockfile pins the older version while package.json asks for the newer one.',
+        'A transitive dependency, not the package you installed, declares the older range.',
+        'Two package managers were used in the same folder and left trees that disagree.',
+        'The package you want has a newer release that already widened the peer range.',
+      ],
+    }
+  }
+
+  if (shape === 'registry-404') {
+    return {
+      likelyCause: `The registry did not have what npm asked for: ${reported}. A 404 from the registry means the name, the scope, or the registry the request went to is not the one that holds the package; a missing version is reported as ETARGET instead.`,
+      debuggingSteps: [
+        'Check the spelling and the letter case of the package name in the command and in package.json.',
+        'For a scoped package, check the scope and whether it is a private organisation package.',
+        'Ask the registry for the package directly with npm view <package-name>.',
+        'Run npm config get registry and compare it with the URL in the failed request.',
+        'If the registry is private, check that authentication for it is configured and still valid.',
+      ],
+      possibleFix: {
+        explanation:
+          'Give npm the name and the registry that really hold the package: correct the spelling or the scope, and when the package is private point npm at the right registry and configure its authentication in .npmrc or an environment variable. A registry that requires a token can answer 404 rather than 401, so an unauthenticated private registry looks the same as a missing package.',
+        whereItMayApply:
+          'Apply it to the package name in the command or in package.json, and to the registry settings npm reads; the request quoted in the message is the one that failed.',
+        exampleCode: [
+          '# Windows (PowerShell)',
+          'npm view <package-name>',
+          'npm config get registry',
+          'Get-Content .npmrc',
+          '',
+          '# macOS or Linux',
+          'npm view <package-name>',
+          'npm config get registry',
+          'cat .npmrc',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the install and check the request returns package metadata instead of 404.',
+        'Confirm npm config get registry still shows the registry you meant.',
+        'If you added credentials, check a plain install of another public package still works.',
+      ],
+      limitations: [
+        'The message shows the request the registry rejected, not why the name is missing there.',
+        'A private registry can answer 404 for a package you are not allowed to see.',
+      ],
+      alternativeExplanations: [
+        'The package was unpublished or renamed.',
+        'The scope belongs to an organisation whose registry you are not logged into.',
+        'A mirror or cache has not synced the package yet.',
+        'The name is correct but the project has a different registry configured.',
+      ],
+    }
+  }
+
+  if (shape === 'no-target') {
+    return {
+      likelyCause: `npm asked for a version of a package that the registry does not publish: ${reported}. The name resolved but the version or range after it matched nothing, so the version is the part to check rather than the package.`,
+      debuggingSteps: [
+        'Run npm view <package-name> versions and compare the list with the version in the message.',
+        'Check the version string for a typo, a trailing tag, or a pre-release that is not published.',
+        'Run npm view <package-name> dist-tags if the install asked for a tag such as latest or next.',
+        'Check whether the registry you use mirrors every version of that package.',
+      ],
+      possibleFix: {
+        explanation:
+          'Install a version the registry really publishes, or correct the range in package.json. A pre-release needs the exact version, or a tag that points at one; a caret range such as ^2.9.9 only resolves when a 2.x version exists.',
+        whereItMayApply:
+          'Apply it to the version or range in the command or in package.json; when a dependency asks for the impossible version, the change belongs to the package that declares it.',
+        exampleCode: [
+          '# Windows (PowerShell) and macOS or Linux, same commands',
+          'npm view <package-name> versions',
+          'npm view <package-name> dist-tags',
+          'npm install <package-name>@<published-version>',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the install and check ETARGET is gone.',
+        'Confirm package.json now records a version that the registry lists.',
+        'Run npm ls <package-name> to see the version that ended up installed.',
+      ],
+      limitations: [
+        'The message names the request, not the versions the registry offers.',
+        'The impossible range may come from a dependency rather than from your own package.json.',
+      ],
+      alternativeExplanations: [
+        'The version was never published, or was unpublished again.',
+        'A pre-release version exists but ranges do not match pre-releases unless asked.',
+        'The registry mirror is behind the public registry.',
+        'A tag such as next was removed after the version was requested.',
+      ],
+    }
+  }
+
+  if (shape === 'missing-path') {
+    const wantsPackageJson = /package\.json/i.test(errorText)
+
+    return {
+      likelyCause: wantsPackageJson
+        ? `npm could not find package.json where it looked: ${reported}. npm reads that file in the current folder and then walks up, so the usual cause is running the command outside the project root rather than a broken install.`
+        : `npm could not find a file or folder it expected: ${reported}. The path was not there when npm tried to open it, so the current folder, the path in your command, or the folder npm wanted is what needs checking.`,
+      debuggingSteps: wantsPackageJson
+        ? [
+            'Check the folder you ran the command from and compare it with the folder that holds package.json.',
+            'Run the command from the project root, the folder that contains package.json.',
+            'Look for a nested copy: a repository root without package.json beside a project folder that has it.',
+            'Use npm init only when you are starting a new project; it does not restore the file of an existing one.',
+          ]
+        : [
+            'Check the folder you ran the command from and compare it with the path in the message.',
+            'Confirm the path npm named exists and is readable.',
+            'Check the command for a path that no longer matches the folder layout.',
+            'Look for a deleted or moved folder, or a checkout that never fetched the file.',
+          ],
+      possibleFix: {
+        explanation: wantsPackageJson
+          ? 'Change into the folder that holds package.json and run npm from there, because npm looks in the current folder and its parents. A working copy opened one folder too deep, or a clone that put the project inside another folder, produces exactly this error.'
+          : 'Point npm at the folder or file it asked for: check the current directory, the path in the command, and whether the path exists at all. The line npm prints quotes the path it tried to open.',
+        whereItMayApply:
+          'Apply it to where you run the command and to the path npm quoted; the package itself is not involved in this failure.',
+        exampleCode: wantsPackageJson
+          ? [
+              '# Windows (PowerShell)',
+              'cd <path-to-your-project>',
+              'Get-ChildItem package.json',
+              '',
+              '# macOS or Linux',
+              'cd <path/to/your/project>',
+              'ls package.json',
+            ].join('\n')
+          : [
+              '# Windows (PowerShell)',
+              'cd <folder-that-holds-the-file>',
+              'Get-ChildItem',
+              '',
+              '# macOS or Linux',
+              'cd <folder-that-holds-the-file>',
+              'ls',
+            ].join('\n'),
+      },
+      verificationSteps: wantsPackageJson
+        ? [
+            'Rerun the command from the folder that holds package.json and check ENOENT is gone.',
+            'Confirm the file is listed by the command above before installing again.',
+            'Check package.json is still the one your project expects rather than a new empty file.',
+          ]
+        : [
+            'Rerun the command with the corrected path and check ENOENT is gone.',
+            'Confirm the file or folder now appears where npm expected it.',
+            'Repeat the original install or script to see whether a different line follows.',
+          ],
+      limitations: [
+        'The message quotes the path npm tried to open, not the folder you were in or the reason it is missing.',
+        'The same code covers any missing path, so the wording stays general.',
+      ],
+      alternativeExplanations: [
+        'The command was run from a parent or sibling folder of the project.',
+        'The repository was cloned without that file, or it was deleted.',
+        'A script changes the working directory before calling npm.',
+        'The path names a file a previous failed install removed.',
+      ],
+    }
+  }
+
+  if (shape === 'permissions') {
+    const isLocked = code === 'EPERM'
+
+    return {
+      likelyCause: isLocked
+        ? `npm could not change a file it needed to replace: ${reported}. On Windows that usually means another program still holds the file, for example a running dev server, an editor, or a scanner looking at the folder, and it can also mean the folder is one your account is not allowed to write to.`
+        : `npm could not write to the folder it targeted: ${reported}. The path is a location your user is not allowed to modify, which is what happens when npm installs into a system-wide folder.`,
+      debuggingSteps: [
+        'Note the path in the message and check whether it belongs to your user or to a system-wide folder.',
+        isLocked
+          ? 'Close anything that holds the folder open: a dev server, an editor, a test watcher, or a terminal sitting inside it.'
+          : 'Run npm config get prefix and check that the folder npm writes to belongs to your account.',
+        'Check the folder ownership and permissions rather than the package you were installing.',
+        'Do not reach for elevated rights: npm writes files that your ordinary user then cannot update, and the next install fails in a new place.',
+      ],
+      possibleFix: {
+        explanation:
+          'Stop writing to a folder your user does not own: set a user-level prefix with npm config set prefix, or install Node through a version manager so the global folder belongs to you, or have the ownership of that folder corrected so your account can write to it. On Windows, release the locked file by closing the program that holds it and run the install again.',
+        whereItMayApply:
+          'Apply it to the folder named in the message and to how Node and npm are installed for your user; the package being installed is usually not the problem.',
+        exampleCode: [
+          '# Windows (PowerShell): install into a folder your account owns',
+          'npm config get prefix',
+          'npm config set prefix %USERPROFILE%\\AppData\\Roaming\\npm',
+          '',
+          '# macOS or Linux: use a version manager so the global folder is yours',
+          'nvm install --lts',
+          'npm config get prefix',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the install and check the EACCES or EPERM line is gone.',
+        'Run npm config get prefix and confirm the folder is one your account owns.',
+        'Start the app or the script again, since a file that was locked may have been released by a different change.',
+      ],
+      limitations: [
+        'The message names the path npm could not write, not who owns it or which program holds it.',
+        'Windows reports a locked file and a permission problem with the same shape, so the two look alike here.',
+      ],
+      alternativeExplanations: [
+        'The folder was created earlier by another user or an elevated run, so ownership does not match.',
+        'A running dev server, editor, backup, or scanner still has the file open.',
+        'The install targets a protected system location.',
+        'The disk or folder settings block writes for this account.',
+      ],
+    }
+  }
+
+  if (shape === 'network') {
+    return {
+      likelyCause: `npm could not reach the registry for this request: ${reported}. The request never completed, so the failure is in the connection, the address, or the proxy in front of npm rather than in the package it was fetching.`,
+      debuggingSteps: [
+        'Read the reason at the end of the line: ENOTFOUND is a host that did not resolve, ETIMEDOUT and ECONNRESET are connections that stalled or dropped.',
+        'Run npm config get registry and compare it with the URL in the failed request.',
+        'Check whether a proxy or VPN is in the path, including HTTP_PROXY, HTTPS_PROXY, and npm config get proxy.',
+        'Retry the same command on a connection you know works to see whether the failure is intermittent.',
+      ],
+      possibleFix: {
+        explanation:
+          'Give npm a route it can actually use: confirm the registry URL, configure the proxy your network requires in npm settings, or retry when the failure comes and goes. A browser working does not prove npm can connect, because npm does not read the browser proxy settings; it uses its own configuration.',
+        whereItMayApply:
+          'Apply it to the network and npm configuration of the machine running the install, not to the code of the package being installed.',
+        exampleCode: [
+          'npm config get registry',
+          'npm config get proxy',
+          'npm config get https-proxy',
+          'npm install <package-name> --fetch-retries 3',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        'Rerun the install and check the request completes instead of failing.',
+        'Compare npm config get registry with the host in the message.',
+        'If you set a proxy, confirm a plain install still works when you are off that network.',
+      ],
+      limitations: [
+        'The message shows one failed request, not whether the rest of the install can reach the registry.',
+        'npm wraps the operating system error in its own code, so the reason text is the useful part.',
+      ],
+      alternativeExplanations: [
+        'DNS does not resolve the registry host on this network.',
+        'A proxy or firewall terminates the connection.',
+        'The registry URL was changed in .npmrc or by an environment variable.',
+        'The registry itself was temporarily unavailable.',
+      ],
+    }
+  }
+
+  if (shape === 'lifecycle') {
+    const script = NPM_SCRIPT_LINE.exec(errorText)?.[1]
+    const scriptName = script ?? '<script-name>'
+
+    return {
+      likelyCause: `${
+        script
+          ? `The npm script "${script}" exited with an error`
+          : 'A script that npm ran exited with an error'
+      }: ${reported}. This line is a trailer, so the message that explains the failure is printed above these lines and the exit code alone does not say what went wrong.`,
+      debuggingSteps: [
+        'Scroll above these lines and read the first error the script itself printed.',
+        `Run the script on its own with npm run ${scriptName} and watch its output without the install noise around it.`,
+        'If the script wraps a compiler or a test command, run that command directly to get the same failure in one place.',
+        'Check the folder and the Node version the script is expected to run with.',
+      ],
+      possibleFix: {
+        explanation: `Run the script on its own and read what it prints: npm run ${scriptName}. The lifecycle line only says the child command exited with a non-zero code, so the real error is the first message above it, and fixing that message is what makes this trailer disappear.`,
+        whereItMayApply:
+          'Apply it to the script named in the message and to the command it runs; changing how npm is invoked only changes the wrapper around the failure.',
+        exampleCode: [
+          '# Windows (PowerShell) and macOS or Linux, same commands',
+          `npm run ${scriptName}`,
+          '',
+          '# Or run the command the script wraps, without npm adding its trailer',
+          '<command-from-the-script>',
+        ].join('\n'),
+      },
+      verificationSteps: [
+        `Rerun npm run ${scriptName} and read the first error before changing anything else.`,
+        'After one focused change, check the script exits without a lifecycle failure.',
+        'Rerun the full command that failed, such as npm install, to confirm nothing else was hiding behind it.',
+      ],
+      limitations: [
+        'This line is a trailer; the reason for the failure sits above it and may not be in the paste.',
+        'The exit code says the script failed but not where, and every script reports the same code.',
+      ],
+      alternativeExplanations: [
+        'The script runs a compiler or test command that reported its own error above these lines.',
+        'A command or dependency the script calls is missing on this machine.',
+        'The script runs in a different folder than the one npm was started from.',
+        'A permission or network failure inside the script is reported separately above.',
+      ],
+    }
+  }
+
+  return {
+    likelyCause: `npm reported the error code ${code}: ${reported}. This engine does not have a specific rule for ${code}, so it repeats the line npm printed rather than guessing a cause.`,
+    debuggingSteps: [
+      'Read the lines npm printed above and below this one; the detail of the failure is normally there.',
+      'Look the code up in the npm error documentation to read what npm means by it.',
+      'Open the log file npm names at the end of the block for the full output of the run.',
+      'Note the npm and Node versions, since the same failure is reported under different codes across major versions.',
+    ],
+    possibleFix: {
+      explanation:
+        `Rerun the same command with the full output kept, then read the npm documentation entry for ${code}. This engine has no rule for that code, so it does not suggest a change; the lines npm printed beside it are where the fix starts.`,
+      whereItMayApply:
+        'Apply it to the command that produced the line and to the log file npm points at; the package being installed is named in the output, not by this engine.',
+      exampleCode: [
+        '# Windows (PowerShell) and macOS or Linux, same commands',
+        'npm <your-command> --loglevel verbose',
+        '',
+        '# npm names the log file at the end of the error block',
+      ].join('\n'),
+    },
+    verificationSteps: [
+      'Rerun the command and check whether a more specific npm line appears.',
+      'Compare the new output with the code in the message before changing anything.',
+      'If the code repeats, read that code in the npm documentation rather than retrying.',
+    ],
+    limitations: [
+      `There is no specific rule for ${code} here, so nothing beyond the pasted line is inferred.`,
+      'npm reuses some codes for several different failures.',
+    ],
+    alternativeExplanations: [
+      'The real failure is printed above the code line.',
+      'The code comes from the operating system rather than from npm itself.',
+      'A different npm version would report the same problem under another code.',
+    ],
+  }
+}
+
+export const javascriptNpmErrorRule: DiagnosticRule = {
+  id: 'javascript.npm-error',
+  language: 'javascript',
+  category: 'npm-error',
+  firstMatchWins: true,
+  contextSymptoms: [NPM_LOG_SYMPTOM, NPM_LOG_FILE_SYMPTOM],
+  match(line: string): RuleMatch | null {
+    const entry = NPM_LOG_LINE.exec(line)
+    if (entry === null) {
+      return null
+    }
+
+    const prefix = entry[1] === 'ERR!' ? 'npm ERR!' : 'npm error'
+    const rest = entry[2].trimEnd()
+
+    let shape = ''
+    let signature = ''
+    let code = ''
+    let specificity: RuleMatch['specificity'] = 'specific'
+    let ceiling: RuleMatch['confidenceCeiling']
+    let packageName: string | undefined
+
+    const codeLine = NPM_CODE_LINE.exec(rest)
+    const conflictingPeer = /^Conflicting peer dependency: (\S+?)@(\S+)$/.exec(
+      rest,
+    )
+    const notFound = /^404 Not Found - GET (\S+)/.exec(rest)
+    const notInRegistry = /^404\s+'([^']*)' is not in this registry\.$/.exec(rest)
+    const noVersion =
+      /^notarget No matching version found for (\S+?)@(\S+?)\.?$/.exec(rest)
+    const readPackageJson =
+      /^(?:enoent\b.*)?Could not read package\.json/.exec(rest)
+    const networkRequest =
+      /^network request to (\S+) failed, reason: (.+)$/.exec(rest)
+    const lifecycleScript =
+      /^Failed at the (?:\S+@\S+\s+)?(\S+) script\.$/.exec(rest)
+    const errnoLine = /^errno\s+(-?\d+)$/.exec(rest)
+
+    if (codeLine) {
+      code = codeLine[1]
+      shape = 'unknown-code'
+      signature = `${prefix} code <error code>`
+      specificity = 'generic'
+      ceiling = 'low'
+
+      if (code === 'ERESOLVE') {
+        shape = 'resolve'
+        signature = `${prefix} code ERESOLVE`
+        specificity = 'specific'
+        ceiling = undefined
+      } else if (code === 'E404') {
+        shape = 'registry-404'
+        signature = `${prefix} code E404`
+        specificity = 'specific'
+        ceiling = undefined
+      } else if (code === 'ETARGET') {
+        shape = 'no-target'
+        signature = `${prefix} code ETARGET`
+        specificity = 'specific'
+        ceiling = undefined
+      } else if (code === 'ENOENT') {
+        shape = 'missing-path'
+        signature = `${prefix} code ENOENT`
+        specificity = 'specific'
+        ceiling = undefined
+      } else if (code === 'EACCES' || code === 'EPERM') {
+        shape = 'permissions'
+        signature = `${prefix} code ${code}`
+        specificity = 'specific'
+        ceiling = undefined
+      } else if (code === 'ELIFECYCLE') {
+        shape = 'lifecycle'
+        signature = `${prefix} code ELIFECYCLE`
+        specificity = 'generic'
+        ceiling = 'medium'
+      } else if (NPM_NETWORK_CODES.has(code)) {
+        shape = 'network'
+        signature = `${prefix} code <network error code>`
+        specificity = 'specific'
+        ceiling = undefined
+      }
+    } else if (conflictingPeer) {
+      shape = 'resolve'
+      signature = `${prefix} Conflicting peer dependency: <package>@<version>`
+      packageName = conflictingPeer[1]
+    } else if (/^ERESOLVE unable to resolve dependency tree$/.test(rest)) {
+      shape = 'resolve'
+      signature = `${prefix} ERESOLVE unable to resolve dependency tree`
+    } else if (/^Could not resolve dependency:?$/.test(rest)) {
+      shape = 'resolve'
+      signature = `${prefix} Could not resolve dependency:`
+    } else if (notFound) {
+      shape = 'registry-404'
+      signature = `${prefix} 404 Not Found - GET <url>`
+    } else if (notInRegistry) {
+      shape = 'registry-404'
+      signature = `${prefix} 404 '<package>' is not in this registry.`
+      packageName = notInRegistry[1].split('@')[0]
+    } else if (noVersion) {
+      shape = 'no-target'
+      signature = `${prefix} No matching version found for <package>@<version>.`
+      packageName = noVersion[1]
+    } else if (readPackageJson) {
+      shape = 'missing-path'
+      signature = `${prefix} Could not read package.json`
+    } else if (networkRequest) {
+      shape = 'network'
+      signature = `${prefix} network request to <url> failed, reason: <reason>`
+    } else if (lifecycleScript) {
+      shape = 'lifecycle'
+      signature = `${prefix} Failed at the <script> script.`
+      specificity = 'generic'
+      ceiling = 'medium'
+    } else if (errnoLine) {
+      shape = 'lifecycle'
+      signature = `${prefix} errno <exit code>`
+      specificity = 'generic'
+      ceiling = 'low'
+    } else {
+      return null
+    }
+
+    const captures: Record<string, string> = {
+      reason: `${shape}:${code}`,
+      detail: rest,
+    }
+    if (packageName !== undefined && packageName.length >= 3) {
+      captures.package = packageName
+    }
+
+    const ruleMatch: RuleMatch = { signature, specificity, captures }
+    if (ceiling !== undefined) {
+      ruleMatch.confidenceCeiling = ceiling
+    }
+
+    return ruleMatch
+  },
+  explain(match: RuleMatch, context: RuleContext): RuleNarrative {
+    const [shape, code] = match.captures.reason.split(':')
+    const narrative = npmNarrative(
+      shape,
+      code,
+      `"${match.captures.detail}"`,
+      context.errorText,
+    )
+
+    return {
+      ...narrative,
+      limitations: [
+        ...narrative.limitations,
+        'The engine reads only the lines you pasted; it cannot see the full npm log, package.json, or the installed tree.',
+      ],
+    }
+  },
+}
+
 export const javascriptRules: readonly DiagnosticRule[] = [
   javascriptReferenceErrorRule,
   javascriptTypeErrorRule,
@@ -2152,4 +3344,6 @@ export const javascriptRules: readonly DiagnosticRule[] = [
   javascriptNetworkRequestFailedRule,
   javascriptCorsBlockedRule,
   javascriptReactErrorRule,
+  javascriptTypeScriptErrorRule,
+  javascriptNpmErrorRule,
 ]

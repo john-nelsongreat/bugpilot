@@ -799,7 +799,7 @@ describe('Input limits and labels', () => {
       'javascript.permission-error',
       'javascript.call-stack-exceeded',
     ])
-    expect(javascriptRules.slice(8).map((rule) => rule.id)).toEqual([
+    expect(javascriptRules.slice(8, 12).map((rule) => rule.id)).toEqual([
       'javascript.json-parse-error',
       'javascript.network-request-failed',
       'javascript.cors-blocked',
