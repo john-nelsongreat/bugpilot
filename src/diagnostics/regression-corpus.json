@@ -3,7 +3,8 @@
   "generatedFrom": [
     "docs/MANUAL_TEST_CHECKLIST.md (section 7 pasteable examples)",
     "src/diagnostics/*.test.ts (static rule-test inputs)",
-    "task Part B/B8/B9 inputs"
+    "task Part B/B8/B9 inputs",
+    "task batch C1 pasteable TypeScript and npm examples"
   ],
   "cases": [
     {
@@ -1139,6 +1140,384 @@
       "source": "task:JSON bare forms",
       "language": "auto",
       "errorText": "\"undefined\" is not valid JSON"
+    },
+    {
+      "id": "case-0190",
+      "source": "task:batch C1 TypeScript classic location",
+      "language": "javascript",
+      "errorText": "src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0191",
+      "source": "task:batch C1 TypeScript classic location",
+      "language": "javascript",
+      "errorText": "C:\\Users\\dev\\project\\src\\App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0192",
+      "source": "task:batch C1 TypeScript pretty location",
+      "language": "javascript",
+      "errorText": "src/App.tsx:12:5 - error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0193",
+      "source": "task:batch C1 TypeScript pretty location",
+      "language": "javascript",
+      "errorText": "src/App.tsx:5:7 - error TS2339: Property 'countt' does not exist on type 'Counter'."
+    },
+    {
+      "id": "case-0194",
+      "source": "task:batch C1 TypeScript pretty location",
+      "language": "javascript",
+      "errorText": "C:\\Users\\dev\\project\\src\\Counter.tsx:7:10 - error TS2339: Property 'countt' does not exist on type 'Counter'."
+    },
+    {
+      "id": "case-0195",
+      "source": "task:batch C1 TypeScript pretty location",
+      "language": "javascript",
+      "errorText": "src/cart.ts:88:3: error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'."
+    },
+    {
+      "id": "case-0196",
+      "source": "task:batch C1 TypeScript bare message",
+      "language": "javascript",
+      "errorText": "error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0197",
+      "source": "task:batch C1 TypeScript bare message",
+      "language": "javascript",
+      "errorText": "Type 'string' is not assignable to type 'number'.ts(2322)"
+    },
+    {
+      "id": "case-0198",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(4,17): error TS2304: Cannot find name 'userCount'."
+    },
+    {
+      "id": "case-0199",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(2,20): error TS2307: Cannot find module 'lodash' or its corresponding type declarations."
+    },
+    {
+      "id": "case-0200",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/cart.ts(9,21): error TS7006: Parameter 'value' implicitly has an 'any' type."
+    },
+    {
+      "id": "case-0201",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(21,9): error TS2532: Object is possibly 'undefined'."
+    },
+    {
+      "id": "case-0202",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(30,5): error TS18048: 'items' is possibly 'undefined'."
+    },
+    {
+      "id": "case-0203",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(44,3): error TS2554: Expected 1 arguments, but got 0."
+    },
+    {
+      "id": "case-0204",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(51,18): error TS2769: No overload matches this call."
+    },
+    {
+      "id": "case-0205",
+      "source": "task:batch C1 TypeScript sub-signatures",
+      "language": "javascript",
+      "errorText": "src/App.tsx(9,3): error TS2551: Property 'countt' does not exist on type 'Counter'. Did you mean 'count'?"
+    },
+    {
+      "id": "case-0206",
+      "source": "task:batch C1 TypeScript multi-error output",
+      "language": "javascript",
+      "errorText": "src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\nC:\\Users\\dev\\project\\src\\Counter.tsx(7,10): error TS2339: Property 'countt' does not exist on type 'Counter'.\nFound 2 errors in 2 files.\n\nErrors  Files\n     1  src/App.tsx:12\n     1  C:\\Users\\dev\\project\\src\\Counter.tsx:7"
+    },
+    {
+      "id": "case-0207",
+      "source": "task:batch C1 TypeScript multi-error output",
+      "language": "auto",
+      "errorText": "src/App.tsx:5:7 - error TS2339: Property 'countt' does not exist on type 'Counter'.\nFound 1 error in src/App.tsx:5\n\nnpm error code ELIFECYCLE\nnpm error Failed at the build script."
+    },
+    {
+      "id": "case-0208",
+      "source": "task:batch C1 TypeScript multi-error output",
+      "language": "auto",
+      "errorText": "src/App.tsx:12:5 - error TS2322: Type 'string' is not assignable to type 'number'.\n    at renderWithHooks (node_modules/react-dom/cjs/react-dom.development.js:14985:18)\n    at App (src/App.tsx:12:5)"
+    },
+    {
+      "id": "case-0209",
+      "source": "task:batch C1 TypeScript Auto detection",
+      "language": "auto",
+      "errorText": "src/App.tsx:12:5 - error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0210",
+      "source": "task:batch C1 TypeScript Auto detection",
+      "language": "auto",
+      "errorText": "error TS2322: Type 'string' is not assignable to type 'number'."
+    },
+    {
+      "id": "case-0211",
+      "source": "task:batch C1 TypeScript Auto detection",
+      "language": "auto",
+      "errorText": "Type 'string' is not assignable to type 'number'.ts(2322)"
+    },
+    {
+      "id": "case-0212",
+      "source": "task:batch C1 npm ERESOLVE",
+      "language": "javascript",
+      "errorText": "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\nnpm error\nnpm error While resolving: bugpilot@1.0.0\nnpm error Found: react@18.2.0\nnpm error node_modules/react\nnpm error   react@\"^18.2.0\" from the root project\nnpm error\nnpm error Could not resolve dependency:\nnpm error peer react@\"^17.0.0\" from some-ui-lib@2.1.0\nnpm error node_modules/some-ui-lib\nnpm error   some-ui-lib@\"^2.1.0\" from the root project\nnpm error\nnpm error Fix the upstream dependency conflict, or retry\nnpm error this command with --force, or --legacy-peer-deps\nnpm error to accept an incorrect (and potentially broken) dependency resolution.\nnpm error A complete log of this run can be found in:\nnpm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log"
+    },
+    {
+      "id": "case-0213",
+      "source": "task:batch C1 npm ERESOLVE",
+      "language": "javascript",
+      "errorText": "npm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree\nnpm ERR!\nnpm ERR! While resolving: bugpilot@1.0.0\nnpm ERR! Found: react@18.2.0\nnpm ERR! node_modules/react\nnpm ERR!   react@\"^18.2.0\" from the root project\nnpm ERR!\nnpm ERR! Could not resolve dependency:\nnpm ERR! peer react@\"^17.0.0\" from some-ui-lib@2.1.0\nnpm ERR! Conflicting peer dependency: react@17.0.2\nnpm ERR! node_modules/react\nnpm ERR!   peer react@\"^17.0.0\" from some-ui-lib@2.1.0\nnpm ERR!\nnpm ERR! A complete log of this run can be found in:\nnpm ERR!     C:\\Users\\dev\\AppData\\Local\\npm-cache\\_logs\\2026-10-31T10_00_00_000Z-debug-0.log"
+    },
+    {
+      "id": "case-0214",
+      "source": "task:batch C1 npm ERESOLVE",
+      "language": "javascript",
+      "errorText": "npm error ERESOLVE unable to resolve dependency tree"
+    },
+    {
+      "id": "case-0215",
+      "source": "task:batch C1 npm ERESOLVE",
+      "language": "javascript",
+      "errorText": "npm error Could not resolve dependency:"
+    },
+    {
+      "id": "case-0216",
+      "source": "task:batch C1 npm ERESOLVE",
+      "language": "javascript",
+      "errorText": "npm ERR! Conflicting peer dependency: react@17.0.2"
+    },
+    {
+      "id": "case-0217",
+      "source": "task:batch C1 npm E404",
+      "language": "javascript",
+      "errorText": "npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/not-a-real-package-xyz - Not found\nnpm error 404\nnpm error 404  'not-a-real-package-xyz@*' is not in this registry.\nnpm error 404\nnpm error A complete log of this run can be found in:\nnpm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log"
+    },
+    {
+      "id": "case-0218",
+      "source": "task:batch C1 npm E404",
+      "language": "javascript",
+      "errorText": "npm ERR! code E404\nnpm ERR! 404 Not Found - GET https://registry.npmjs.org/nope - Not found\nnpm ERR! 404\nnpm ERR! 404  'nope@*' is not in this registry."
+    },
+    {
+      "id": "case-0219",
+      "source": "task:batch C1 npm E404",
+      "language": "javascript",
+      "errorText": "npm error 404 Not Found - GET https://registry.npmjs.org/not-a-real-package-xyz - Not found"
+    },
+    {
+      "id": "case-0220",
+      "source": "task:batch C1 npm E404",
+      "language": "javascript",
+      "errorText": "npm ERR! 404  'nope@*' is not in this registry."
+    },
+    {
+      "id": "case-0221",
+      "source": "task:batch C1 npm ETARGET",
+      "language": "javascript",
+      "errorText": "npm error code ETARGET\nnpm error notarget No matching version found for some-ui-lib@2.9.9.\nnpm error notarget In most cases you or one of your dependencies are requesting\nnpm error notarget a package version that does not exist."
+    },
+    {
+      "id": "case-0222",
+      "source": "task:batch C1 npm ETARGET",
+      "language": "javascript",
+      "errorText": "npm error notarget No matching version found for some-ui-lib@2.9.9."
+    },
+    {
+      "id": "case-0223",
+      "source": "task:batch C1 npm ENOENT",
+      "language": "javascript",
+      "errorText": "npm error code ENOENT\nnpm error path C:\\Users\\dev\\project\\package.json\nnpm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\\Users\\dev\\project\\package.json'"
+    },
+    {
+      "id": "case-0224",
+      "source": "task:batch C1 npm ENOENT",
+      "language": "javascript",
+      "errorText": "npm ERR! code ENOENT\nnpm ERR! syscall open\nnpm ERR! path /home/dev/package.json\nnpm ERR! errno -2\nnpm ERR! enoent ENOENT: no such file or directory, open '/home/dev/package.json'\nnpm ERR! enoent This is related to npm not being able to find a file.\nnpm ERR! enoent"
+    },
+    {
+      "id": "case-0225",
+      "source": "task:batch C1 npm ENOENT",
+      "language": "javascript",
+      "errorText": "npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\\Users\\dev\\project\\package.json'"
+    },
+    {
+      "id": "case-0226",
+      "source": "task:batch C1 npm ENOENT",
+      "language": "auto",
+      "errorText": "npm error code ENOENT\nnpm error path C:\\Users\\dev\\project\\package.json\nnpm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\\Users\\dev\\project\\package.json'"
+    },
+    {
+      "id": "case-0227",
+      "source": "task:batch C1 npm EACCES and EPERM",
+      "language": "javascript",
+      "errorText": "npm error code EACCES\nnpm error syscall mkdir\nnpm error path /usr/local/lib/node_modules\nnpm error Error: EACCES: permission denied, mkdir '/usr/local/lib/node_modules'"
+    },
+    {
+      "id": "case-0228",
+      "source": "task:batch C1 npm EACCES and EPERM",
+      "language": "javascript",
+      "errorText": "npm ERR! code EPERM\nnpm ERR! syscall rename\nnpm ERR! path C:\\Program Files\\nodejs\\node_modules\\bugpilot\nnpm ERR! dest C:\\Program Files\\nodejs\\node_modules\\.bugpilot.delete\nnpm ERR! Error: EPERM: operation not permitted, rename 'C:\\Program Files\\nodejs\\node_modules\\bugpilot' -> 'C:\\Program Files\\nodejs\\node_modules\\.bugpilot.delete'"
+    },
+    {
+      "id": "case-0229",
+      "source": "task:batch C1 npm network",
+      "language": "javascript",
+      "errorText": "npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error errno ENOTFOUND\nnpm error network request to https://registry.npmjs.org/express failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org"
+    },
+    {
+      "id": "case-0230",
+      "source": "task:batch C1 npm network",
+      "language": "javascript",
+      "errorText": "npm ERR! code ECONNRESET\nnpm ERR! network request to https://registry.npmjs.org/vite failed, reason: read ECONNRESET"
+    },
+    {
+      "id": "case-0231",
+      "source": "task:batch C1 npm network",
+      "language": "javascript",
+      "errorText": "npm error network request to https://registry.npmjs.org/express failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org"
+    },
+    {
+      "id": "case-0232",
+      "source": "task:batch C1 npm network",
+      "language": "auto",
+      "errorText": "npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error errno ENOTFOUND\nnpm error network request to https://registry.npmjs.org/express failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org"
+    },
+    {
+      "id": "case-0233",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "auto",
+      "errorText": "src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/App.tsx(13,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.\nnpm error code ELIFECYCLE\nnpm error Failed at the build script."
+    },
+    {
+      "id": "case-0234",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "auto",
+      "errorText": "npm error code ELIFECYCLE\nnpm error command failed\nnpm error\nnpm error> bugpilot@1.0.0 build\nnpm error Failed at the bugpilot@1.0.0 build script.\nnpm error A complete log of this run can be found in:\nnpm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log"
+    },
+    {
+      "id": "case-0235",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "javascript",
+      "errorText": "npm ERR! code ELIFECYCLE\nnpm ERR! errno 1\nnpm ERR! bugpilot@1.0.0 build: `tsc -b`\nnpm ERR! Failed at the bugpilot@1.0.0 build script.\nnpm ERR! This is probably not a problem with npm. There is likely additional logging output above."
+    },
+    {
+      "id": "case-0236",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "javascript",
+      "errorText": "Error: EACCES: permission denied, mkdir 'C:\\Users\\dev\\project\\dist'\nnpm ERR! Failed at the bugpilot@1.0.0 build script.\nnpm ERR! This is probably not a problem with npm. There is likely additional logging output above."
+    },
+    {
+      "id": "case-0237",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "javascript",
+      "errorText": "npm ERR! Failed at the bugpilot@1.0.0 build script."
+    },
+    {
+      "id": "case-0238",
+      "source": "task:batch C1 npm ELIFECYCLE trailer",
+      "language": "javascript",
+      "errorText": "npm ERR! errno 1"
+    },
+    {
+      "id": "case-0239",
+      "source": "task:batch C1 precedence",
+      "language": "javascript",
+      "errorText": "Error: ENOENT: no such file or directory, open 'C:\\Users\\dev\\project\\package.json'"
+    },
+    {
+      "id": "case-0240",
+      "source": "task:batch C1 precedence",
+      "language": "javascript",
+      "errorText": "Error: EACCES: permission denied, mkdir '/usr/local/lib/node_modules'"
+    },
+    {
+      "id": "case-0241",
+      "source": "task:batch C1 precedence",
+      "language": "javascript",
+      "errorText": "Error: listen EADDRINUSE: address already in use :::5173\nnpm ERR! Failed at the bugpilot@1.0.0 dev script."
+    },
+    {
+      "id": "case-0242",
+      "source": "task:batch C1 precedence",
+      "language": "javascript",
+      "errorText": "Error: Cannot find module 'express'\nnpm error code ELIFECYCLE\nnpm error Failed at the build script."
+    },
+    {
+      "id": "case-0243",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "2026-10-31T10:00:00Z src/App.tsx(12,5): error TS2322: Type 'a' is not assignable to type 'b'."
+    },
+    {
+      "id": "case-0244",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "The TS2322 error is a type mismatch in TypeScript."
+    },
+    {
+      "id": "case-0245",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "// error TS2322: Type \"a\" is not assignable to type \"b\"."
+    },
+    {
+      "id": "case-0246",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "see the ERESOLVE docs"
+    },
+    {
+      "id": "case-0247",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "npm install failed with a dependency conflict"
+    },
+    {
+      "id": "case-0248",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "npm error"
+    },
+    {
+      "id": "case-0249",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "ERR_PNPM_NO_MATCHING_VERSION  No matching version found for some-ui-lib@2.9.9."
+    },
+    {
+      "id": "case-0250",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "yarn add v1.22.19\n[1/4] Resolving packages...\nerror Command failed.\nExit code: 1"
+    },
+    {
+      "id": "case-0251",
+      "source": "task:batch C1 lookalike",
+      "language": "auto",
+      "errorText": "Progress: resolved 214, reused 0\n ERR_PNPM_NO_MATCHING_VERSION  No matching version found for some-ui-lib@2.9.9\nFailed to create install \"tree\""
+    },
+    {
+      "id": "case-0252",
+      "source": "task:batch C1 Python conflict",
+      "language": "auto",
+      "errorText": "Traceback (most recent call last):\n  File \"/home/ana/project/app.py\", line 4, in <module>\n    run()\nValueError: invalid literal for int() with base 10: TS2322\nnpm error code ERESOLVE"
     }
   ]
 }

@@ -1132,5 +1132,383 @@
     "matchedSignature": "SyntaxError: \"undefined\" is not valid JSON",
     "confidence": "medium",
     "ruleId": "javascript.json-parse-error"
+  },
+  "case-0190": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0191": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0192": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0193": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2339: Property '<name>' does not exist on type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0194": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2339: Property '<name>' does not exist on type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0195": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2345: Argument of type '<type>' is not assignable to parameter of type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0196": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "medium",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0197": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "low",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0198": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2304: Cannot find name '<name>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0199": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2307: Cannot find module '<module>' or its corresponding type declarations.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0200": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS7006: Parameter '<name>' implicitly has an 'any' type.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0201": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2532: Object is possibly '<value>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0202": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS18048: '<name>' is possibly '<value>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0203": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2554: Expected <count> arguments, but got <count>.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0204": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2769: No overload matches this call.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0205": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2551: <message>",
+    "confidence": "medium",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0206": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0207": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2339: Property '<name>' does not exist on type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0208": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0209": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0210": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "medium",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0211": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "low",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0212": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code ERESOLVE",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0213": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code ERESOLVE",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0214": {
+    "category": "npm-error",
+    "matchedSignature": "npm error ERESOLVE unable to resolve dependency tree",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0215": {
+    "category": "npm-error",
+    "matchedSignature": "npm error Could not resolve dependency:",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0216": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! Conflicting peer dependency: <package>@<version>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0217": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code E404",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0218": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code E404",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0219": {
+    "category": "npm-error",
+    "matchedSignature": "npm error 404 Not Found - GET <url>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0220": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! 404 '<package>' is not in this registry.",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0221": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code ETARGET",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0222": {
+    "category": "npm-error",
+    "matchedSignature": "npm error No matching version found for <package>@<version>.",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0223": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code ENOENT",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0224": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code ENOENT",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0225": {
+    "category": "npm-error",
+    "matchedSignature": "npm error Could not read package.json",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0226": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code ENOENT",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0227": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code EACCES",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0228": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code EPERM",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0229": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code <network error code>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0230": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code <network error code>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0231": {
+    "category": "npm-error",
+    "matchedSignature": "npm error network request to <url> failed, reason: <reason>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0232": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code <network error code>",
+    "confidence": "high",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0233": {
+    "category": "typescript-error",
+    "matchedSignature": "error TS2322: Type '<type>' is not assignable to type '<type>'.",
+    "confidence": "high",
+    "ruleId": "javascript.typescript-error"
+  },
+  "case-0234": {
+    "category": "npm-error",
+    "matchedSignature": "npm error code ELIFECYCLE",
+    "confidence": "medium",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0235": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! code ELIFECYCLE",
+    "confidence": "medium",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0236": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EACCES: permission denied, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0237": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! Failed at the <script> script.",
+    "confidence": "medium",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0238": {
+    "category": "npm-error",
+    "matchedSignature": "npm ERR! errno <exit code>",
+    "confidence": "low",
+    "ruleId": "javascript.npm-error"
+  },
+  "case-0239": {
+    "category": "missing-file",
+    "matchedSignature": "Error: ENOENT: no such file or directory, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-file-error"
+  },
+  "case-0240": {
+    "category": "permission-denied",
+    "matchedSignature": "Error: EACCES: permission denied, <operation> '<path>'",
+    "confidence": "high",
+    "ruleId": "javascript.permission-error"
+  },
+  "case-0241": {
+    "category": "port-in-use",
+    "matchedSignature": "Error: listen EADDRINUSE: address already in use <address>",
+    "confidence": "high",
+    "ruleId": "javascript.port-in-use"
+  },
+  "case-0242": {
+    "category": "missing-module",
+    "matchedSignature": "Error: Cannot find module '<package>'",
+    "confidence": "high",
+    "ruleId": "javascript.node-module-not-found"
+  },
+  "case-0243": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0244": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0245": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0246": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0247": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0248": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0249": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0250": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0251": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0252": {
+    "category": "invalid-value",
+    "matchedSignature": "ValueError: <unclassified value error>",
+    "confidence": "low",
+    "ruleId": "python.value-error"
   }
 }
