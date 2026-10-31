@@ -515,11 +515,15 @@ function chooseSelection(
       certainty = 'conflict'
       conflictDetail = `${formatSignalLabels(
         signals[otherLanguage],
-      )} point to ${LANGUAGE_LABELS[otherLanguage]}`
+      )} that ${signalVerb(
+        signals[otherLanguage],
+        'point',
+        'points',
+      )} to ${LANGUAGE_LABELS[otherLanguage]}`
     } else if (ownScore >= 2 && otherScore >= 2) {
       certainty = 'conflict'
       conflictDetail =
-        'the surrounding text contains evidence for both Python and JavaScript'
+        'evidence in the surrounding text for both Python and JavaScript'
     }
 
     return {
@@ -549,7 +553,13 @@ function chooseSelection(
             certainty: 'conflict',
             conflictDetail: `${formatSignalLabels(
               signals[inferredLanguage],
-            )} point to ${LANGUAGE_LABELS[inferredLanguage]}, but the final line has a more specific ${LANGUAGE_LABELS[otherLanguage]} signature`,
+            )} that ${signalVerb(
+              signals[inferredLanguage],
+              'point',
+              'points',
+            )} to ${LANGUAGE_LABELS[inferredLanguage]}, but the final line has a more specific ${
+              LANGUAGE_LABELS[otherLanguage]
+            } signature`,
           },
         }
       }
@@ -565,7 +575,7 @@ function chooseSelection(
           language: inferredLanguage,
           certainty: conflictingSignals ? 'conflict' : 'trace',
           conflictDetail: conflictingSignals
-            ? 'the surrounding text contains evidence for both Python and JavaScript'
+            ? 'evidence in the surrounding text for both Python and JavaScript'
             : undefined,
         },
       }
@@ -580,7 +590,13 @@ function chooseSelection(
           certainty: 'conflict',
           conflictDetail: `${formatSignalLabels(
             signals[inferredLanguage],
-          )} point to ${LANGUAGE_LABELS[inferredLanguage]}, but no supported ${LANGUAGE_LABELS[inferredLanguage]} signature matched the final line`,
+          )} that ${signalVerb(
+            signals[inferredLanguage],
+            'point',
+            'points',
+          )} to ${LANGUAGE_LABELS[inferredLanguage]}, but no supported ${
+            LANGUAGE_LABELS[inferredLanguage]
+          } signature matched the final line`,
         },
       }
     }
@@ -682,14 +698,17 @@ function buildConfidence(
   }
 
   if (selection.certainty === 'trace') {
+    const verb = signalVerb(signals[selection.language], 'support', 'supports')
     return selection.candidate.match.specificity === 'specific'
       ? {
           level: 'high',
-          reason: `${specificSignatureText}, and ${matchingSignals} support the ${languageLabel} runtime.${competingNote}`,
+          reason: `${specificSignatureText}, and ${matchingSignals} ${verb} the ${languageLabel} runtime.${competingNote}`,
         }
       : {
           level: 'medium',
-          reason: `${genericSignatureText}. ${matchingSignals} support ${languageLabel}, but the specific cause remains less certain.${competingNote}`,
+          reason: `${genericSignatureText}. ${startSentence(
+            matchingSignals,
+          )} ${verb} ${languageLabel}, but the specific cause remains less certain.${competingNote}`,
         }
   }
 
@@ -844,7 +863,7 @@ function signalScore(signals: LanguageSignal[]): number {
 }
 
 function formatSignalLabels(signals: LanguageSignal[]): string {
-  const labels = Array.from(new Set(signals.map((signal) => signal.label)))
+  const labels = distinctSignalLabels(signals)
   if (labels.length === 0) {
     return 'the matched signature'
   }
@@ -855,6 +874,26 @@ function formatSignalLabels(signals: LanguageSignal[]): string {
     return `${labels[0]} and ${labels[1]}`
   }
   return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`
+}
+
+function distinctSignalLabels(signals: LanguageSignal[]): string[] {
+  return Array.from(new Set(signals.map((signal) => signal.label)))
+}
+
+/**
+ * The clue list is the grammatical subject of these sentences, so the verb has
+ * to agree with how many distinct clues it names.
+ */
+function signalVerb(
+  signals: LanguageSignal[],
+  plural: string,
+  singular: string,
+): string {
+  return distinctSignalLabels(signals).length > 1 ? plural : singular
+}
+
+function startSentence(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`
 }
 
 function bestCandidate(
