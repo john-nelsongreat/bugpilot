@@ -50,6 +50,151 @@ interface GitSubSignature {
 const FATAL_LINE = /^fatal:\s*(.+)$/
 
 const GIT_SUB_SIGNATURES: readonly GitSubSignature[] = [
+  {
+    shape: 'not-a-repository',
+    pattern:
+      /^fatal: not a git repository \(or any of the parent directories(?:, \.\.)?\): \.git$/,
+    signature: 'fatal: not a git repository (or any of the parent directories): .git',
+    specificity: 'specific',
+  },
+  {
+    shape: 'remote-exists',
+    pattern: /^(?:fatal|error): remote (?<name>\S+) already exists\.$/,
+    signature: 'error: remote origin already exists.',
+    specificity: 'specific',
+  },
+  {
+    shape: 'push-rejected',
+    pattern:
+      /^!\s*\[rejected\]\s+(?<from>\S+) -> (?<to>\S+)\s+\((?<kind>fetch first|non-fast-forward)\)$/,
+    signature: (parts) =>
+      `! [rejected] <ref> -> <ref> (${parts.groups?.kind ?? 'fetch first'})`,
+    specificity: 'specific',
+  },
+  {
+    shape: 'push-refs-failed',
+    pattern: /^error: failed to push some refs to '(?<url>[^']+)'\.?$/,
+    signature: "error: failed to push some refs to '<url>'",
+    specificity: 'generic',
+  },
+  {
+    shape: 'unrelated-histories',
+    pattern: /^fatal: refusing to merge unrelated histories$/,
+    signature: 'fatal: refusing to merge unrelated histories',
+    specificity: 'specific',
+  },
+  {
+    shape: 'merge-conflict',
+    pattern: /^CONFLICT \((?<type>[^)]+)\): Merge conflict in (?<file>.+)$/,
+    signature: 'CONFLICT (<type>): Merge conflict in <file>',
+    specificity: 'specific',
+  },
+  {
+    shape: 'merge-aborted-summary',
+    pattern: /^Automatic merge failed; fix conflicts and then commit the result\.?$/,
+    signature: 'Automatic merge failed; fix conflicts and then commit the result.',
+    specificity: 'generic',
+  },
+  {
+    shape: 'local-changes',
+    pattern:
+      /^error: Your local changes to the following files would be overwritten by (?<op>checkout|merge):$/,
+    signature: (parts) =>
+      `error: Your local changes to the following files would be overwritten by ${parts.groups?.op ?? 'checkout'}:`,
+    specificity: 'specific',
+  },
+  {
+    shape: 'identity',
+    pattern: /^fatal: unable to auto-detect email address \(got '(?<value>[^']+)'\)$/,
+    signature: "fatal: unable to auto-detect email address (got '<value>')",
+    specificity: 'specific',
+  },
+  {
+    shape: 'identity',
+    pattern: /^Author identity unknown$/,
+    signature: 'Author identity unknown',
+    specificity: 'specific',
+  },
+  {
+    shape: 'identity-banner',
+    pattern: /^\*\*\* Please tell me who you are\.?$/,
+    signature: '*** Please tell me who you are.',
+    specificity: 'generic',
+  },
+  {
+    shape: 'password-auth',
+    pattern:
+      /^remote: Support for password authentication was removed on August 13, 2021\.?$/,
+    signature: 'remote: Support for password authentication was removed on August 13, 2021.',
+    specificity: 'specific',
+  },
+  {
+    shape: 'auth-failed',
+    pattern: /^fatal: Authentication failed for '(?<url>[^']+)'\.?$/,
+    signature: "fatal: Authentication failed for '<url>'",
+    specificity: 'specific',
+  },
+  {
+    shape: 'permission-denied',
+    pattern: /^remote: Permission to (?<repo>\S+) denied to (?<user>[^.]+)\.?$/,
+    signature: 'remote: Permission to <owner>/<repo>.git denied to <user>.',
+    specificity: 'specific',
+  },
+  {
+    shape: 'http-403',
+    pattern: /^error: The requested URL returned error: (?<code>40[13])$/,
+    signature: (parts) =>
+      `error: The requested URL returned error: ${parts.groups?.code ?? '403'}`,
+    specificity: 'specific',
+  },
+  {
+    shape: 'publickey',
+    pattern:
+      /^(?:(?:git|[\w.+-]+)@[\w.-]+:\s*|[\w.-]+@[\w.-]+:\s*|ssh:\s*)?Permission denied \(publickey\)\.?$/,
+    signature: 'Permission denied (publickey).',
+    specificity: 'specific',
+  },
+  {
+    shape: 'src-refspec',
+    pattern: /^error: src refspec (?<branch>\S+) does not match any$/,
+    signature: 'error: src refspec <branch> does not match any',
+    specificity: 'specific',
+  },
+  {
+    shape: 'dubious-ownership',
+    pattern: /^fatal: detected dubious ownership in repository at '(?<path>[^']+)'\.?$/,
+    signature: "fatal: detected dubious ownership in repository at '<path>'",
+    specificity: 'specific',
+  },
+  {
+    shape: 'index-lock',
+    pattern: /^fatal: Unable to create '(?<path>[^']*index\.lock)': File exists\.$/,
+    signature: "fatal: Unable to create '<path>': File exists.",
+    specificity: 'specific',
+  },
+  {
+    shape: 'line-endings',
+    pattern:
+      /^warning: in the working copy of '(?<file>[^']+)', (?<from>LF|CRLF) will be replaced by (?<to>CRLF|LF) the next time Git touches it$/,
+    signature: (parts) =>
+      `warning: in the working copy of '<file>', ${parts.groups?.from ?? 'LF'} will be replaced by ${parts.groups?.to ?? 'CRLF'} the next time Git touches it`,
+    specificity: 'specific',
+  },
+  {
+    shape: 'line-endings-short',
+    pattern:
+      /^warning: (?<from>LF|CRLF) will be replaced by (?<to>CRLF|LF) in (?<file>.+)\.?$/,
+    signature: (parts) =>
+      `warning: ${parts.groups?.from ?? 'LF'} will be replaced by ${parts.groups?.to ?? 'CRLF'} in <file>.`,
+    specificity: 'specific',
+  },
+  {
+    shape: 'network',
+    pattern:
+      /^fatal: unable to access '(?<url>[^']+)': (?<why>(?:Could not resolve host|Failed to connect to|Connection timed out).*)$/,
+    signature: "fatal: unable to access '<url>': <network detail>",
+    specificity: 'specific',
+  },
 ]
 
 function gitErrorRule(): DiagnosticRule {

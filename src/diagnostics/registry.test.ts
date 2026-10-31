@@ -4,12 +4,14 @@ import {
   diagnosticCategoryLabel,
 } from './labels'
 import { javascriptRules } from './rules/javascript'
+import { neutralRules } from './rules/neutral'
 import { pythonRules } from './rules/python'
 import type { DiagnosticRule } from './types'
 
 const ALL_RULES: readonly DiagnosticRule[] = [
   ...pythonRules,
   ...javascriptRules,
+  ...neutralRules,
 ]
 
 const NEW_RULES = [
@@ -83,6 +85,10 @@ const BATCH_C1_RULES = [
     'npm-error',
     'NPM install or run error',
   ],
+] as const
+
+const BATCH_C2_RULES = [
+  ['tool.git-error', 'any', 'git-error', 'Git error'],
 ] as const
 
 describe('diagnostic rule registry', () => {
@@ -180,6 +186,28 @@ describe('diagnostic rule registry', () => {
   })
 
   it.each(BATCH_C1_RULES)(
+    'labels %s with %s on the detail page',
+    (_id, _language, category, label) => {
+      expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
+      expect(diagnosticCategoryLabel(category)).toBe(label)
+    },
+  )
+
+  it('registers every batch-C2 rule once as a language-neutral rule', () => {
+    for (const [id, language, category] of BATCH_C2_RULES) {
+      const rules = neutralRules.filter((rule) => rule.id === id)
+
+      expect(rules).toHaveLength(1)
+      expect(rules[0].language).toBe(language)
+      expect(rules[0].category).toBe(category)
+    }
+
+    expect(neutralRules.map((rule) => rule.id)).toEqual(
+      BATCH_C2_RULES.map(([id]) => id),
+    )
+  })
+
+  it.each(BATCH_C2_RULES)(
     'labels %s with %s on the detail page',
     (_id, _language, category, label) => {
       expect(DIAGNOSTIC_CATEGORY_LABELS[category]).toBe(label)
