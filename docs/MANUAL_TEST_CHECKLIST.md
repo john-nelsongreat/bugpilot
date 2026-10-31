@@ -551,6 +551,238 @@ These are the same distinctive browser messages pasted without the error class, 
 
 One related distinction: a plain `SyntaxError: Unexpected token '}'` still returns **Syntax error**, and `TypeError: x is not a function` still returns **Type mismatch**; the new rules supersede the generic fallbacks only when their own message families match.
 
+### Batch C1 TypeScript compiler rules
+
+Set **Language** to `JavaScript` for every one-line example unless a step says otherwise; multi-line blocks are also listed with `Auto`. Every result in this section shows the category **TypeScript compiler error**. These are compiler output shapes; the Python rules must stay quiet.
+
+**Message forms**
+
+- [ ] Clear the form and paste each line separately. Each should return **High confidence** with the signature shown and one evidence item, **Final exception line** at **Line 1**:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.` | `error TS2322: Type '<type>' is not assignable to type '<type>'.` |
+  | `C:\Users\dev\project\src\App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.` | `error TS2322: Type '<type>' is not assignable to type '<type>'.` |
+  | `src/App.tsx:12:5 - error TS2322: Type 'string' is not assignable to type 'number'.` | `error TS2322: Type '<type>' is not assignable to type '<type>'.` |
+  | `src/cart.ts:88:3: error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.` | `error TS2345: Argument of type '<type>' is not assignable to parameter of type '<type>'.` |
+  | `C:\Users\dev\project\src\Counter.tsx:7:10 - error TS2339: Property 'countt' does not exist on type 'Counter'.` | `error TS2339: Property '<name>' does not exist on type '<type>'.` |
+- [ ] Clear the form and paste `error TS2322: Type 'string' is not assignable to type 'number'.` (no location).
+  - Expected: **Medium confidence**, signature `error TS2322: Type '<type>' is not assignable to type '<type>'.`, and the confidence reason says the matched wording is generic so the confidence is capped at medium. The cause must not invent a line or column.
+- [ ] Clear the form and paste `Type 'string' is not assignable to type 'number'.ts(2322)`.
+  - Expected: **Low confidence**, same signature, evidence **Final exception line** at **Line 1**.
+
+**Sub-signatures**
+
+- [ ] Clear the form and paste each line separately. Each should return **High confidence** with its own signature, and the cause, steps, fix, verification, limitations, and alternatives should all be about that message:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `src/App.tsx(4,17): error TS2304: Cannot find name 'userCount'.` | `error TS2304: Cannot find name '<name>'.` |
+  | `src/App.tsx(2,20): error TS2307: Cannot find module 'lodash' or its corresponding type declarations.` | `error TS2307: Cannot find module '<module>' or its corresponding type declarations.` |
+  | `src/cart.ts(9,21): error TS7006: Parameter 'value' implicitly has an 'any' type.` | `error TS7006: Parameter '<name>' implicitly has an 'any' type.` |
+  | `src/App.tsx(21,9): error TS2532: Object is possibly 'undefined'.` | `error TS2532: Object is possibly '<value>'.` |
+  | `src/App.tsx(30,5): error TS18048: 'items' is possibly 'undefined'.` | `error TS18048: '<name>' is possibly '<value>'.` |
+  | `src/App.tsx(44,3): error TS2554: Expected 1 arguments, but got 0.` | `error TS2554: Expected <count> arguments, but got <count>.` |
+  | `src/App.tsx(51,18): error TS2769: No overload matches this call.` | `error TS2769: No overload matches this call.` |
+- [ ] Expected: the `TS2339`, `TS2304`, and `TS2307` causes name the quoted property, name, or module and stay inside what the message says (`'countt'`, `'userCount'`, `'lodash'`); they do not mention anything else from the paste.
+- [ ] Expected: `TS2532` and `TS18048` suggest narrowing with a check or optional chaining, and do **not** propose a non-null assertion (`!`) as the first option.
+- [ ] Expected: every fix lists Windows PowerShell or Command Prompt commands before the macOS and Linux ones, and nothing claims the fix was verified on your project.
+
+**An unknown code**
+
+- [ ] Clear the form and paste `src/App.tsx(9,3): error TS2551: Property 'countt' does not exist on type 'Counter'. Did you mean 'count'?`.
+  - Expected: **Medium confidence**, signature `error TS2551: <message>`, evidence **Final exception line** at **Line 1**. The result names `TS2551`, quotes the message, says plainly that this engine has no specific rule for that code, points to the TypeScript documentation for it, and tells you to read the indented lines the compiler prints after it. It must not name a cause.
+
+**Several errors, summaries, and trailers**
+
+- [ ] Set **Language** to `Auto` and paste:
+  ```text
+  src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.
+  src/App.tsx:5:7 - error TS2339: Property 'countt' does not exist on type 'Counter'.
+  Found 1 error in src/App.tsx:5
+  ```
+  - Expected: **TypeScript compiler error** for `error TS2322: Type '<type>' is not assignable to type '<type>'.` at **High confidence**. The summary line is not treated as the error, and the limitations say how many TypeScript error lines the paste contains.
+- [ ] Set **Language** to `JavaScript` and paste a full `tsc` run with the summary table:
+  ```text
+  src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.
+  C:\Users\dev\project\src\Counter.tsx(7,10): error TS2339: Property 'countt' does not exist on type 'Counter'.
+  Found 2 errors in 2 files.
+
+  Errors  Files
+       1  src/App.tsx:12
+       1  C:\Users\dev\project\src\Counter.tsx:7
+  ```
+  - Expected: **High confidence**, signature `error TS2322: …` — the **first** error line, not the last. Evidence shows **Final exception line** at **Line 2** (the `TS2339` line) and **Matched context line** at **Line 1** (the `TS2322` line). The `Found 2 errors in 2 files.` line, the `Errors  Files` header, and the two table rows are all skipped.
+- [ ] Set **Language** to `Auto` and paste a failed build:
+  ```text
+  src/App.tsx(12,5): error TS2322: Type 'string' is not assignable to type 'number'.
+  src/App.tsx(13,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+  npm error code ELIFECYCLE
+  npm error Failed at the build script.
+  ```
+  - Expected: **TypeScript compiler error** with signature `error TS2322: …` at **High confidence**, evidence **Final exception line** at **Line 4** (`npm error Failed at the build script.`) and **Matched context line** at **Line 1**. The cause must not mention `ELIFECYCLE`.
+
+**Automatic detection**
+
+- [ ] Set **Language** to `Auto — infer from the text` and paste `error TS2322: Type 'string' is not assignable to type 'number'.` with no stack frame.
+  - Expected: **TypeScript compiler error** at **Medium confidence**, with a confidence reason that names JavaScript.
+- [ ] Set **Language** to `Auto` and paste the pretty `TS2322` line alone, then separately the editor `.ts(2322)` line.
+  - Expected: **High** and **Low** confidence respectively, both naming JavaScript in the reason.
+
+**Batch C1 TypeScript lookalikes**
+
+- [ ] Clear the form and paste `2026-10-31T10:00:00Z src/App.tsx(12,5): error TS2322: Type 'a' is not assignable to type 'b'.`.
+  - Expected: **Unrecognised** at **Low confidence**, no signature and no possible fix. A timestamp is not a compiler location.
+- [ ] Clear the form and paste `The TS2322 error is a type mismatch in TypeScript.` and separately `// error TS2322: Type "a" is not assignable to type "b".`.
+  - Expected: **Unrecognised** both times; a mention in prose or a comment is not a compiler line.
+- [ ] Clear the form and paste `src/App.tsx(12): error TS2322: Type 'a' is not assignable to type 'b'.` and separately `src/App.vue(12,5): error TS2322: Type 'a' is not assignable to type 'b'.`.
+  - Expected: **Unrecognised** both times; the location must carry a column, and the file must end in `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, or `.cjs`.
+
+### Batch C1 npm rules
+
+Set **Language** to `JavaScript` unless a step says otherwise. Every result here shows the category **NPM install or run error** on the detail page (`npm-error`). Only lines starting with exactly `npm error ` (npm 9+) or `npm ERR! ` (npm 6 to 8) count; `yarn` and `pnpm` are out of scope. For the multi-line blocks, evidence shows two items: **Final exception line** (the last line of the block that the engine selects) and **Matched context line** at **Line 1** (the recognised `code …` line).
+
+**Sub-signature blocks**
+
+- [ ] Clear the form and paste this npm 9 `ERESOLVE` block. Expected: **High confidence**, signature `npm error code ERESOLVE`; the cause names `some-ui-lib` and `react`; the fix reads the peer requirement, suggests `npm ls`, and mentions `--legacy-peer-deps` or `--force` only as an informed last resort with its risks.
+  ```text
+  npm error code ERESOLVE
+  npm error ERESOLVE unable to resolve dependency tree
+  npm error
+  npm error While resolving: bugpilot@1.0.0
+  npm error Found: react@18.2.0
+  npm error node_modules/react
+  npm error   react@"^18.2.0" from the root project
+  npm error
+  npm error Could not resolve dependency:
+  npm error peer react@"^17.0.0" from some-ui-lib@2.1.0
+  npm error node_modules/some-ui-lib
+  npm error   some-ui-lib@"^2.1.0" from the root project
+  npm error
+  npm error Fix the upstream dependency conflict, or retry
+  npm error this command with --force, or --legacy-peer-deps
+  npm error to accept an incorrect (and potentially broken) dependency resolution.
+  npm error A complete log of this run can be found in:
+  npm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log
+  ```
+- [ ] Clear the form and paste the same conflict in npm 8 wording (`npm ERR! code ERESOLVE` first, with `npm ERR! Conflicting peer dependency: react@17.0.2` and the `_logs` line inside a Windows `AppData\Local\npm-cache` path).
+  - Expected: **High confidence**, signature `npm ERR! code ERESOLVE`.
+- [ ] Clear the form and paste this `E404` block. Expected: **High confidence**, signature `npm error code E404`; the cause and fix name the package spelling, the scope, and a private registry's `.npmrc` auth.
+  ```text
+  npm error code E404
+  npm error 404 Not Found - GET https://registry.npmjs.org/not-a-real-package-xyz - Not found
+  npm error 404
+  npm error 404  'not-a-real-package-xyz@*' is not in this registry.
+  npm error 404
+  npm error A complete log of this run can be found in:
+  npm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log
+  ```
+- [ ] Clear the form and paste this `ETARGET` block.
+  ```text
+  npm error code ETARGET
+  npm error notarget No matching version found for some-ui-lib@2.9.9.
+  npm error notarget In most cases you or one of your dependencies are requesting
+  npm error notarget a package version that does not exist.
+  ```
+  - Expected: **High confidence**, signature `npm error code ETARGET`; the cause says the requested version is not published, and the fix uses `npm view` to list the versions and tags.
+- [ ] Clear the form and paste this Windows `ENOENT` block. Expected: **High confidence**, signature `npm error code ENOENT`; the cause mentions `package.json` and the working directory; the fix starts with `cd` and `dir` (PowerShell) and mentions `npm init` only for a new project.
+  ```text
+  npm error code ENOENT
+  npm error path C:\Users\dev\project\package.json
+  npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\Users\dev\project\package.json'
+  ```
+- [ ] Clear the form and paste this `EACCES` block. Expected: **High confidence**, signature `npm error code EACCES`; the text must not contain `sudo`, and it should mention folder ownership, a Node version manager, or a user-level prefix.
+  ```text
+  npm error code EACCES
+  npm error syscall mkdir
+  npm error path /usr/local/lib/node_modules
+  npm error Error: EACCES: permission denied, mkdir '/usr/local/lib/node_modules'
+  ```
+- [ ] Clear the form and paste this npm 8 `EPERM` block. Expected: **High confidence**, signature `npm ERR! code EPERM`; the cause names a locked file or another program holding it, and nothing suggests disabling antivirus or running as administrator.
+  ```text
+  npm ERR! code EPERM
+  npm ERR! syscall rename
+  npm ERR! path C:\Program Files\nodejs\node_modules\bugpilot
+  npm ERR! dest C:\Program Files\nodejs\node_modules\.bugpilot.delete
+  npm ERR! Error: EPERM: operation not permitted, rename 'C:\Program Files\nodejs\node_modules\bugpilot' -> 'C:\Program Files\nodejs\node_modules\.bugpilot.delete'
+  ```
+- [ ] Clear the form and paste this network block. Expected: **High confidence**, signature `npm error code <network error code>`; the text mentions the connection, a proxy, the registry setting, and retrying, and names `ENOTFOUND`.
+  ```text
+  npm error code ENOTFOUND
+  npm error syscall getaddrinfo
+  npm error errno ENOTFOUND
+  npm error network request to https://registry.npmjs.org/express failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+  ```
+
+**Single-line forms**
+
+- [ ] Clear the form and paste each line separately; each returns **NPM install or run error** with the signature shown. With **Language** set to `JavaScript` the confidence reason says the language was selected explicitly; set it to `Auto` and the reason names the npm log line as a JavaScript clue instead:
+  | Paste this line | Expected signature |
+  | --- | --- |
+  | `npm error ERESOLVE unable to resolve dependency tree` | `npm error ERESOLVE unable to resolve dependency tree` |
+  | `npm error Could not resolve dependency:` | `npm error Could not resolve dependency:` |
+  | `npm ERR! Conflicting peer dependency: react@17.0.2` | `npm ERR! Conflicting peer dependency: <package>@<version>` |
+  | `npm error 404 Not Found - GET https://registry.npmjs.org/not-a-real-package-xyz - Not found` | `npm error 404 Not Found - GET <url>` |
+  | `npm ERR! 404  'nope@*' is not in this registry.` | `npm ERR! 404 '<package>' is not in this registry.` |
+  | `npm error notarget No matching version found for some-ui-lib@2.9.9.` | `npm error No matching version found for <package>@<version>.` |
+  | `npm error network request to https://registry.npmjs.org/express failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org` | `npm error network request to <url> failed, reason: <reason>` |
+  | `npm error code EAI_MEMORY` | `npm error code <error code>` at **Low confidence** — the code is named, quoted, and no specific advice is invented |
+
+**A lifecycle failure on its own**
+
+- [ ] Set **Language** to `Auto` and paste:
+  ```text
+  npm error code ELIFECYCLE
+  npm error command failed
+  npm error
+  npm error> bugpilot@1.0.0 build
+  npm error Failed at the bugpilot@1.0.0 build script.
+  npm error A complete log of this run can be found in:
+  npm error     /home/dev/.npm/_logs/2026-10-31T10_00_00_000Z-debug-0.log
+  ```
+  - Expected: **Medium confidence** (never High), signature `npm error code ELIFECYCLE`, evidence **Final exception line** at **Line 5** and **Matched context line** at **Line 1**. The cause names the `build` script, says the real error is printed above these lines, and the fix tells you to run the script on its own.
+- [ ] Clear the form and paste `npm ERR! Failed at the bugpilot@1.0.0 build script.` on its own.
+  - Expected: **Low or Medium confidence**, signature `npm ERR! Failed at the <script> script.`, cause names `build`.
+- [ ] Clear the form and paste `npm ERR! errno 1` on its own.
+  - Expected: **Low confidence**, signature `npm ERR! errno <exit code>`.
+
+**Precedence against the existing Node.js rules**
+
+- [ ] Clear the form and paste `Error: ENOENT: no such file or directory, open 'C:\Users\dev\project\package.json'`.
+  - Expected: **Missing file** at **High confidence** from `javascript.node-file-error` — a bare Node.js error line is not routed to the npm rule, even though the npm `ENOENT` block above is.
+- [ ] Clear the form and paste `Error: EACCES: permission denied, mkdir '/usr/local/lib/node_modules'`.
+  - Expected: **Permission denied** at **High confidence** from the Node.js permission rule.
+- [ ] Clear the form and paste:
+  ```text
+  Error: listen EADDRINUSE: address already in use :::5173
+  npm ERR! Failed at the bugpilot@1.0.0 dev script.
+  ```
+  - Expected: **Port already in use** at **High confidence**; the lifecycle trailer must not win.
+- [ ] Clear the form and paste:
+  ```text
+  Error: Cannot find module 'express'
+  npm error code ELIFECYCLE
+  npm error Failed at the build script.
+  ```
+  - Expected: **Missing module** at **High confidence** from the Node.js module rule.
+- [ ] Clear the form and paste the npm 8 `EACCES`-style block `Error: EACCES: permission denied, mkdir 'C:\Users\dev\project\dist'` followed by `npm ERR! Failed at the bugpilot@1.0.0 build script.` and the npm note line.
+  - Expected: **Permission denied** at **High confidence** from the Node.js rule, and no mention of `ELIFECYCLE` anywhere in the result.
+
+**Batch C1 npm lookalikes**
+
+- [ ] Clear the form and paste `see the ERESOLVE docs`.
+  - Expected: **Unrecognised** with no possible fix.
+- [ ] Clear the form and paste `npm error` alone, then separately `npm ERR! 404` and `npm error code`.
+  - Expected: **Unrecognised** each time; the prefix alone carries no recognised shape.
+- [ ] Clear the form and paste a pnpm block:
+  ```text
+  Progress: resolved 214, reused 0
+   ERR_PNPM_NO_MATCHING_VERSION  No matching version found for some-ui-lib@2.9.9
+  Failed to create install "tree"
+  ```
+  - Expected: **Unrecognised**; pnpm is out of scope. Then paste `yarn add v1.22.19` with `[1/4] Resolving packages...`, `error Command failed.`, and `Exit code: 1` below it.
+  - Expected: **Unrecognised**; yarn is out of scope.
+
+One related distinction: `npm install failed with a dependency conflict` and `The build log mentioned ERESOLVE earlier.` stay **Unrecognised**, and a Python traceback that ends in `ValueError: … TS2322` still returns **Invalid value** from the Python rule — the new signals only add evidence for JavaScript, they never claim another language's exception line.
+
 ### Context lines and React trailers
 
 Set **Language** to `Auto — infer from the text` for every example in this section. Paste each block exactly as shown, one per analysis.
