@@ -2,6 +2,12 @@ export type DiagnosticLanguage = 'auto' | 'python' | 'javascript'
 
 export type ResolvedLanguage = Exclude<DiagnosticLanguage, 'auto'>
 
+/**
+ * A rule either belongs to one language or describes a tool that has no
+ * language. `'any'` rules are consulted in every mode.
+ */
+export type DiagnosticRuleLanguage = ResolvedLanguage | 'any'
+
 export type SupportedDiagnosticCategory =
   | 'missing-module'
   | 'import-failure'
@@ -25,6 +31,7 @@ export type SupportedDiagnosticCategory =
   | 'react-error'
   | 'typescript-error'
   | 'npm-error'
+  | 'git-error'
 
 export type DiagnosticCategory =
   | SupportedDiagnosticCategory
@@ -101,7 +108,7 @@ export interface RuleNarrative {
 
 export interface DiagnosticRule {
   id: string
-  language: ResolvedLanguage
+  language: DiagnosticRuleLanguage
   category: SupportedDiagnosticCategory
   /** Rule ids this rule overrides when both match the same final line. */
   supersedes?: readonly string[]

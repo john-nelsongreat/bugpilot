@@ -23,6 +23,7 @@ export const DIAGNOSTIC_CATEGORY_LABELS: Record<DiagnosticCategory, string> = {
   'react-error': 'React error',
   'typescript-error': 'TypeScript compiler error',
   'npm-error': 'NPM install or run error',
+  'git-error': 'Git error',
   unrecognized: 'Unrecognised',
 }
 

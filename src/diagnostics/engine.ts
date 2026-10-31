@@ -1,4 +1,5 @@
 import { javascriptRules } from './rules/javascript'
+import { neutralRules } from './rules/neutral'
 import { pythonRules } from './rules/python'
 import type {
   DiagnosticConfidence,
@@ -17,7 +18,22 @@ export const MAX_ERROR_TEXT_LENGTH = 20_000
 const ALL_RULES: readonly DiagnosticRule[] = [
   ...pythonRules,
   ...javascriptRules,
+  ...neutralRules,
 ]
+
+/** Rules that describe one runtime and compete with each other for a line. */
+const LANGUAGE_RULES: readonly LanguageDiagnosticRule[] = ALL_RULES.filter(
+  (rule): rule is LanguageDiagnosticRule => rule.language !== 'any',
+)
+
+/**
+ * Rules that describe a tool with no programming language. They are consulted
+ * only when no language rule claimed anything in the paste, so they can never
+ * take a line a Python or JavaScript rule already explains.
+ */
+const NEUTRAL_RULES: readonly DiagnosticRule[] = ALL_RULES.filter(
+  (rule) => rule.language === 'any',
+)
 
 const SUPPORTED_LANGUAGES: readonly DiagnosticLanguage[] = [
   'auto',
@@ -58,6 +74,10 @@ const SUMMARY_TRAILERS: readonly RegExp[] = [
   /^npm (?:ERR!|error)\s+This is probably not a problem\b/i,
   /^npm (?:ERR!|error)\s+command failed\b/i,
   /^(?:npm (?:ERR!|error)\s*)?\S*(?:\.npm|npm-cache)[\\/]_logs[\\/]\S+\.log$/i,
+  // Git writes the advice that follows an error one hint: line at a time, and
+  // names the remote it pushed to before saying whether the push was refused.
+  /^hint: /,
+  /^To\s+(?:[a-z][a-z0-9+.-]*:\/\/\S+|\S+@\S+:\S+)$/i,
 ]
 
 const SAFETY_LIMITATION =
@@ -87,6 +107,8 @@ interface EvaluatedCandidate {
   contextLine?: SelectedLine
 }
 
+type LanguageDiagnosticRule = DiagnosticRule & { language: ResolvedLanguage }
+
 type CandidateGroups = Record<ResolvedLanguage, EvaluatedCandidate[]>
 
 interface LanguageSignal {
@@ -105,10 +127,14 @@ type LanguageCertainty =
   | 'signature'
   | 'specificity'
   | 'conflict'
+  | 'neutral'
+
+/** The runtime a match is attributed to, or none for a tool-written message. */
+type SelectionLanguage = ResolvedLanguage | 'neutral'
 
 interface CandidateSelection {
   candidate: EvaluatedCandidate
-  language: ResolvedLanguage
+  language: SelectionLanguage
   certainty: LanguageCertainty
   conflictDetail?: string
 }
@@ -309,23 +335,34 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
   )
   const signals = collectLanguageSignals(errorText, reproductionDetails)
   const outcome = chooseSelection(language, candidatesByLanguage, signals)
+  let selection: CandidateSelection | null =
+    outcome.kind === 'match' ? outcome.selection : null
 
-  if (outcome.kind === 'ambiguous') {
-    return unrecognized(
-      'The final exception line has a signature shared by Python and JavaScript, and there is not enough evidence to determine the runtime.',
-      'Add the traceback header or JavaScript stack frame surrounding the error line so the language can be identified.',
-      {
-        confidenceReason:
-          'No language-specific evidence was available, so no cause has been inferred.',
-        alternativeExplanations: [
-          'The error could come from a Python runtime.',
-          'The error could come from a JavaScript runtime.',
-        ],
-      },
-    )
+  if (
+    selection === null &&
+    outcome.kind === 'none' &&
+    candidatesByLanguage.python.length === 0 &&
+    candidatesByLanguage.javascript.length === 0
+  ) {
+    selection = selectNeutralCandidate(primaryLine, errorText, selectedLine)
   }
 
-  if (outcome.kind === 'none') {
+  if (selection === null) {
+    if (outcome.kind === 'ambiguous') {
+      return unrecognized(
+        'The final exception line has a signature shared by Python and JavaScript, and there is not enough evidence to determine the runtime.',
+        'Add the traceback header or JavaScript stack frame surrounding the error line so the language can be identified.',
+        {
+          confidenceReason:
+            'No language-specific evidence was available, so no cause has been inferred.',
+          alternativeExplanations: [
+            'The error could come from a Python runtime.',
+            'The error could come from a JavaScript runtime.',
+          ],
+        },
+      )
+    }
+
     if (language !== 'auto') {
       const otherLanguage = oppositeLanguage(language)
       const otherMatch = candidatesByLanguage[otherLanguage].length > 0
@@ -343,7 +380,6 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     )
   }
 
-  const { selection } = outcome
   const context: RuleContext = {
     primaryLine,
     errorText,
@@ -354,8 +390,12 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     selection.candidate.match,
     context,
   )
-  const competingLanguage = oppositeLanguage(selection.language)
+  const competingLanguage =
+    selection.language === 'neutral'
+      ? null
+      : oppositeLanguage(selection.language)
   const hasCompetingCandidate =
+    competingLanguage !== null &&
     candidatesByLanguage[competingLanguage].length > 0
   const confidence = applyConfidenceCeiling(
     buildConfidence(
@@ -388,7 +428,7 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
 function collectCandidates(primaryLine: string): CandidateGroups {
   const groups: CandidateGroups = { python: [], javascript: [] }
 
-  for (const rule of ALL_RULES) {
+  for (const rule of LANGUAGE_RULES) {
     const match = rule.match(primaryLine)
     if (match) {
       groups[rule.language].push({ rule, match })
@@ -427,7 +467,7 @@ function collectContextCandidates(
   const groups: CandidateGroups = { python: [], javascript: [] }
   const lines = errorText.split(/\r?\n/)
 
-  for (const rule of ALL_RULES) {
+  for (const rule of LANGUAGE_RULES) {
     if (
       !rule.contextSymptoms ||
       !rule.contextSymptoms.some((symptom) => symptom.test(primaryLine))
@@ -489,6 +529,77 @@ function mergeContextCandidates(
       }
     }
   }
+}
+
+/**
+ * A neutral rule describes a tool that has no programming language, so it reads
+ * the whole paste: every line it recognises becomes a candidate, the most
+ * specific line wins, and between two equally specific lines the lower one
+ * wins, because a tool repeats the outcome last. Lines the engine will never
+ * select as the error line are never scanned either.
+ */
+function selectNeutralCandidate(
+  primaryLine: string,
+  errorText: string,
+  selectedLine: SelectedLine,
+): CandidateSelection | null {
+  const candidates = applySupersedes(
+    collectNeutralCandidates(primaryLine, errorText, selectedLine),
+  )
+  let best: EvaluatedCandidate | null = null
+
+  for (const candidate of candidates) {
+    if (
+      best === null ||
+      specificityScore(candidate.match) >= specificityScore(best.match)
+    ) {
+      best = candidate
+    }
+  }
+
+  if (best === null) {
+    return null
+  }
+
+  return { candidate: best, language: 'neutral', certainty: 'neutral' }
+}
+
+function collectNeutralCandidates(
+  primaryLine: string,
+  errorText: string,
+  selectedLine: SelectedLine,
+): EvaluatedCandidate[] {
+  const candidates: EvaluatedCandidate[] = []
+  const lines = errorText.split(/\r?\n/)
+
+  for (const rule of NEUTRAL_RULES) {
+    for (const [index, rawLine] of lines.entries()) {
+      const text = rawLine.trim()
+      if (text === '' || isSummaryTrailer(text)) {
+        continue
+      }
+
+      const isPrimary = index === selectedLine.lineNumber - 1
+      const match = rule.match(isPrimary ? primaryLine : text)
+      if (match === null) {
+        continue
+      }
+
+      candidates.push({
+        rule,
+        match,
+        contextLine: isPrimary
+          ? undefined
+          : { text, lineNumber: index + 1 },
+      })
+    }
+  }
+
+  return candidates
+}
+
+function isSummaryTrailer(text: string): boolean {
+  return SUMMARY_TRAILERS.some((trailer) => trailer.test(text))
 }
 
 function chooseSelection(
@@ -659,6 +770,10 @@ function buildConfidence(
   signals: LanguageSignals,
   competingLanguage: ResolvedLanguage | null,
 ): DiagnosticConfidence {
+  if (selection.language === 'neutral') {
+    return neutralConfidence(selection.candidate)
+  }
+
   const languageLabel = LANGUAGE_LABELS[selection.language]
   const otherLabel = competingLanguage
     ? LANGUAGE_LABELS[competingLanguage]
@@ -736,6 +851,34 @@ const CONFIDENCE_ORDER: readonly DiagnosticConfidence['level'][] = [
   'medium',
   'high',
 ]
+
+/**
+ * A tool writes its own messages, so a neutral match is judged on the signature
+ * only: language clues never raise it and a selected language never lowers it.
+ * The wording names the failing command, never a programming language.
+ */
+function neutralConfidence(
+  candidate: EvaluatedCandidate,
+): DiagnosticConfidence {
+  const contextLine = candidate.contextLine
+  const specific = candidate.match.specificity === 'specific'
+
+  if (specific) {
+    return {
+      level: 'high',
+      reason: contextLine
+        ? `A message the failing command wrote itself appears on line ${contextLine.lineNumber}, and a specific signature recognises it, so no language evidence was needed.`
+        : 'The final line is a message the failing command wrote itself, and a specific signature recognises it, so no language evidence was needed.',
+    }
+  }
+
+  return {
+    level: 'low',
+    reason: contextLine
+      ? `An error line from the failing command appears on line ${contextLine.lineNumber}, but no specific signature covers it, so it is quoted rather than explained.`
+      : 'The final line is an error line from the failing command, but no specific signature covers it, so it is quoted rather than explained.',
+  }
+}
 
 function applyConfidenceCeiling(
   confidence: DiagnosticConfidence,
