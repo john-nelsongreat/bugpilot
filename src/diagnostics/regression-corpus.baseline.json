@@ -1510,5 +1510,203 @@
     "matchedSignature": "ValueError: <unclassified value error>",
     "confidence": "low",
     "ruleId": "python.value-error"
+  },
+  "case-0253": {
+    "category": "git-error",
+    "matchedSignature": "fatal: not a git repository (or any of the parent directories): .git",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0254": {
+    "category": "git-error",
+    "matchedSignature": "error: remote origin already exists.",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0255": {
+    "category": "git-error",
+    "matchedSignature": "! [rejected] <ref> -> <ref> (fetch first)",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0256": {
+    "category": "git-error",
+    "matchedSignature": "fatal: refusing to merge unrelated histories",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0257": {
+    "category": "git-error",
+    "matchedSignature": "CONFLICT (<type>): Merge conflict in <file>",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0258": {
+    "category": "git-error",
+    "matchedSignature": "error: Your local changes to the following files would be overwritten by checkout:",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0259": {
+    "category": "git-error",
+    "matchedSignature": "fatal: unable to auto-detect email address (got '<value>')",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0260": {
+    "category": "git-error",
+    "matchedSignature": "fatal: Authentication failed for '<url>'",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0261": {
+    "category": "git-error",
+    "matchedSignature": "error: The requested URL returned error: 403",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0262": {
+    "category": "git-error",
+    "matchedSignature": "Permission denied (publickey).",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0263": {
+    "category": "git-error",
+    "matchedSignature": "error: src refspec <branch> does not match any",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0264": {
+    "category": "git-error",
+    "matchedSignature": "fatal: detected dubious ownership in repository at '<path>'",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0265": {
+    "category": "git-error",
+    "matchedSignature": "fatal: Unable to create '<path>': File exists.",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0266": {
+    "category": "git-error",
+    "matchedSignature": "warning: in the working copy of '<file>', LF will be replaced by CRLF the next time Git touches it",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0267": {
+    "category": "git-error",
+    "matchedSignature": "fatal: unable to access '<url>': <network detail>",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0268": {
+    "category": "git-error",
+    "matchedSignature": "fatal: unable to access '<url>': <network detail>",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0269": {
+    "category": "git-error",
+    "matchedSignature": "fatal: not a git repository (or any of the parent directories): .git",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0270": {
+    "category": "git-error",
+    "matchedSignature": "fatal: not a git repository (or any of the parent directories): .git",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0271": {
+    "category": "git-error",
+    "matchedSignature": "! [rejected] <ref> -> <ref> (fetch first)",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0272": {
+    "category": "git-error",
+    "matchedSignature": "! [rejected] <ref> -> <ref> (fetch first)",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0273": {
+    "category": "git-error",
+    "matchedSignature": "CONFLICT (<type>): Merge conflict in <file>",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0274": {
+    "category": "git-error",
+    "matchedSignature": "CONFLICT (<type>): Merge conflict in <file>",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0275": {
+    "category": "missing-module",
+    "matchedSignature": "ModuleNotFoundError: No module named '<module>'",
+    "confidence": "high",
+    "ruleId": "python.module-not-found"
+  },
+  "case-0276": {
+    "category": "git-error",
+    "matchedSignature": "fatal: not a git repository (or any of the parent directories): .git",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0277": {
+    "category": "type-mismatch",
+    "matchedSignature": "TypeError: Cannot read properties of undefined (reading 'name')",
+    "confidence": "medium",
+    "ruleId": "javascript.type-error"
+  },
+  "case-0278": {
+    "category": "git-error",
+    "matchedSignature": "remote: Permission to <owner>/<repo>.git denied to <user>.",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0279": {
+    "category": "git-error",
+    "matchedSignature": "! [rejected] <ref> -> <ref> (non-fast-forward)",
+    "confidence": "high",
+    "ruleId": "tool.git-error"
+  },
+  "case-0280": {
+    "category": "git-error",
+    "matchedSignature": "fatal: <message Git reported>",
+    "confidence": "low",
+    "ruleId": "tool.git-error"
+  },
+  "case-0281": {
+    "category": "git-error",
+    "matchedSignature": "fatal: <message Git reported>",
+    "confidence": "low",
+    "ruleId": "tool.git-error"
+  },
+  "case-0282": {
+    "category": "git-error",
+    "matchedSignature": "fatal: <message Git reported>",
+    "confidence": "low",
+    "ruleId": "tool.git-error"
+  },
+  "case-0283": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0284": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
+  },
+  "case-0285": {
+    "category": "unrecognized",
+    "matchedSignature": null,
+    "confidence": "low",
+    "ruleId": null
   }
 }

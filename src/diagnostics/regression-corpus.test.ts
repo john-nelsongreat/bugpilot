@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { diagnose } from './engine'
 import { javascriptRules } from './rules/javascript'
+import { neutralRules } from './rules/neutral'
 import { pythonRules } from './rules/python'
 import type { DiagnosticResult } from './types'
 
@@ -57,7 +58,7 @@ function primaryLineOf(errorText: string): string | null {
     : selected.replace(/^Uncaught\s+(?:\(in promise\)\s+)?/, '')
 }
 
-const rules = [...pythonRules, ...javascriptRules]
+const rules = [...pythonRules, ...javascriptRules, ...neutralRules]
 
 function ruleIdFor(
   entry: CorpusCase,

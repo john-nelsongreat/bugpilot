@@ -4,7 +4,8 @@
     "docs/MANUAL_TEST_CHECKLIST.md (section 7 pasteable examples)",
     "src/diagnostics/*.test.ts (static rule-test inputs)",
     "task Part B/B8/B9 inputs",
-    "task batch C1 pasteable TypeScript and npm examples"
+    "task batch C1 pasteable TypeScript and npm examples",
+    "src/diagnostics/git-rule.test.ts and neutral-rules.test.ts (batch C2 Git and language-neutral inputs)"
   ],
   "cases": [
     {
@@ -1518,6 +1519,204 @@
       "source": "task:batch C1 Python conflict",
       "language": "auto",
       "errorText": "Traceback (most recent call last):\n  File \"/home/ana/project/app.py\", line 4, in <module>\n    run()\nValueError: invalid literal for int() with base 10: TS2322\nnpm error code ERESOLVE"
+    },
+    {
+      "id": "case-0253",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 not a repository)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\project> git status\nfatal: not a git repository (or any of the parent directories): .git"
+    },
+    {
+      "id": "case-0254",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 remote already exists)",
+      "language": "auto",
+      "errorText": "$ git remote add origin https://github.com/dev/app.git\nerror: remote origin already exists."
+    },
+    {
+      "id": "case-0255",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 push rejected)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git push\nTo https://github.com/dev/app.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'https://github.com/dev/app.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: 'git pull' before pushing again.\nhint: See the 'Note about fast-forwards' in 'git push --help' for details."
+    },
+    {
+      "id": "case-0256",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 unrelated histories)",
+      "language": "auto",
+      "errorText": "$ git pull origin main --rebase\nfatal: refusing to merge unrelated histories"
+    },
+    {
+      "id": "case-0257",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 merge conflict)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git merge feature/login\nAuto-merging src/App.tsx\nCONFLICT (content): Merge conflict in src/App.tsx\nAutomatic merge failed; fix conflicts and then commit the result."
+    },
+    {
+      "id": "case-0258",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 local changes)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git checkout main\nerror: Your local changes to the following files would be overwritten by checkout:\n\tsrc/App.tsx\nPlease commit your changes or stash them before you switch branches.\nAborting"
+    },
+    {
+      "id": "case-0259",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 identity unknown)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git commit -m \"fix login\"\nAuthor identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email \"<you@example.com>\"\n  git config --global user.name \"<Your Name>\"\n\nto set your account's default identity.\nOmit --global to set the identity only in this repository.\n\nfatal: unable to auto-detect email address (got 'dev@PC.(none)')"
+    },
+    {
+      "id": "case-0260",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 password authentication)",
+      "language": "auto",
+      "errorText": "remote: Support for password authentication was removed on August 13, 2021.\nfatal: Authentication failed for 'https://github.com/dev/app.git/'"
+    },
+    {
+      "id": "case-0261",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 access denied 403)",
+      "language": "auto",
+      "errorText": "remote: Permission to dev/app.git denied to dev.\nerror: The requested URL returned error: 403\nfatal: unable to access 'https://github.com/dev/app.git/': The requested URL returned error: 403"
+    },
+    {
+      "id": "case-0262",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 ssh key refused)",
+      "language": "auto",
+      "errorText": "$ git clone git@github.com:dev/app.git\nCloning into app...\ngit@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."
+    },
+    {
+      "id": "case-0263",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 src refspec)",
+      "language": "auto",
+      "errorText": "error: src refspec main does not match any\nerror: failed to push some refs to 'https://github.com/dev/app.git'"
+    },
+    {
+      "id": "case-0264",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 dubious ownership)",
+      "language": "auto",
+      "errorText": "fatal: detected dubious ownership in repository at 'C:/Users/dev/project'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory C:/Users/dev/project"
+    },
+    {
+      "id": "case-0265",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 index.lock)",
+      "language": "auto",
+      "errorText": "fatal: Unable to create 'C:/Users/dev/project/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by `git commit`, or if two `git` processes were started\nat the same time. If you make sure no processes are running then\nremove the file manually to continue."
+    },
+    {
+      "id": "case-0266",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 line ending warning)",
+      "language": "auto",
+      "errorText": "warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it"
+    },
+    {
+      "id": "case-0267",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 host unresolved)",
+      "language": "auto",
+      "errorText": "fatal: unable to access 'https://github.com/dev/app.git/': Could not resolve host: github.com"
+    },
+    {
+      "id": "case-0268",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 connection timeout)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git clone https://github.com/dev/app.git\nfatal: unable to access 'https://github.com/dev/app.git/': Failed to connect to github.com port 443 after 21062 ms: Could not connect to server"
+    },
+    {
+      "id": "case-0269",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 not a repository, Python mode)",
+      "language": "python",
+      "errorText": "PS C:\\Users\\dev\\project> git status\nfatal: not a git repository (or any of the parent directories): .git"
+    },
+    {
+      "id": "case-0270",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 not a repository, JavaScript mode)",
+      "language": "javascript",
+      "errorText": "PS C:\\Users\\dev\\project> git status\nfatal: not a git repository (or any of the parent directories): .git"
+    },
+    {
+      "id": "case-0271",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 push rejected, Python mode)",
+      "language": "python",
+      "errorText": "PS C:\\Users\\dev\\app> git push\nTo https://github.com/dev/app.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'https://github.com/dev/app.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: 'git pull' before pushing again.\nhint: See the 'Note about fast-forwards' in 'git push --help' for details."
+    },
+    {
+      "id": "case-0272",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 push rejected, JavaScript mode)",
+      "language": "javascript",
+      "errorText": "PS C:\\Users\\dev\\app> git push\nTo https://github.com/dev/app.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'https://github.com/dev/app.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: 'git pull' before pushing again.\nhint: See the 'Note about fast-forwards' in 'git push --help' for details."
+    },
+    {
+      "id": "case-0273",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 merge conflict, Python mode)",
+      "language": "python",
+      "errorText": "PS C:\\Users\\dev\\app> git merge feature/login\nAuto-merging src/App.tsx\nCONFLICT (content): Merge conflict in src/App.tsx\nAutomatic merge failed; fix conflicts and then commit the result."
+    },
+    {
+      "id": "case-0274",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 merge conflict, JavaScript mode)",
+      "language": "javascript",
+      "errorText": "PS C:\\Users\\dev\\app> git merge feature/login\nAuto-merging src/App.tsx\nCONFLICT (content): Merge conflict in src/App.tsx\nAutomatic merge failed; fix conflicts and then commit the result."
+    },
+    {
+      "id": "case-0275",
+      "source": "src/diagnostics/neutral-rules.test.ts (batch C2 language rule beats an earlier Git line)",
+      "language": "auto",
+      "errorText": "Traceback (most recent call last):\n  File \"app.py\", line 4, in load\nfatal: not a git repository (or any of the parent directories): .git\nModuleNotFoundError: No module named 'requests'"
+    },
+    {
+      "id": "case-0276",
+      "source": "src/diagnostics/neutral-rules.test.ts (batch C2 Git final line beats a traceback above it)",
+      "language": "auto",
+      "errorText": "Traceback (most recent call last):\n  File \"app.py\", line 4, in load\nfatal: not a git repository (or any of the parent directories): .git"
+    },
+    {
+      "id": "case-0277",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 summary line does not hide the Git line)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git push\nerror: failed to push some refs to 'https://github.com/dev/app.git'\nTypeError: Cannot read properties of undefined (reading 'name')"
+    },
+    {
+      "id": "case-0278",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 lone remote permission line)",
+      "language": "auto",
+      "errorText": "remote: Permission to dev/app.git denied to dev."
+    },
+    {
+      "id": "case-0279",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 Git Bash prompt echo)",
+      "language": "auto",
+      "errorText": "dev@workstation:~/app$ git push\nTo https://github.com/dev/app.git\n ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/dev/app.git'\ndev@workstation:~/app$"
+    },
+    {
+      "id": "case-0280",
+      "source": "src/diagnostics/neutral-rules.test.ts (batch C2 unrecognised fatal line)",
+      "language": "auto",
+      "errorText": "fatal: bad object 0123456789abcdef"
+    },
+    {
+      "id": "case-0281",
+      "source": "src/diagnostics/neutral-rules.test.ts (batch C2 fatal line between hints)",
+      "language": "auto",
+      "errorText": "PS C:\\Users\\dev\\app> git fetch\nTo https://github.com/dev/app.git\nhint: some explanatory hint\nfatal: bad object 0123456789abcdef\nhint: another explanatory hint\nPS C:\\Users\\dev\\app>"
+    },
+    {
+      "id": "case-0282",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 fatal with no sub-signature)",
+      "language": "auto",
+      "errorText": "fatal: The remote end hung up unexpectedly"
+    },
+    {
+      "id": "case-0283",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 lookalike timestamp prefix)",
+      "language": "auto",
+      "errorText": "2026-10-31T10:00:00Z fatal: not a git repository (or any of the parent directories): .git"
+    },
+    {
+      "id": "case-0284",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 lookalike log level prefix)",
+      "language": "auto",
+      "errorText": "[2026-10-31 10:00:00] error: remote origin already exists."
+    },
+    {
+      "id": "case-0285",
+      "source": "src/diagnostics/git-rule.test.ts (batch C2 lookalike prose about pushing)",
+      "language": "auto",
+      "errorText": "run git push to publish your branch"
     }
   ]
 }
