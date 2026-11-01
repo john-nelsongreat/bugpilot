@@ -1639,7 +1639,7 @@ These checks apply to the deployed Vercel site. The headers are defined in `verc
 - [ ] Repeat the command for the root `https://bugpilot-lac.vercel.app/`, for `https://bugpilot-lac.vercel.app/assistant`, and for a missing path such as `https://bugpilot-lac.vercel.app/missing-page`. Expected: all return the same CSP; deep links and the SPA fallback load the app instead of a 404.
 - [ ] Compare the policy with the block in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src`, no `'unsafe-eval'`, and no external hosts. Whitespace after semicolons is not significant.
 - [ ] If the header is missing, first confirm the deployment is actually the commit that changed `vercel.json`, and that Vercel marks it **Ready** as the current production deployment. Wait for the deployment to settle, hard-reload, and repeat. Do not conclude that the header works from the local preview or from the source file alone.
-- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: **1 test passed**. This checks the committed configuration, not the live response.
+- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: that one test file passes with no failures. This checks the committed configuration, not the live response.
 
 ### Browser console check on every page
 
