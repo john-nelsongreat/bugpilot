@@ -1328,7 +1328,7 @@ The current app emits info toasts for successful actions. Error-tone toast persi
 - [ ] Reload a page and press `Tab` as the first action.
   - Expected: **Skip to main content** becomes visible at the top. Press `Enter`.
   - Expected: focus moves into the main content (the URL gains `#main-content`).
-- [ ] Continue pressing `Tab` through the brand, theme button, **Overview**, **Bug log**, **Assistant**, and **Report a bug**.
+- [ ] Continue pressing `Tab` through the brand, theme button, **Overview**, **Bug log**, **Assistant**, **Analyze code**, and **Report a bug**.
   - Expected: every stop shows a visible focus ring; the active navigation item is clear.
 - [ ] On the report form, operate every input and select with the keyboard.
   - Expected: labels are associated, arrow keys change select values, and the error summary links jump to invalid fields.
@@ -1348,12 +1348,12 @@ Use the browser's device/resize controls. Check 390 × 844 and 1440 × 900.
 
 ### 390 × 844
 
-- [ ] The sidebar becomes a compact top header: brand and theme button on the first row, three navigation links on the second. The sidebar-only **Report a bug** button is hidden, but the page-level **Report a bug** button remains.
+- [ ] The sidebar becomes a compact top header: brand and theme button on the first row, the four navigation links in two columns below it. The sidebar-only **Report a bug** button is hidden, but the page-level **Report a bug** button remains.
 - [ ] In the Console, run:
   ```js
   document.documentElement.scrollWidth <= window.innerWidth
   ```
-  Expected: `true` on Overview, Bug log, a detail, the form, Assistant, and a missing URL.
+  Expected: `true` on Overview, Bug log, a detail, the form, Assistant, Analyze code, and a missing URL.
 - [ ] Overview stats form two columns, with **High and critical** spanning the full row.
 - [ ] The bug-log table scrolls horizontally inside its own container if needed; the whole page does not shift sideways.
 - [ ] The report form and Assistant form are single-column; buttons and text are not clipped.
@@ -1508,7 +1508,134 @@ Run this after the saved-diagnosis flow above. Save a diagnosis again if the ear
 - [ ] At 1440 × 900 in both themes, repeat the preview and confirm the dialog is centered and readable.
 - [ ] Confirm the 5 MB, 5,000-report, newer-schema, and zero-valid-report paths in the automated tests; do not create multi-megabyte fixtures by hand.
 
-## 14. Production preview
+## 14. Code analysis (slice A)
+
+Use a disposable profile and keep DevTools open. Create every sample file and archive in a scratch folder **outside this repository**. The page never executes uploaded code, and no sample needs to be committed.
+
+### Sample folder, loose files, and zip
+
+Create a folder named `analyze-sample` with these files. Invent the fake key yourself; never paste a real credential.
+
+- `app.js` containing `const total = ;` — a JavaScript syntax error.
+- `main.ts` containing `function add(a: number) { return a + }` — a TypeScript syntax error.
+- `secret.py` containing a Python assignment to a made-up AWS-style key: the prefix `AKIA` followed by sixteen invented uppercase letters and digits.
+- `broken.json` containing `{ "name": "demo", }` — a trailing comma, so JSON parsing fails.
+- `conflict.js` containing a merge conflict: `<<<<<<< HEAD`, `const value = 1`, `=======`, `const value = 2`, `>>>>>>> other`.
+- `empty-catch.py` containing `except ValueError: pass` under a `try` block.
+- `notes.txt` containing `See http://insecure-demo.dev/docs and TODO: replace this.` (the `http://` rule deliberately ignores local and documentation hosts, so do not use `example.test`).
+- `image.png` — any small real PNG.
+- `node_modules/skip-me.js` — any JavaScript file.
+- `big.log` — more than 2 MiB of text (for the per-file skip check).
+
+Zip the folder as `analyze-sample.zip`.
+
+- [ ] Open **Analyze code** in the sidebar.
+  - Expected: `/analyze`; tab title **Analyze code · BugPilot**; headings **Analyze code** and **Upload code to check**; the **Local analysis only.** statement; the limits list; **No files checked yet**.
+- [ ] Click **Choose a folder** and select `analyze-sample`.
+  - Expected: progress announces **Reading the upload**, then **Running BugPilot rules**, then **Checking TypeScript syntax**, with **Cancel** available. No dialog asks for permission to upload anything.
+  - Expected: focus moves to **Results for N files**; the summary shows findings, files analysed, files skipped, and critical/high counts.
+  - Expected findings include: JavaScript and TypeScript syntax errors (High), a Critical secret finding, JSON syntax (High), merge-conflict markers (High), empty `except` (Low), insecure `http://` URL (Low), and TODO marker (Low).
+  - Expected: the secret's evidence is redacted to its first two and last two characters. The full fake key never appears on the page.
+  - Expected: the coverage list names every file. `image.png` is **Skipped** as binary, `node_modules/skip-me.js` is **Skipped** as a vendored folder, and `big.log` is **Skipped** with the per-file ceiling reason. Analysed files list their language and the syntax/pattern tiers that ran or were unavailable.
+  - Expected: **No findings does not mean no bugs** lists the checks that were not performed for each analysed language.
+- [ ] Change **Severity** and **File**, then click **Reset filters**.
+  - Expected: the **Showing X of Y findings** status and the visible groups follow the filters; reset restores all groups.
+- [ ] Click **Download report.json** with the snippet box still unticked, open the downloaded file, then repeat with the box ticked.
+  - Expected filename: `bugpilot-analysis-<timestamp>.json`, where `<timestamp>` is the report's ISO time with `:` and `.` replaced by `-`.
+  - Expected: unticked → `"includeSnippets": false`, every `evidence` array is empty, and the limitations include the snippet-exclusion note; ticked → `"includeSnippets": true` and evidence quotes are present (the secret stays redacted).
+- [ ] Download `report.md` both ways and open the file.
+  - Expected: the same filename stem ends in `.md`; the report notes **Code snippets in this export: no/yes**; findings, explanations, coverage, skipped entries, and limitations are present; evidence is absent unless ticked.
+  - Expected: the export status line under the buttons confirms whether quotes were left out. Both downloads are built in the tab; DevTools shows no upload, no external request, and no request carrying file contents.
+- [ ] Click **Clear results**.
+  - Expected: findings, coverage, filters, and both download buttons disappear; **No files checked yet** returns; saved reports in **Bug log** are unchanged.
+- [ ] Upload `analyze-sample.zip` with **Choose files** (not the folder picker).
+  - Expected: the same findings and skipped reasons, with entries named inside the zip.
+- [ ] Drag a loose `.js` file and then the whole folder onto the drop area.
+  - Expected: both start the same analysis; the drag highlight clears when the pointer leaves.
+- [ ] Start a large folder or zip, then click **Cancel**.
+  - Expected: **Analysis cancelled** says nothing was kept; no results panel appears; no report downloads are offered.
+
+### Hostile archives and the declared limits
+
+These archives are generated locally and never committed. Save this script as `bugpilot\hostile-zips.mjs` temporarily, run `node hostile-zips.mjs` from the `bugpilot` folder, then delete the script. It writes the zips to `%TEMP%\bugpilot-sample-zips` and needs the already-installed `fflate`.
+
+```js
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomFillSync } from 'node:crypto'
+import { zipSync, strToU8 } from 'fflate'
+
+const out = join(tmpdir(), 'bugpilot-sample-zips')
+mkdirSync(out, { recursive: true })
+const write = (name, data) => writeFileSync(join(out, name), data)
+
+write('hostile-traversal.zip', zipSync({ '../escape.txt': strToU8('x') }))
+write('hostile-nested.zip', zipSync({ 'inner.zip': strToU8('not really a zip') }))
+const many = {}
+for (let i = 0; i < 2500; i += 1) many[`f${i}.txt`] = strToU8('x')
+write('hostile-many.zip', zipSync(many))
+write('hostile-bomb.zip', zipSync({ 'bomb.txt': new Uint8Array(8 * 1024 * 1024) }))
+const alphabet = Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/')
+const raw = randomFillSync(new Uint8Array(6 * 1024 * 1024))
+for (let i = 0; i < raw.length; i += 1) raw[i] = alphabet[raw[i] & 63]
+for (let i = 1000; i < raw.length; i += 1001) raw[i] = 10
+const big = {}
+for (let i = 0; i < 4; i += 1) big[`big-${i}.txt`] = raw.subarray(i * 1572864, (i + 1) * 1572864)
+write('large-ok.zip', zipSync(big))
+console.log(out)
+```
+
+Run each upload in a fresh tab state (click **Clear results** between attempts) and watch the Console and the page for freezing.
+
+- [ ] `hostile-bomb.zip`: expected **Upload refused**, with **An entry claims to expand far more than a normal text file does, so BugPilot refused it before unpacking anything.** and **Nothing was analysed and nothing was kept.**
+- [ ] `hostile-traversal.zip`: expected **Upload refused**, with a message saying a name points out of the archive with `..`.
+- [ ] `hostile-nested.zip`: expected **Upload refused**, with **The entry "inner.zip" is itself an archive. BugPilot does not open archives inside archives, so the upload is refused.**
+- [ ] `hostile-many.zip`: expected **Upload refused**, saying the archive holds more than 2000 entries and that reading stopped at that count.
+- [ ] While each refusal is processed, the page stays responsive: the theme toggle still responds, the progress/limit text does not freeze, and no browser tab warning about an unresponsive page appears. Memory in DevTools does not keep climbing after the refusal.
+- [ ] Upload `large-ok.zip` (about 4.7 MB compressed; four files of 1.5 MiB each).
+  - Expected: the run completes; all four files are analysed (none is skipped for size), and the only findings are Low large-file findings. No refusal.
+- [ ] Upload a folder containing the 6 MiB of `big-*.txt` text from `large-ok.zip` plus an extra text file over 2 MiB.
+  - Expected: files over 2 MiB are skipped with the per-file ceiling reason; smaller files are analysed; the run does not stop.
+- [ ] Upload an archive larger than 10 MiB (for example, a zip of the same large files plus padding).
+  - Expected: **Upload refused** with the archive byte-ceiling message, before analysis starts.
+
+### Privacy and data retention
+
+- [ ] Before uploading, with `/analyze` fully loaded, run this in the Console:
+  ```js
+  const snapshot = async () => JSON.stringify({
+    local: Object.fromEntries(Object.entries(localStorage)),
+    session: Object.fromEntries(Object.entries(sessionStorage)),
+    databases: await indexedDB.databases(),
+  })
+  await snapshot()
+  ```
+  Copy the result. Do not toggle the theme and do not navigate during the check. The footer rotates a session-only joke index every 60 seconds, so finish within a minute or repeat behind a clock; that footer key is the only thing allowed to change.
+- [ ] Run an analysis, use both filters, download both reports (with and without snippets), and click **Clear results**.
+- [ ] Run `await snapshot()` again and compare.
+  - Expected: identical strings; `databases` is still empty. `localStorage.getItem('bugpilot.bugs.v1')` is byte-for-byte unchanged.
+- [ ] With DevTools Network open, clear the log after the page has loaded, then upload a small file.
+  - Expected: the only requests are same-origin JavaScript module requests for the site's own analyzer/worker chunks, shown as coming from this origin. There is no request to another host, no POST, and no request whose URL or body contains uploaded file names or contents. Export, filters, and **Clear results** add no request.
+- [ ] Open **Bug log** and the seeded checkout report. Expected: the same reports and saved diagnosis as before; code analysis did not change them. Run one Assistant example and expected: unchanged behaviour.
+- [ ] Navigate away from `/analyze` and back, and reload the page.
+  - Expected: the result does not return; no report is stored.
+
+### Keyboard, themes, and narrow screens
+
+- [ ] With the keyboard only, tab to **Analyze code** in the primary navigation and press `Enter`.
+- [ ] Tab to **Choose files** and press `Enter`; choose a small file in the operating-system picker.
+  - Expected: the flow completes; focus moves to the results heading; `Tab` reaches both filters, the snippet checkbox, both download buttons, **Clear results**, and the coverage `<details>` summary. Every stop has a visible focus ring.
+- [ ] Open the coverage summary with `Enter` and close it with `Enter`.
+- [ ] At 1440 × 900 in the light theme, upload the sample folder. Expected: no control is clipped; the page looks consistent with the rest of the app.
+- [ ] At 320 CSS px in the dark theme, upload the sample folder and run:
+  ```js
+  ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth })
+  ```
+  Expected: `scrollWidth <= clientWidth`; findings, filters, export controls, and coverage stack without horizontal page scroll or clipped buttons. Long code evidence may scroll inside its own block, never the page.
+- [ ] In both themes, confirm severity and confidence are not conveyed by colour alone — each badge also has its text — and that the redacted secret remains readable.
+
+## 15. Production preview
 
 - [ ] Stop the development server with `Ctrl+C`.
 - [ ] Build the production bundle:
@@ -1530,10 +1657,12 @@ Run this after the saved-diagnosis flow above. Save a diagnosis again if the ear
   - `/bugs/sample-checkout-nan`
   - `/bugs/sample-checkout-nan/edit`
   - `/assistant`
+  - `/analyze`
   - a missing path such as `/missing-page`
   Expected: every route loads; `/missing-page` shows **Page not found**, and reloading a client-side route does not return a server error.
 - [ ] Toggle the theme, navigate away and back, and reload. Expected: the theme persists for `localhost:4173`.
 - [ ] Analyze the Python `ModuleNotFoundError` example and the JavaScript `ReferenceError: userCount is not defined` example. Expected: both results render, with the same categories and confidence as in development.
+- [ ] On **Analyze code**, upload the small sample folder from section 14 and download both report formats. Expected: the same findings and exports as in development, with no CSP message about the analyzer, TypeScript, or worker chunks, and no request to another origin.
 - [ ] On **Bug log**, click **Export reports** and confirm the production build downloads a valid `bugpilot-export-YYYY-MM-DD.json` file. Open **Import reports**, choose that file, and expected: the preview matches the five sample reports and **Already in your log: 5**. Click **Add reports** and expected: **Import complete. Added 0, skipped 5, replaced 0.**, with no sample notice and no external request.
 - [ ] Scroll to the footer and expected: a page-specific joke is present.
 - [ ] Check the Console. Expected: no errors during load or navigation.
@@ -1542,15 +1671,15 @@ Run this after the saved-diagnosis flow above. Save a diagnosis again if the ear
 - [ ] Stop the preview server with `Ctrl+C`.
 - [ ] Optional cleanup: clear the `localhost:4173` site data if you do not want the preview's sample workspace to remain in the profile.
 
-## 15. Accessibility walkthrough
+## 16. Accessibility walkthrough
 
-Section 10 covers keyboard behaviour during the normal flow. This section is the dedicated pass: automated tests prove the DOM is well-formed, and only a human can judge whether the app is actually usable without sight, without a mouse, at small widths, and at high zoom. Run it on the production preview (section 14) or on `npm run dev`, in a disposable profile, in **both themes**.
+Section 10 covers keyboard behaviour during the normal flow. This section is the dedicated pass: automated tests prove the DOM is well-formed, and only a human can judge whether the app is actually usable without sight, without a mouse, at small widths, and at high zoom. Run it on the production preview (section 15) or on `npm run dev`, in a disposable profile, in **both themes**.
 
 ### Keyboard-only pass
 
 Put the mouse aside — or unplug it — and complete the whole session with the keyboard.
 
-- [ ] On each of `/`, `/bugs`, `/bugs/new`, a report detail, `/bugs/<id>/edit`, `/assistant`, and a missing path: press `Tab` from the top of the page to the bottom, then `Shift+Tab` back.
+- [ ] On each of `/`, `/bugs`, `/bugs/new`, a report detail, `/bugs/<id>/edit`, `/assistant`, `/analyze`, and a missing path: press `Tab` from the top of the page to the bottom, then `Shift+Tab` back.
   - Expected: the order matches the visual order; nothing is skipped; the focus ring is visible on **every** stop, including against cards, tables, badges, and both themes.
   - Expected: no stop is unreachable and no stop traps you — `Tab` eventually reaches the browser UI or wraps inside a dialog on purpose.
 - [ ] Use the skip link on each page.
@@ -1564,7 +1693,7 @@ Put the mouse aside — or unplug it — and complete the whole session with the
 
 ### 320 CSS px reflow (WCAG 1.4.10)
 
-Resize the window to 320 CSS px wide (Device Toolbar is acceptable; a narrow real window is better) and check each of the seven routes in both themes.
+Resize the window to 320 CSS px wide (Device Toolbar is acceptable; a narrow real window is better) and check each of the eight routes in both themes.
 
 - [ ] In the Console, run:
   ```js
@@ -1617,9 +1746,9 @@ Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a devic
 
 `npm test` already checks axe violations, token contrast, labels, roles, names, and the route announcement in jsdom, and the 2026-10-25 browser audit checked 14 states × 2 themes × 3 viewports plus the same 14 states × 2 themes × 6 widths for page-level sideways scroll. Those tools cannot judge whether a focus ring is *visible*, whether reading order makes sense, or whether a page sounds right — so the boxes above are the part that stays manual. See **Accessibility** in `README.md` for what is covered automatically and for the open items.
 
-## 16. Security headers
+## 17. Security headers
 
-These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 14) reads that file, so a local preview will not show them. **Until the commit that adds the policy has been deployed and this section has been run, do not assume the live site sends it.** This section was added before the production response was inspected.
+These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 15) reads that file, so a local preview will not show them. **Until the commit that adds the policy has been deployed and this section has been run, do not assume the live site sends it.** This section was added before the production response was inspected.
 
 ### Header response
 
@@ -1644,12 +1773,12 @@ These checks apply to the deployed Vercel site. The headers are defined in `verc
 ### Browser console check on every page
 
 - [ ] Open the live site in a fresh Chromium profile. Open DevTools, select the Console, enable **Preserve log**, clear it, and reload.
-- [ ] Visit each route directly by typing the URL: `/`, `/bugs`, `/bugs/new`, a bug detail URL, that report's `/edit` URL, `/assistant`, and `/missing-page`.
+- [ ] Visit each route directly by typing the URL: `/`, `/bugs`, `/bugs/new`, a bug detail URL, that report's `/edit` URL, `/assistant`, `/analyze`, and `/missing-page`.
   - Expected: every page renders; **no** console error mentions `Content Security Policy`, `Refused to`, or a blocked resource; the fonts, icons, and favicon render.
   - In the Network tab, select the document request and inspect its response headers. Expected: `content-security-policy` is present and matches the value above.
 - [ ] Repeat the console check in Firefox and in Safari, or in Playwright WebKit when Safari is unavailable (Playwright WebKit approximates Safari; physical Safari was not tested).
   - Expected in Chromium and Firefox: no CSP message on any route or during the flows below.
   - Expected in WebKit/Safari: each `<select>` created by JavaScript produces one `style-src-attr` message (4 on `/bugs`, 3 on `/bugs/new`, 1 on a report detail and on `/assistant`). A minimal page that only calls `document.createElement('select')` reproduces this, so it is WebKit's own form-control handling, not an inline style written by the app. Treat any other CSP message — especially `style-src-elem`, or one whose source points to an element the app styled — as a real finding. Confirm that `<html>` has no `style` attribute after toggling the theme.
-- [ ] In both themes, repeat the main flows on the live site: create, edit, delete with confirmation, search/filter/sort, fix states, Python and JavaScript analyses plus **Copy code**, export download, import preview and merge, toast, joke rotation, keyboard focus, and both dialogs.
+- [ ] In both themes, repeat the main flows on the live site: create, edit, delete with confirmation, search/filter/sort, fix states, Python and JavaScript analyses plus **Copy code**, code analysis upload and both report downloads, export download, import preview and merge, toast, joke rotation, keyboard focus, and both dialogs.
   - Expected: behaviour matches the local build; the Console still has no CSP errors, and Network still shows only the site's own origin.
 - [ ] If a violation appears, copy the complete console message (directive, blocked URL, and source file) before changing anything. Do not add `'unsafe-inline'`, `'unsafe-eval'`, or a broad external host as the first response. Identify the resource, add only the narrowest source or remove the dependency, then repeat the local checks and this section.

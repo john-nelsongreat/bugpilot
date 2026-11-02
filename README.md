@@ -27,6 +27,7 @@ This repository contains a working MVP, not a hosted service: the live demo is a
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
 - **Debug Assistant** at `/assistant`, backed by a local rule engine with 16 Python rules, 14 JavaScript rules, and one language-neutral Git rule. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
 - **Saved diagnoses**: after a recognised analysis loaded from a report, the Assistant previews every field and writes one diagnosis to that report when confirmed. The bug detail shows the category, signature, confidence, selected evidence, and saved date, and can remove the diagnosis without touching the proposed fix, fix state, status, or verification notes.
+- **Code analysis** at `/analyze` (slice A): upload a folder, a `.zip`, or loose files and get findings from 16 registered pattern/syntax rules plus a lazy TypeScript syntax check, with per-file coverage, skipped-file reasons, severity/file filters, and `report.md`/`report.json` downloads. Everything runs in the tab in web workers; uploaded text is never executed, uploaded, or persisted, and exports contain no evidence quotes unless the user ticks the snippet box. See [Code analysis (slice A)](#code-analysis-slice-a).
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
 - **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete, import, remove-diagnosis, and save-diagnosis dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
@@ -98,6 +99,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 - Tested in Chromium on Windows only; Firefox, Safari, and physical mobile devices are not covered.
 - No screen-reader pass yet; NVDA, Narrator, JAWS, and VoiceOver remain untested. See [Accessibility](#accessibility) for the full list.
 - The assistant recognises only the 31 documented rules: 16 Python, 14 JavaScript, and one language-neutral Git rule.
+- Code analysis is slice A: JavaScript/TypeScript is parsed for syntax only, JSON for strict syntax only, and every other language gets pattern rules without a parser. It is not a security audit and does not prove a file is safe. See [Code analysis (slice A)](#code-analysis-slice-a).
 
 ## Tech stack
 
@@ -112,6 +114,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 | Styling | Hand-written CSS with custom properties; no CSS framework |
 | Tests | Vitest 5.0.5, Testing Library, jsdom 30.1.3, axe-core 4.14.0 (dev only) |
 | Linting | oxlint 1.88.0 |
+| Archives | fflate 0.8.3 (MIT), used by the streaming zip reader |
 | Storage | Browser `localStorage` and `sessionStorage` only |
 
 ## Requirements
@@ -183,11 +186,11 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; f
 | Directive | Why it is set |
 | --- | --- |
 | `default-src 'self'` | Fallback for any fetch directive not listed below; only this origin is allowed. |
-| `script-src 'self'` | The build loads one same-origin module script. There are no inline scripts, inline event-handler attributes, `eval`, or `new Function`; neither `'unsafe-inline'` nor `'unsafe-eval'` is allowed. |
+| `script-src 'self'` | The build loads only same-origin module scripts: the main entry, the lazy Analyze-page chunk, and the analyzer and worker chunks. There are no inline scripts, inline event-handler attributes, `eval`, or `new Function`; neither `'unsafe-inline'` nor `'unsafe-eval'` is allowed. |
 | `style-src 'self'` | The build loads one same-origin stylesheet. There are no `<style>` blocks and the app writes no inline styles at runtime. The light and dark `color-scheme` values live in `src/index.css` under `:root` and `:root[data-theme='dark']`; the theme code only sets `data-theme`, and a unit test asserts that toggling leaves no `style` attribute on `<html>`. |
 | `img-src 'self' data:` | Allows the self-hosted favicon and inert data-URI images, and blocks every external image. No data-URI image is in the current build; `data:` is retained from the requested baseline. |
 | `font-src 'self' data:` | Ten of the eleven `@font-face` files are self-hosted `.woff2` files. Vite inlines one Cyrillic-extended JetBrains Mono subset as `data:font/woff2` in the built CSS, so this allowance is required for that face. Rendering `Ѡ` (U+0460) confirmed the face loaded under this policy. |
-| `connect-src 'self'` | The app makes no `fetch`, XHR, or WebSocket requests after loading. Nothing can send reports, assistant text, or anything else to another host. |
+| `connect-src 'self'` | The app makes no `fetch`, XHR, or WebSocket request for data, and nothing can send reports, assistant text, uploads, or anything else to another host. Loading the lazy Analyze page and its workers fetches only same-origin static JavaScript chunks; those are `script-src` loads, not data connections. |
 | `object-src 'none'` | Blocks plugins, `<object>`, and `<embed>` content. |
 | `base-uri 'self'` | Stops an injected `<base>` element from changing how relative URLs resolve. |
 | `form-action 'self'` | Restricts form submissions to this origin. The app's forms are handled by React and never post to a server. |
@@ -209,7 +212,7 @@ No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exce
 
 `.github/workflows/live-check.yml` runs `scripts/check-live.mjs` once a day at 06:17 UTC, and it can be run by hand from the repository's **Actions** tab (**Live site check** → **Run workflow**). The optional `url` input sends the same checks to another address; leaving it empty uses [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
 
-The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares all five security headers with the values in `vercel.json`, fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. Network errors are retried twice; redirects are reported and not followed.
+The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant`, `/analyze` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares all five security headers with the values in `vercel.json`, fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. Network errors are retried twice; redirects are reported and not followed.
 
 Run it locally with:
 
@@ -244,6 +247,7 @@ GitHub can delay or skip scheduled runs. Scheduled workflows in a public reposit
 | `/bugs/:bugId` | Bug detail with quick status changes, edit, and delete |
 | `/bugs/:bugId/edit` | Edit form for an existing report |
 | `/assistant` | Local Debug Assistant. `?bugId=<id>` prefills it from a saved report; the query carries only the id. |
+| `/analyze` | Local code analysis (slice A): folder, zip, or loose-file upload, findings, coverage, filters, and report downloads. |
 | `*` | Page-not-found screen with a link back to the overview |
 
 Routes are declared in `src/App.tsx`.
@@ -363,12 +367,13 @@ src/
 ├─ diagnostics/    Diagnostic types, matching engine, rule tests
 │  └─ rules/       Python, JavaScript, and language-neutral diagnostic rules
 ├─ features/
+│  ├─ analyzer/    Code-analysis slice A: archive reader, rules, analysis pipeline, exports, and UI
 │  ├─ assistant/   Bug-to-Assistant prefill and save-diagnosis composition
 │  ├─ bugs/        Bug types, samples, validation, storage, querying, saved diagnoses, export/import, and the workspace hook
 │  ├─ footer/      Joke selection, 60-second rotation, and sessionStorage handling
 │  └─ theme/       Theme resolution, persistence, and the WCAG contrast test
 ├─ lib/            Clipboard helper shared by the report detail copy buttons
-├─ pages/          Route-level pages for the dashboard, log, form, detail, assistant, and 404
+├─ pages/          Route-level pages for the dashboard, log, form, detail, assistant, analyze, and 404
 ├─ test/           Vitest setup and shared test factories
 ├─ App.tsx         Route table and optional footer-joke interval configuration
 ├─ App.css         Amber & Charcoal theme, layout, and component styles
@@ -682,6 +687,117 @@ export const pythonFStringSyntaxErrorRule: DiagnosticRule = {
 
 After adding a rule like this to the `pythonRules` array, a false-positive test must prove that nearby input such as `SyntaxError: invalid syntax` and a prose sentence containing `f-string: expecting '}'` do **not** match. The generic Python `SyntaxError` rule may still handle the first line through the engine; the new rule must not claim it.
 
+## Code analysis (slice A)
+
+`/analyze` is a local static-review page, separate from the Assistant. Upload a folder, a `.zip`, or loose files; BugPilot reads them in the tab, runs its own pattern rules, and asks the TypeScript parser for syntax diagnostics. Nothing is executed, uploaded, or persisted, and no finding proposes an applied code change. The page states its limits before any upload and prints the checks that were **not** performed for each language that was analysed.
+
+`/analyze` is a lazy route. The archive and rules workers, the TypeScript worker, and the bundled TypeScript compiler load as separate chunks only when that page needs them, so the main entry stays the small app shell.
+
+### What runs, per language
+
+| Language (detected by extension, file name, shebang, or content sniff) | Syntax tier | Pattern tier |
+| --- | --- | --- |
+| JavaScript, JSX, TypeScript, TSX | TypeScript compiler parser (`ts.transpileModule`): syntax errors and warnings only | Generic and secret rules |
+| JSON | Strict `JSON.parse`; the first syntax error with line and column | Generic and secret rules |
+| Python, Java, Kotlin, C#, PHP, Ruby, Go, Rust, C, C++, Swift, Scala, Shell, SQL, YAML, TOML, XML, HTML, CSS, Markdown, plain text | Not available; the coverage panel says no syntax engine is bundled | The applicable generic rules and all eight secret rules |
+| Unrecognised file type | Not available | The applicable generic rules and all eight secret rules |
+
+- The TypeScript check is deliberately transpile-only: `transpileModule` never builds a program, resolves imports, reads `tsconfig.json`, or checks types. Unresolved names and type errors are not reported.
+- Content sniffing runs only when the name identifies nothing: XML, HTML, and complete JSON documents are recognised by their first bytes. A known extension is never overridden.
+- Text is decoded as UTF-8 (a BOM is removed), UTF-16 LE/BE, or Latin-1 as a fallback. Binary content is skipped.
+- Each rule call is isolated in a `try/catch`. A rule that throws adds a note for that file and the remaining rules still run. One file gets at most 1.5 s of rule time and 200 findings; the TypeScript check gets 5 s per file. When a cap stops work, the coverage notes say so.
+
+### Rules
+
+There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id synthesised by the worker:
+
+| Rule id | Tier | Severity | Languages | Finds |
+| --- | --- | --- | --- | --- |
+| `bugpilot/generic/merge-conflict-markers` | pattern | High | every text language | Git conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) left in a file |
+| `bugpilot/generic/todo-marker` | pattern | Low | every text language | `TODO`, `FIXME`, `HACK` |
+| `bugpilot/generic/mixed-indentation` | pattern | Low | every text language | leading tabs and spaces in the same file |
+| `bugpilot/generic/long-line` | pattern | Low | every text language | lines over 1,000 characters |
+| `bugpilot/generic/large-file` | pattern | Low | every text language | files over 4,000 lines or 512 KiB |
+| `bugpilot/generic/empty-catch` | pattern | Low | JS/JSX/TS/TSX, Java, Kotlin, C#, PHP, Python, Ruby, Go | literally empty `catch`/`except`/`rescue`/error-check blocks |
+| `bugpilot/generic/insecure-http-url` | pattern | Low | every text language | literal `http://` URLs that are not local or documentation hosts |
+| `bugpilot/syntax/json` | syntax | High | JSON | the first strict JSON syntax error |
+| `bugpilot/typescript/syntax` | syntax | High (parser warnings: Medium) | JS/JSX/TS/TSX | TypeScript parser errors and warnings, syntax only |
+
+The eight secret rules are `bugpilot/secret/aws-access-key`, `github-token`, `slack-token`, `stripe-live-key`, `private-key-block`, `jwt`, `connection-string`, and `credential-assignment`. All are `pattern` tier and `Critical`, and all run on every text language. Evidence quotes are redacted to two leading and two trailing characters. Placeholder values and low-entropy literals are filtered; an assignment's confidence moves from medium to high only when its literal is long enough and has enough entropy.
+
+Every rule has positive tests, lookalike tests that must not match, and prose-style negative tests that mention the pattern in a sentence without it being code, plus a registry test that checks ids, metadata, and empty-file quietness. Test fixtures never contain a literal credential-shaped string; fake secrets are assembled at runtime from fragments.
+
+### Limits, applied before analysis
+
+| Cap | Value |
+| --- | --- |
+| Archive file | 10 MiB |
+| Total decoded text across the upload | 50 MiB |
+| One file | 2 MiB; a larger file is skipped with a reason, not fatal |
+| Archive entries walked | 2,000; reading stops as soon as the cap is exceeded |
+| One entry name | 1,024 bytes |
+| Declared expansion ratio | 60 : 1, refused before inflating |
+| Actual expansion ratio while inflating | 300 : 1, refused at that point |
+| Loose files or folder-drop sources collected | 2,000 plus one sentinel, so an over-limit drop is refused rather than silently truncated |
+| Rule time / findings per file | 1.5 s / 200 |
+| TypeScript syntax check per file | 5 s |
+
+The reader is a streaming zip reader. It refuses, with a plain-language message, traversal (`..`), absolute paths, Windows drive letters, backslash separators, NUL bytes, duplicate names, symbolic links, nested archives, encrypted entries, ZIP64, data descriptors, unsupported compression, checksum mismatches, and damaged indexes before or while reading. It skips binaries, empty entries, directory entries, files over 2 MiB, and anything under `.git`, `node_modules`, `dist`, `build`, `.next`, `coverage`, `__pycache__`, `.venv`, `venv`, `vendor`, `target`, `bin`, or `obj`. Only `.zip` archives are read; `.tar`, `.gz`, `.7z`, `.rar`, and similar files are treated as ordinary files or refused as nested archives.
+
+### Report, coverage, and export
+
+After a run, the page shows findings grouped by file with severity, confidence and its reason, tier, rule id, location, redacted evidence, explanation, a suggested direction with a risk class (never an applied change or example patch), verification steps, and per-finding limits. Severity and file filters apply to the on-screen list and are counted in a live status line.
+
+The coverage panel lists every uploaded entry: analysed or skipped, its detected language and source, encoding, size, finding count, and each tier's status (`ran`, `not run` with a reason, or `not available` with a reason). The **No findings does not mean no bugs** panel prints the per-language list of checks that were not performed.
+
+**Download report.md** and **Download report.json** are built in the tab from the in-memory report and handed to the browser. Both files are named `bugpilot-analysis-<timestamp>.md` or `.json`. Evidence quotes are excluded by default; ticking **Include code snippets (evidence quotes) in the exported files** is the only way to include them, and the exports say which choice was used. Findings, explanations, and coverage are exported either way. The report contains no clean version of the user's code, only the quoted lines that triggered a finding.
+
+**Clear results** aborts any run, empties the report state, and returns focus to the upload heading. Leaving the route unmounts the page and aborts the workers.
+
+### Privacy
+
+- Files are read in this tab by same-origin web workers. No code is executed: the only parsers are BugPilot's regex/text rules, `JSON.parse`, and the TypeScript parser.
+- Uploaded text is never sent to a server, never written to `localStorage` or `sessionStorage`, never written to IndexedDB, and never added to the bug log or a saved diagnosis. The page tests spy on `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, and `indexedDB.open` across upload, both exports, Clear, and a route change, and compare the full `localStorage`/`sessionStorage` contents before and after; all of those checks must stay quiet and byte-identical. Loading the page and its workers fetches only same-origin static JavaScript chunks, which contain no uploaded text.
+- The in-memory report keeps the redacted evidence quotes needed for the on-screen findings. It is dropped on Clear or when the page unmounts. Nothing survives a reload.
+- Exports are the only way data leaves the page, and they are browser downloads chosen by the user. They contain no source file contents other than evidence quotes, and only when the snippet box was ticked.
+- There is no code execution, no package installation, no network fetch of a user URL, and no AI provider.
+
+### Non-goals in slice A
+
+- No type checking, module resolution, project-wide analysis, data-flow, or taint analysis.
+- No syntax parser for any language other than JavaScript/TypeScript (via the TypeScript parser) and JSON (via `JSON.parse`).
+- No lint rules, automatic code changes, automatic fixes, or clean-version export.
+- No code execution, tests, builds, or package installation.
+- No archives inside archives, ZIP64, encrypted archives, password prompts, or `.tar`/`.gz`/`.7z`/`.rar` reading.
+- Secret detection is best-effort pattern matching. A clean run is not a security audit and does not prove that a file contains no secret.
+- No persistence of an analysis; only the bug log and its saved diagnoses persist.
+
+### Analyzer source tree
+
+```text
+src/features/analyzer/
+├─ archive/        Streaming zip guard and reader, decoding, language classification, loose-file intake, worker and client
+├─ analysis/       Finding model, rule engine, coverage, report model, session orchestration, workers, and clients
+│  └─ typescript/  Classic worker and client for the syntax-only TypeScript check
+├─ export/         Export filtering and the Markdown/JSON writers and download helpers
+├─ rules/          Generic, secret, and JSON syntax rules plus shared text helpers
+├─ ui/             AnalyzeResults: findings, filters, coverage, honesty panel, and export controls
+├─ upload/         File, folder-picker, and drag-and-drop source collection
+├─ languages.ts    Labels, TypeScript-family detection, tier availability, and per-language not-checked lists
+└─ types.ts        Finding, coverage, and report types
+```
+
+`src/pages/AnalyzePage.tsx` owns the page state, upload inputs, progress, cancellation, and report downloads. The worker entry points are `src/features/analyzer/archive/worker.ts`, `src/features/analyzer/analysis/worker.ts`, and `src/features/analyzer/analysis/typescript/tsWorkerEntry.ts`.
+
+### How to add a rule
+
+1. Add an `AnalyzerRule` object in `src/features/analyzer/rules/generic.ts`, `secrets.ts`, or a new module. Use a namespaced id (`bugpilot/<group>/<name>`), a tier, severity, title, description, the language list, and a synchronous `check(file)`.
+2. Return `RuleHit` objects with a range, message, explanation, confidence and reason, evidence, optional fix text with a `riskClass` (`safe`, `needs-review`, or `manual-only`) and `riskReason`, verification steps, and limitations. Return `[]` when nothing matches.
+3. Register the rule in `ANALYZER_RULES` in `src/features/analyzer/rules/registry.ts`. Rules run in registry order within the per-file time budget, so put the most valuable checks first.
+4. Add tests beside the rule module: a positive case, a lookalike that must not match, and a prose sentence that mentions the pattern without being code. Keep the registry test passing.
+5. Never write a literal credential-shaped value in a test or fixture. Build every fake secret at runtime from fragments so the repository cannot trip push protection or a secret scanner.
+6. Run `npx vitest run src/features/analyzer` while developing, then the full `npm test`, `npm run lint`, and `npm run build`.
+
 ## Privacy and safety
 
 - **Everything is local.** The app has no backend, login, cloud database, analytics, telemetry, service worker, or external AI call. Fonts and icons are bundled by the build; the app does not need a network request after the page and assets load.
@@ -693,7 +809,9 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 - **Session-only data.** Footer joke indices use `sessionStorage` keys named `bugpilot.footerJoke.<pageKey>`. They store an index, not page content.
 - **Assistant text is session-only unless you save a diagnosis.** Pasted error text, code snippets, reproduction details, verification checkmarks, and unsaved results are held in React component state for the current tab session. Opening the Assistant from a bug, analyzing, copying code, and ticking checklist items write nothing; refreshing or closing the tab discards the text, and nothing is sent anywhere.
 - **What saving a diagnosis stores.** Only an explicit **Save diagnosis** confirmation writes data: the structured fields `category`, `matchedSignature`, `confidence`, the evidence items you tick (`label` and `quote`), and `savedAt`, plus the composed proposed fix in the report's normal `proposedFix` field. It never stores the whole pasted error text, code snippet, reproduction details, or unticked evidence. A ticked evidence quote can itself contain the final exception line, so untick that item if you do not want that line saved. No assistant text is written to any other storage key.
-- **No code execution.** BugPilot never executes submitted code, runs shell commands, installs packages, or modifies files on the user's computer. The diagnostic engine only pattern-matches text.
+- **No code execution.** BugPilot never executes submitted code, runs shell commands, installs packages, or modifies files on the user's computer. The diagnostic engine only pattern-matches text, and code analysis follows the same rule: uploaded files are read as text and parsed for patterns or syntax, never run.
+- **Code analysis stays in the tab.** Uploaded files and archives are decoded by the page's own workers, held in memory for the run only, and dropped when the report is cleared, the route changes, or the tab is closed. The report keeps findings, line ranges, and short evidence quotes — not the source files. Analysis writes no `localStorage`, `sessionStorage`, or IndexedDB entry and makes no `fetch`, XHR, or beacon call; the only network activity is the browser's normal same-origin load of the page's static JavaScript chunks, including the lazy analyzer and worker files. The TypeScript check parses one file at a time with the bundled compiler and does not resolve modules or read `node_modules`.
+- **Secrets are redacted and snippets are opt-in.** Secret rules show a shortened, redacted value rather than the full credential. Both report downloads are built in the tab from the in-memory report, and code snippets — including any evidence quote — are left out of `report.md` and `report.json` unless the user ticks the snippet box. Analysis, exports, Clear, and route changes leave saved reports and their diagnoses untouched.
 - **Suggestions are not proof.** Possible fixes, debugging steps, and verification checklists are displayed text. The app does not apply a suggested change or mark a fix as verified. The user must make and verify changes outside BugPilot and record the result manually.
 - **Local does not mean encrypted.** Anyone with access to the browser profile can read the saved reports. Use a device and browser profile you trust, and do not treat this as secure storage for secrets.
 - **Deletion is permanent.** Deleting a report removes it from the browser's stored array immediately; there is no undo. Export a JSON file first if you may need a copy. An import copies the previous raw log to `bugpilot.bugs.preimport.v1`, but that single slot is overwritten by the next import.
@@ -708,11 +826,12 @@ BugPilot is checked at three levels: automated tests in the repository, a live a
 | Check | Where | Runs | Notes |
 | --- | --- | --- | --- |
 | axe-core rule engine | `src/App.accessibility.test.tsx` + `src/test/axe.ts` | `npm test` | Renders every route and state through the real router and layout: overview (first run), bug log (seeded and empty), bug detail (with no copy buttons and with both copy buttons), a bug detail with a saved diagnosis, new form, the new form with its error summary after an empty submit, edit form, assistant (empty, loaded from a bug, Python result, validation error), not-found, delete dialog open, remove-diagnosis dialog open, save-diagnosis dialog open for a bug with and without an existing fix, import dialog open with a preview, and a visible toast. Each asserts an empty violations array. |
+| axe-core, Analyze page | `src/pages/AnalyzePage.test.tsx` | `npm test` | Renders `AnalyzePage` directly, not through the real router, and asserts an empty violations array in the empty upload state and after a completed run with findings, coverage, filters, and the export control. Uses the same helper, so `color-contrast` is off here too. |
 | Theme token contrast | `src/features/theme/contrast.test.ts` | `npm test` | Computes WCAG AA ratios for text, badge, border, and focus-ring token pairs in both themes. This is where contrast is covered, because axe cannot measure it under jsdom. |
 | Route announcement | `src/components/AppLayout.announcement.test.tsx` | `npm test` | Drives the real router and the app layout: silent on first load, announces the page entered by clicking a nav link and a bug detail page's own report title, announces on history back and forward, stays quiet when only the query string changes (including the Assistant's `bugId` link) or when the same route re-renders (theme toggle), and leaves focus on the control that caused the navigation. |
 | Lint | `npm run lint` (`oxlint --deny-warnings`) | `npm test` is separate | `react-refresh/only-export-components` and the other oxlint rules fail the run on a warning, so component files cannot quietly re-absorb non-component exports. |
 
-axe-core 4.14.0 is a `devDependency` only. The single module that imports it, `src/test/axe.ts`, is reachable only from `src/App.accessibility.test.tsx`, and the built bundle contains no `axe-core` string — confirmed by `grep -c "axe-core" dist/assets/index-*.js`, which returns 0. The `color-contrast` rule is switched off in the helper because jsdom performs no layout and paints nothing, so axe cannot resolve a real background for an element — the rule is not weakening a check, it is disabling one that cannot run there. Layout-dependent rules (`target-size`, reflow, zoom) are in the same position.
+axe-core 4.14.0 is a `devDependency` only. The only modules that import `src/test/axe.ts` are test files (`src/App.accessibility.test.tsx` and `src/pages/AnalyzePage.test.tsx`), and the built bundle contains no `axe-core` string — confirmed by `grep -c "axe-core" dist/assets/index-*.js`, which returns 0. The `color-contrast` rule is switched off in the helper because jsdom performs no layout and paints nothing, so axe cannot resolve a real background for an element — the rule is not weakening a check, it is disabling one that cannot run there. Layout-dependent rules (`target-size`, reflow, zoom) are in the same position.
 
 ### Audited live
 
@@ -791,12 +910,13 @@ None of the following exists in the current app:
 - Additional diagnostic rules beyond those documented above, for example other browser console messages or framework-specific errors.
 - Integration with test-runner or CI output.
 - An optional external AI provider. Any such provider would need to be opt-in, clearly disclosed, and reviewed for the project's no-transmission constraint; no provider is configured now.
+- Deeper code analysis (slice B and beyond): full-program TypeScript type checking across files, syntax engines for languages other than the TypeScript family and JSON, additional archive formats, stored or shareable analysis reports, and automatic fixes. Slice A never executes uploaded code and never edits it.
 - Authentication, multi-user use, or a database.
 - A committed Playwright or cross-browser end-to-end suite.
 
 ## Manual test checklist
 
-Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
+Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, code analysis (mixed-folder and zip upload, hostile-archive refusals, filters, both report downloads, Clear, and DevTools privacy), keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
 
 ## License
 
