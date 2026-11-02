@@ -12,6 +12,7 @@ describe('getRouteTitle', () => {
     expect(getRouteTitle('/bugs', bugs)).toBe('Bug log · BugPilot')
     expect(getRouteTitle('/bugs/new', bugs)).toBe('Report a bug · BugPilot')
     expect(getRouteTitle('/assistant', bugs)).toBe('Debug assistant · BugPilot')
+    expect(getRouteTitle('/analyze', bugs)).toBe('Analyze code · BugPilot')
   })
 
   it('names detail routes after the report and edit routes generically', () => {

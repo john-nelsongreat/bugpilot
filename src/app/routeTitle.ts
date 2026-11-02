@@ -17,6 +17,7 @@ export function getRouteTitle(
   else if (path === '/bugs') label = 'Bug log'
   else if (path === '/bugs/new') label = 'Report a bug'
   else if (path === '/assistant') label = 'Debug assistant'
+  else if (path === '/analyze') label = 'Analyze code'
   else if (edit) label = 'Edit bug report'
   else if (detail) {
     const report = bugs.find((bug) => bug.id === detail[1])

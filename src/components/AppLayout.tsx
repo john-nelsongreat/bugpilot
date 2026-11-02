@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Bug,
   ClipboardList,
+  FileSearch,
   Info,
   LayoutDashboard,
   Moon,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/bugs', label: 'Bug log', icon: ClipboardList, end: false },
   { to: '/assistant', label: 'Assistant', icon: Stethoscope, end: false },
+  { to: '/analyze', label: 'Analyze code', icon: FileSearch, end: false },
 ] as const
 
 type AppLayoutProps = {

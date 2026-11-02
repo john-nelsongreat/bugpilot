@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { WorkspaceProvider } from './app/WorkspaceContext'
 import { AppLayout } from './components/AppLayout'
@@ -8,6 +9,10 @@ import { BugListPage } from './pages/BugListPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import './App.css'
+
+const AnalyzePage = lazy(() =>
+  import('./pages/AnalyzePage').then((module) => ({ default: module.AnalyzePage })),
+)
 
 const configuredJokeInterval = Number(
   import.meta.env.VITE_FOOTER_JOKE_INTERVAL_MS,
@@ -30,6 +35,20 @@ function App() {
           <Route path="bugs/:bugId" element={<BugDetailPage />} />
           <Route path="bugs/:bugId/edit" element={<BugFormPage />} />
           <Route path="assistant" element={<AssistantPage />} />
+          <Route
+            path="analyze"
+            element={
+              <Suspense
+                fallback={
+                  <div className="panel empty-state">
+                    <p role="status">Loading the analyzer…</p>
+                  </div>
+                }
+              >
+                <AnalyzePage />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

@@ -9,6 +9,7 @@ export const ROUTES = Object.freeze([
   '/bugs',
   '/bugs/new',
   '/assistant',
+  '/analyze',
   '/__bugpilot-live-check-missing-9f3a2b__',
 ])
 export const REQUIRED_HEADERS = Object.freeze([
