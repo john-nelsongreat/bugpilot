@@ -61,8 +61,8 @@ const BY_EXTENSION: Record<string, SourceLanguage> = {
   zsh: 'shell',
   sql: 'sql',
   json: 'json',
-  jsonc: 'json',
-  jsonl: 'json',
+  jsonc: 'text',
+  jsonl: 'text',
   yml: 'yaml',
   yaml: 'yaml',
   toml: 'toml',
@@ -126,21 +126,52 @@ export function basenameOf(name: string): string {
   return name.slice(name.lastIndexOf('/') + 1).toLowerCase()
 }
 
-export function languageOf(name: string, text: string): SourceLanguage {
+export type LanguageSource = 'extension' | 'shebang' | 'content' | 'fallback'
+
+export interface LanguageDetection {
+  language: SourceLanguage
+  source: LanguageSource
+}
+
+/** Content sniffing only runs when the name says nothing; it never overrides an extension. */
+function sniffContent(text: string): SourceLanguage | null {
+  const head = text.slice(0, 65_536).trimStart()
+  if (head === '') return null
+  if (/^<\?xml\b/i.test(head)) return 'xml'
+  if (/^<!doctype\s+html\b/i.test(head) || /^<html\b/i.test(head)) return 'html'
+  const first = head[0]
+  if (first === '{' || first === '[') {
+    try {
+      JSON.parse(head)
+      return 'json'
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+export function detectLanguage(name: string, text: string): LanguageDetection {
   const ext = extensionOf(name)
   const byExt = BY_EXTENSION[ext]
-  if (byExt) return byExt
+  if (byExt) return { language: byExt, source: 'extension' }
   const byBase = BY_BASENAME[basenameOf(name)]
-  if (byBase) return byBase
+  if (byBase) return { language: byBase, source: 'extension' }
   if (text.startsWith('#!')) {
     const end = text.indexOf('\n')
     const line = text.slice(0, end === -1 ? text.length : end)
     for (const raw of line.split(/[\s/]+/)) {
       const mapped = SHEBANG_LANGUAGES[raw.replace(/[0-9.]+$/, '')]
-      if (mapped) return mapped
+      if (mapped) return { language: mapped, source: 'shebang' }
     }
   }
-  return ext ? 'unknown' : 'text'
+  const sniffed = sniffContent(text)
+  if (sniffed) return { language: sniffed, source: 'content' }
+  return ext ? { language: 'unknown', source: 'fallback' } : { language: 'text', source: 'fallback' }
+}
+
+export function languageOf(name: string, text: string): SourceLanguage {
+  return detectLanguage(name, text).language
 }
 
 /** Languages whose syntax the TypeScript compiler can be asked about in slice A. */

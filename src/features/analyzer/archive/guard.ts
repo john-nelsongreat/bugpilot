@@ -1,6 +1,6 @@
 import { Inflate } from 'fflate'
 import { crc32, crc32Finish } from './crc32'
-import { languageOf, type SourceLanguage } from './classify'
+import { detectLanguage, type LanguageSource, type SourceLanguage } from './classify'
 import { decodeBytes, looksBinary, type TextEncoding } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
 import { archiveReasonMessage, type ArchiveRefusalCode, type ArchiveSkipCode } from './reasons'
@@ -41,6 +41,7 @@ export interface ArchiveEntry {
   name: string
   text: string
   language: SourceLanguage
+  languageSource: LanguageSource
   encoding: TextEncoding
   bytes: number
 }
@@ -361,12 +362,14 @@ async function extractRecord(bytes: Uint8Array, view: DataView, record: CentralR
   if (crc32Finish(crc32(out)) !== record.crc) refuse('crc_mismatch', record.name)
   if (looksBinary(out)) skipEntry('binary_content')
   const decoded = decodeBytes(out)
+  const detection = detectLanguage(record.name, decoded.text)
   run.stats.peakEntryBytes = Math.max(run.stats.peakEntryBytes, out.length)
   run.stats.producedBytes += out.length
   return {
     name: record.name,
     text: decoded.text,
-    language: languageOf(record.name, decoded.text),
+    language: detection.language,
+    languageSource: detection.source,
     encoding: decoded.encoding,
     bytes: out.length,
   }

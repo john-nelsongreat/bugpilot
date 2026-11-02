@@ -1,4 +1,4 @@
-import { languageOf, type SourceLanguage } from './classify'
+import { detectLanguage, type LanguageSource, type SourceLanguage } from './classify'
 import { decodeBytes, looksBinary, type TextEncoding } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
 import type { ArchiveEntry, ArchiveReadProgress, ArchiveReadResult, ArchiveReadStats, ArchiveRefusal, ArchiveSkippedEntry } from './guard'
@@ -22,7 +22,16 @@ export interface ReadLooseFilesOptions {
 }
 
 export type LooseFilesResult = ArchiveReadResult
-export type { ArchiveEntry, ArchiveRefusal, ArchiveSkippedEntry, ArchiveReadProgress, ArchiveReadStats, SourceLanguage, TextEncoding }
+export type {
+  ArchiveEntry,
+  ArchiveRefusal,
+  ArchiveSkippedEntry,
+  ArchiveReadProgress,
+  ArchiveReadStats,
+  SourceLanguage,
+  LanguageSource,
+  TextEncoding,
+}
 
 export async function readLooseFiles(
   sources: readonly IntakeSource[],
@@ -99,10 +108,12 @@ export async function readLooseFiles(
       continue
     }
     const decoded = decodeBytes(bytes)
+    const detection = detectLanguage(item.path, decoded.text)
     entries.push({
       name: item.path,
       text: decoded.text,
-      language: languageOf(item.path, decoded.text),
+      language: detection.language,
+      languageSource: detection.source,
       encoding: decoded.encoding,
       bytes: bytes.length,
     })
