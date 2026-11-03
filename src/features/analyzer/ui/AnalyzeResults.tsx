@@ -1,9 +1,27 @@
-import { useMemo, useState, type RefObject } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Download, RotateCcw } from 'lucide-react'
 import type { Severity } from '../../bugs/types'
+import type { ArchiveEntry } from '../archive/guard'
 import type { DownloadReportFile } from '../export/reportFiles'
+import { prepareFixPlan as prepareFixPlanDefault, type FixPlan } from '../fixes/plan'
+import type { FixCandidate } from '../fixes/types'
 import { NOT_CHECKED_BY_LANGUAGE, languageLabel } from '../languages'
 import type { AnalyzerFinding, AnalyzerReport, CoverageTier } from '../types'
+
+const FixReview = lazy(() => import('./FixReview'))
+const CleanExportPanel = lazy(() => import('./CleanExportPanel'))
+
+export type PrepareFixPlan = (
+  findings: readonly AnalyzerFinding[],
+  sources: readonly ArchiveEntry[],
+  signal?: AbortSignal,
+) => Promise<FixPlan>
+
+const defaultPrepareFixPlan: PrepareFixPlan = (findings, sources, signal) =>
+  prepareFixPlanDefault(findings, sources, {}, signal)
+
+const EMPTY_SOURCES: readonly ArchiveEntry[] = []
+const EMPTY_PLAN: FixPlan = { available: [], unavailable: new Map(), dropped: [] }
 
 const SEVERITY_OPTIONS: readonly Severity[] = ['Critical', 'High', 'Medium', 'Low']
 
@@ -39,7 +57,15 @@ function findingGroups(findings: readonly AnalyzerFinding[]): [string, AnalyzerF
   return [...groups.entries()]
 }
 
-function FindingCard({ finding }: { finding: AnalyzerFinding }) {
+interface FindingCardProps {
+  finding: AnalyzerFinding
+  candidate?: FixCandidate
+  unavailableReason?: string
+  checked: boolean
+  onSelect: (checked: boolean) => void
+}
+
+function FindingCard({ finding, candidate, unavailableReason, checked, onSelect }: FindingCardProps) {
   const titleId = `finding-${finding.id}`
   return (
     <article className="analyze-finding" aria-labelledby={titleId}>
@@ -82,15 +108,61 @@ function FindingCard({ finding }: { finding: AnalyzerFinding }) {
       ) : null}
 
       <div className="analyze-finding-section">
-        <p className="eyebrow">Suggested direction ({finding.fix?.riskClass ?? 'manual-only'}, not applied)</p>
-        {finding.fix ? (
+        {candidate ? (
           <>
-            <p className="prose">{finding.fix.explanation}</p>
-            <p className="field-hint">{finding.fix.whereItMayApply}</p>
-            <p className="field-hint">{finding.fix.riskReason}</p>
+            <p className="eyebrow">
+              Proposed change ({candidate.riskClass}, not applied)
+            </p>
+            <p className="prose">{candidate.description}</p>
+            {candidate.behaviourChange ? (
+              <p className="analyze-behaviour">
+                This change can alter behaviour. Read the diff in the review before exporting.
+              </p>
+            ) : null}
+            {candidate.warnings.length > 0 ? (
+              <ul className="analyze-list analyze-fix-warnings">
+                {candidate.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+            <label className="analyze-check analyze-fix-check">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => onSelect(event.target.checked)}
+              />
+              <span>
+                Include this change{' '}
+                <span className="sr-only">
+                  for {finding.ruleId} at line {finding.range.startLine} in {finding.file}
+                </span>
+              </span>
+            </label>
+            <p className="field-hint">
+              Verified by re-running the analyzers on a copy of this file. Your files are not modified.
+            </p>
           </>
         ) : (
-          <p className="prose">No automatic fix is suggested for this finding.</p>
+          <>
+            <p className="eyebrow">
+              Suggested direction ({finding.fix?.riskClass ?? 'manual-only'}, not applied)
+            </p>
+            {unavailableReason ? (
+              <p className="analyze-unavailable">
+                No automatic change offered: {unavailableReason}
+              </p>
+            ) : null}
+            {finding.fix ? (
+              <>
+                <p className="prose">{finding.fix.explanation}</p>
+                <p className="field-hint">{finding.fix.whereItMayApply}</p>
+                <p className="field-hint">{finding.fix.riskReason}</p>
+              </>
+            ) : (
+              <p className="prose">No automatic fix is suggested for this finding.</p>
+            )}
+          </>
         )}
       </div>
 
@@ -124,13 +196,104 @@ export interface AnalyzeResultsProps {
   headingRef: RefObject<HTMLHeadingElement | null>
   downloadReportFile: DownloadReportFile
   onClear: () => void
+  sources?: readonly ArchiveEntry[]
+  prepareFixPlan?: PrepareFixPlan
 }
 
-export function AnalyzeResults({ report, headingRef, downloadReportFile, onClear }: AnalyzeResultsProps) {
+const EMPTY_SELECTION: ReadonlySet<string> = new Set()
+
+interface PlanState {
+  report: AnalyzerReport
+  sources: readonly ArchiveEntry[]
+  plan: FixPlan
+  error: string | null
+  selected: ReadonlySet<string>
+}
+
+export function AnalyzeResults({
+  report,
+  headingRef,
+  downloadReportFile,
+  onClear,
+  sources = EMPTY_SOURCES,
+  prepareFixPlan = defaultPrepareFixPlan,
+}: AnalyzeResultsProps) {
   const [severity, setSeverity] = useState<'all' | Severity>('all')
   const [file, setFile] = useState('all')
   const [includeSnippets, setIncludeSnippets] = useState(false)
   const [exportStatus, setExportStatus] = useState<string | null>(null)
+  const [planState, setPlanState] = useState<PlanState | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const reviewButtonRef = useRef<HTMLButtonElement>(null)
+
+  const planningAvailable = sources.length > 0 && report.findings.length > 0
+  const planStateMatches =
+    planState !== null && planState.report === report && planState.sources === sources
+  const plan = planStateMatches ? planState.plan : planningAvailable ? null : EMPTY_PLAN
+  const planError = planStateMatches ? planState.error : null
+  const selected = planStateMatches ? planState.selected : EMPTY_SELECTION
+
+  useEffect(() => {
+    if (!planningAvailable) return
+    const controller = new AbortController()
+    prepareFixPlan(report.findings, sources, controller.signal).then(
+      (next) => {
+        if (controller.signal.aborted) return
+        setPlanState({
+          report,
+          sources,
+          plan: next,
+          error: null,
+          selected: new Set(
+            next.available
+              .filter((candidate) => candidate.riskClass === 'safe')
+              .map((candidate) => candidate.findingId),
+          ),
+        })
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return
+        setPlanState({
+          report,
+          sources,
+          plan: EMPTY_PLAN,
+          error:
+            error instanceof Error ? error.message : 'The automatic fixes could not be prepared.',
+          selected: EMPTY_SELECTION,
+        })
+      },
+    )
+    return () => controller.abort()
+  }, [planningAvailable, prepareFixPlan, report, sources])
+
+  const candidatesByFinding = useMemo(
+    () => new Map((plan?.available ?? []).map((candidate) => [candidate.findingId, candidate])),
+    [plan],
+  )
+  const selectedCandidates = useMemo(
+    () => (plan?.available ?? []).filter((candidate) => selected.has(candidate.findingId)),
+    [plan, selected],
+  )
+  const selectedFiles = useMemo(
+    () => new Set(selectedCandidates.map((candidate) => candidate.file)),
+    [selectedCandidates],
+  )
+  const hasCandidates = (plan?.available.length ?? 0) > 0
+
+  function toggleSelection(findingId: string, checked: boolean): void {
+    setPlanState((current) => {
+      if (!current || current.report !== report || current.sources !== sources) return current
+      const next = new Set(current.selected)
+      if (checked) next.add(findingId)
+      else next.delete(findingId)
+      return { ...current, selected: next }
+    })
+  }
+
+  function closeReview(): void {
+    setReviewOpen(false)
+    reviewButtonRef.current?.focus()
+  }
 
   const findingFiles = useMemo(
     () => [...new Set(report.findings.map((finding) => finding.file))].sort((a, b) => a.localeCompare(b)),
@@ -248,6 +411,95 @@ export function AnalyzeResults({ report, headingRef, downloadReportFile, onClear
         </p>
       </div>
 
+      <div className="panel analyze-fix-select" aria-labelledby="analyze-fix-select-heading">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Step 2</p>
+            <h2 id="analyze-fix-select-heading">Automatic fixes</h2>
+            <p className="field-hint">
+              Each proposed change was applied to a copy and verified by re-running the analyzers.
+              Your files are never modified and your upload is not saved.
+            </p>
+          </div>
+        </div>
+        <div className="analyze-body">
+          {planError ? (
+            <p className="notice notice--alert" role="alert">
+              Automatic fixes could not be prepared: {planError}. The report export above still works
+              and nothing was kept.
+            </p>
+          ) : plan === null ? (
+            <p className="field-hint analyze-fix-planning">
+              Checking which findings can be fixed automatically. The analyzers re-run on in-memory
+              copies.
+            </p>
+          ) : hasCandidates ? (
+            <>
+              <p className="analyze-fix-summary">
+                {selectedCandidates.length} change
+                {selectedCandidates.length === 1 ? '' : 's'} selected in {selectedFiles.size} file
+                {selectedFiles.size === 1 ? '' : 's'}
+              </p>
+              <p className="field-hint">
+                Safe changes are ticked by default. Changes that can alter behaviour are unticked.
+                Manual-only findings have no checkbox.
+              </p>
+              <div className="analyze-fix-actions">
+                <button
+                  ref={reviewButtonRef}
+                  type="button"
+                  className="button button--primary"
+                  disabled={selectedCandidates.length === 0}
+                  aria-describedby={selectedCandidates.length === 0 ? 'fix-review-disabled-note' : undefined}
+                  onClick={() => setReviewOpen(true)}
+                >
+                  Review changes
+                </button>
+                {selectedCandidates.length === 0 ? (
+                  <p className="field-hint" id="fix-review-disabled-note">
+                    Select at least one change to open the review.
+                  </p>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <p className="field-hint">
+              No finding in this upload has a verified automatic change. The report export above
+              still works.
+            </p>
+          )}
+
+          {reviewOpen && selectedCandidates.length > 0 ? (
+            <>
+              <Suspense
+                fallback={
+                  <p className="field-hint analyze-fix-planning">Loading the review view…</p>
+                }
+              >
+                <FixReview
+                  report={report}
+                  sources={sources}
+                  candidates={selectedCandidates}
+                  onClose={closeReview}
+                />
+              </Suspense>
+              <Suspense
+                fallback={
+                  <p className="field-hint analyze-fix-planning">Loading the clean export…</p>
+                }
+              >
+                <CleanExportPanel
+                  report={report}
+                  sources={sources}
+                  candidates={selectedCandidates}
+                  onReportOnly={() => handleDownload('markdown')}
+                />
+              </Suspense>
+            </>
+          ) : null}
+        </div>
+      </div>
+
       <div className="panel analyze-filter-panel" aria-labelledby="analyze-findings-heading">
         <div className="panel-head">
           <div>
@@ -323,7 +575,13 @@ export function AnalyzeResults({ report, headingRef, downloadReportFile, onClear
                     <ul className="analyze-findings">
                       {findings.map((finding) => (
                         <li key={finding.id}>
-                          <FindingCard finding={finding} />
+                          <FindingCard
+                            finding={finding}
+                            candidate={candidatesByFinding.get(finding.id)}
+                            unavailableReason={plan?.unavailable.get(finding.id)}
+                            checked={selected.has(finding.id)}
+                            onSelect={(checked) => toggleSelection(finding.id, checked)}
+                          />
                         </li>
                       ))}
                     </ul>

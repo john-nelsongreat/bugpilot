@@ -32,6 +32,11 @@
   --danger-fill-hover: #7e2118;
   --danger-ink: #fff8f0;
 
+  --diff-add-line: #17603a;
+  --diff-remove-line: #9c2b21;
+  --diff-add-surface: #e8f2df;
+  --diff-remove-surface: #f7e4dd;
+
   --panel: #2b2a26;
   --panel-ink: #f6f1e3;
   --panel-muted: #cfc8b6;
@@ -100,6 +105,11 @@
   --danger-fill: #a8332b;
   --danger-fill-hover: #b23a32;
   --danger-ink: #fff8f0;
+
+  --diff-add-line: #8fe3a6;
+  --diff-remove-line: #ff9d90;
+  --diff-add-surface: #1e2a20;
+  --diff-remove-surface: #3a211c;
 
   --panel: #33322b;
   --panel-ink: #f4f0e5;

@@ -15,7 +15,7 @@ import {
   downloadReportMarkdown,
   type DownloadReportFile,
 } from '../features/analyzer/export/reportFiles'
-import { AnalyzeResults } from '../features/analyzer/ui/AnalyzeResults'
+import { AnalyzeResults, type PrepareFixPlan } from '../features/analyzer/ui/AnalyzeResults'
 import { isZipFile, sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
 
 const PHASE_LABELS: Record<SessionPhase, string> = {
@@ -35,6 +35,7 @@ export interface AnalyzePageProps {
   analyze?: AnalyzeFunction
   readFile?: (file: File) => Promise<Uint8Array>
   downloadReportFile?: DownloadReportFile
+  prepareFixPlan?: PrepareFixPlan
   now?: () => Date
 }
 
@@ -97,6 +98,7 @@ export function AnalyzePage({
   analyze = analyzeUpload,
   readFile = readFileBytes,
   downloadReportFile = defaultDownloadReportFile,
+  prepareFixPlan,
   now = () => new Date(),
 }: AnalyzePageProps = {}) {
   const [running, setRunning] = useState(false)
@@ -419,6 +421,8 @@ export function AnalyzePage({
         <AnalyzeResults
           key={result.report.generatedAt}
           report={result.report}
+          sources={result.sources ?? []}
+          prepareFixPlan={prepareFixPlan}
           headingRef={resultsHeadingRef}
           downloadReportFile={downloadReportFile}
           onClear={handleClear}
