@@ -6,7 +6,7 @@ import type { FileAnalysis } from './engine'
 export const REPORT_LIMITATIONS = [
   'This is a static analysis. Nothing was executed and no finding was verified by running the code.',
   'Uploaded source stayed in this browser tab; BugPilot did not upload or store it.',
-  'No type checking, data-flow analysis or full linter ran. Each file lists the tiers that were actually available.',
+  'No type checking or data-flow analysis ran. A linter is used only where the file coverage says so, and it reads one file at a time.',
   'A file with no findings was not proven correct; it only means no enabled rule matched.',
 ]
 
@@ -43,6 +43,8 @@ export interface ReportBuildInput {
   skipped: readonly ArchiveSkippedEntry[]
   analyses: readonly FileAnalysis[]
   coverage: readonly FileCoverage[]
+  /** Engine-specific honesty lines: what did not run this time, and why. */
+  extraLimitations?: readonly string[]
 }
 
 export function buildReport(input: ReportBuildInput): AnalyzerReport {
@@ -61,7 +63,7 @@ export function buildReport(input: ReportBuildInput): AnalyzerReport {
     summary: summarizeFindings(findings),
     findings,
     coverage: [...input.coverage],
-    limitations: [...REPORT_LIMITATIONS],
+    limitations: [...REPORT_LIMITATIONS, ...(input.extraLimitations ?? [])],
   }
 }
 

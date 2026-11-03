@@ -1,5 +1,7 @@
 import { detectLanguage } from '../archive/classify'
 import type { ArchiveEntry, ArchiveSkippedEntry } from '../archive/guard'
+import type { EngineId } from '../engines/registry'
+import type { EngineParseStatus } from '../engines/protocol'
 import { isTsFamily, languageLabel, tierAvailability } from '../languages'
 import type { CoverageTier, FileCoverage } from '../types'
 import type { FileAnalysis } from './engine'
@@ -8,6 +10,17 @@ export interface TypeScriptStatus {
   ran: boolean
   reason: string
 }
+
+/** What the deep engines did (or refused to do) with one file. */
+export interface EngineStatus {
+  enginesRan: EngineId[]
+  parse: EngineParseStatus
+  reason: string
+  notes: string[]
+}
+
+export const ENGINES_NOT_RUN_REASON =
+  'The deep engines were not used for this upload; only the built-in rules ran.'
 
 const SKIPPED_TIERS: CoverageTier[] = [
   {
@@ -55,6 +68,7 @@ export function buildCoverage(
   skipped: readonly ArchiveSkippedEntry[],
   analyses: readonly FileAnalysis[],
   typescript: ReadonlyMap<string, TypeScriptStatus> = new Map(),
+  engines: ReadonlyMap<string, EngineStatus> = new Map(),
 ): FileCoverage[] {
   const byFile = new Map(analyses.map((analysis) => [analysis.file, analysis]))
   const coverage: FileCoverage[] = []
@@ -62,6 +76,7 @@ export function buildCoverage(
   for (const entry of entries) {
     const analysis = byFile.get(entry.name)
     const ts = typescript.get(entry.name)
+    const engine = engines.get(entry.name)
     const tiers = tierAvailability(entry.language).map((tier) => {
       if (tier.tier === 'pattern') {
         return { ...tier, ran: analysis !== undefined }
@@ -72,6 +87,9 @@ export function buildCoverage(
       }
       if (isTsFamily(entry.language) && ts) {
         return { ...tier, ran: ts.ran, reason: ts.reason }
+      }
+      if (engine) {
+        return { ...tier, ran: engine.enginesRan.includes('tree-sitter'), reason: engine.reason }
       }
       return tier
     })
@@ -87,7 +105,12 @@ export function buildCoverage(
       findings: analysis?.findings.length ?? 0,
       tiers,
       skipReason: null,
-      notes: [...(analysis?.notes ?? []), ...encodingNote(entry), ...languageSourceNote(entry)],
+      notes: [
+        ...(analysis?.notes ?? []),
+        ...(engine?.notes ?? []),
+        ...encodingNote(entry),
+        ...languageSourceNote(entry),
+      ],
     })
   }
 

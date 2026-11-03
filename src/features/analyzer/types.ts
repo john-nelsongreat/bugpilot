@@ -27,7 +27,7 @@ export interface AnalyzerFinding {
   /** Deterministic for the same file bytes, rule and line. */
   id: string
   ruleId: string
-  analyzer: 'bugpilot-rules' | 'typescript'
+  analyzer: 'bugpilot-rules' | 'typescript' | 'tree-sitter' | 'ruff'
   tier: AnalyzerTier
   severity: Severity
   confidence: DiagnosticConfidence
