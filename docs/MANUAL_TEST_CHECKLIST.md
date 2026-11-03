@@ -1508,7 +1508,7 @@ Run this after the saved-diagnosis flow above. Save a diagnosis again if the ear
 - [ ] At 1440 × 900 in both themes, repeat the preview and confirm the dialog is centered and readable.
 - [ ] Confirm the 5 MB, 5,000-report, newer-schema, and zero-valid-report paths in the automated tests; do not create multi-megabyte fixtures by hand.
 
-## 14. Code analysis (slice A)
+## 14. Code analysis
 
 Use a disposable profile and keep DevTools open. Create every sample file and archive in a scratch folder **outside this repository**. The page never executes uploaded code, and no sample needs to be committed.
 
@@ -1518,7 +1518,8 @@ Create a folder named `analyze-sample` with these files. Invent the fake key you
 
 - `app.js` containing `const total = ;` — a JavaScript syntax error.
 - `main.ts` containing `function add(a: number) { return a + }` — a TypeScript syntax error.
-- `secret.py` containing a Python assignment to a made-up AWS-style key: the prefix `AKIA` followed by sixteen invented uppercase letters and digits.
+- `secret.py` containing `AWS_ACCESS_KEY = "AKIA"` followed by sixteen invented uppercase letters and digits — a Python assignment to a made-up AWS-style key.
+- `tabs.py` with mixed indentation: a function whose first body line starts with a tab and whose later lines use spaces.
 - `broken.json` containing `{ "name": "demo", }` — a trailing comma, so JSON parsing fails.
 - `conflict.js` containing a merge conflict: `<<<<<<< HEAD`, `const value = 1`, `=======`, `const value = 2`, `>>>>>>> other`.
 - `empty-catch.py` containing `except ValueError: pass` under a `try` block.
@@ -1554,6 +1555,44 @@ Zip the folder as `analyze-sample.zip`.
   - Expected: both start the same analysis; the drag highlight clears when the pointer leaves.
 - [ ] Start a large folder or zip, then click **Cancel**.
   - Expected: **Analysis cancelled** says nothing was kept; no results panel appears; no report downloads are offered.
+
+### Fix selection, defaults, and the diff review
+
+Upload the sample folder in a fresh state and wait for **Step 2 · Automatic fixes**.
+
+- [ ] Expected defaults: the trailing-comma change in `broken.json` is the only safe change and is ticked; the credential lookup in `secret.py`, the `http://` → `https://` change in `notes.txt`, and the indentation change in `tabs.py` are `needs-review` and unticked; the syntax errors, merge conflict, empty catch and TODO have no checkbox and keep their manual-only text.
+- [ ] Expected summary: **1 change selected in 1 file** and **Review changes** is enabled. Untick the safe change → **0 changes selected in 0 files**, the button is disabled, and the note reads **Select at least one change to open the review.** Tick it again.
+- [ ] Tick the credential change. Expected: the card shows the rotate sentence verbatim, and the summary updates to **2 changes selected in 2 files**. Tick the `tabs.py` and `notes.txt` changes too for a multi-file diff.
+- [ ] Click **Review changes**. Expected: focus moves to **Diff of N proposed changes in M files**; unified and side-by-side controls are present; files are collapsible sections listing their causing findings; rows carry line numbers and `+`/`-` glyphs plus visually hidden *added*/*removed* text.
+- [ ] Click **Side by side** at a wide window, then **Unified**. Narrow the window below 720 px: **Side by side** becomes disabled with the width explanation and the unified diff stays.
+- [ ] Use **Previous change** and **Next change**, then repeat with `Tab` to the same buttons and `Enter` or `Space`. Expected: the counter moves, the matching row receives focus, and `Tab` order follows the sections.
+- [ ] Search the page for the full fake key (`Ctrl+F`). Expected: it is not found. Removed credential lines show first character, an ellipsis, and the last character, with no reveal control.
+- [ ] While the review is open, run `document.querySelectorAll('[style]').length` in the Console. Expected: `0`, with no inline-style CSP violation.
+
+### Clean export and the patch round trip
+
+- [ ] In **Step 3 · Clean export**, confirm all four outputs are ticked and the warning says **changes.patch contains your original lines** and that it may contain the original credential. Untick every output: the button is disabled and says **Tick at least one output to build.** Tick all four again.
+- [ ] Click **Build clean export**. Expected: five download buttons appear (changes.patch, clean.zip, CHANGELOG.md, report.md, report.json) and the count names the files and fixed files.
+- [ ] Download all five. Expected: each button works with the mouse and, after repeating the flow, with the keyboard. A polite status names the file just downloaded.
+- [ ] Open `CHANGELOG.md`, `report.md`, `report.json`, and `MANIFEST.md` inside the zip and search for the full fake key. Expected: never present. The changelog lists finding id, rule id, file, line range, risk class, description, behaviour warnings and the rotate warning. The report has an **Included fixes** section. The manifest says the zip is not a full project copy and recommends `changes.patch`.
+- [ ] Open `changes.patch`. Expected: per-file `--- a/...` and `+++ b/...` sections; it **does** quote the original credential line, which is why the warning exists. Do not share it.
+- [ ] Copy `analyze-sample` to a scratch Git repository, commit it, then apply the downloaded patch:
+  ```bash
+  git init
+  git add -A
+  git commit -m "sample before BugPilot"
+  git apply --check changes.patch
+  git apply changes.patch
+  git status --short
+  ```
+  Expected: `--check` exits 0; after applying, `broken.json` parses, `secret.py` reads the environment instead of the invented key, `notes.txt` uses `https://`, and `tabs.py` has one indentation style. All changed files are listed as modified.
+- [ ] Unzip `clean.zip` in a separate folder and compare its text files byte for byte with the applied repository (`git diff --no-index <folder> <folder>` or `cmp`). Expected: identical for the analysed text files; the zip has no `image.png`, `node_modules`, or `big.log`.
+- [ ] Run `git apply -R changes.patch` and then `git status --short`. Expected: no output — the originals are restored byte for byte.
+- [ ] Guard-failure check: reload `/analyze`, select at least one change, and before clicking **Build clean export** run this in the Console to make the re-verification analyzer unavailable:
+  ```js
+  window.Worker = class { constructor() { throw new Error('guard test: worker blocked') } }
+  ```
+  Click **Build clean export**. Expected: **Clean export blocked** with a message that the change **did not verify again**, names the worker failure, says the export was blocked, and offers **Download report only**. No patch, zip or changelog download button appears. Reload the page afterwards to restore `Worker`.
 
 ### Hostile archives and the declared limits
 
@@ -1612,11 +1651,11 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
   await snapshot()
   ```
   Copy the result. Do not toggle the theme and do not navigate during the check. The footer rotates a session-only joke index every 60 seconds, so finish within a minute or repeat behind a clock; that footer key is the only thing allowed to change.
-- [ ] Run an analysis, use both filters, download both reports (with and without snippets), and click **Clear results**.
+- [ ] Run an analysis, use both filters, download both reports (with and without snippets), tick fixes, open the review, build the clean export, download every output, and click **Clear results**.
 - [ ] Run `await snapshot()` again and compare.
   - Expected: identical strings; `databases` is still empty. `localStorage.getItem('bugpilot.bugs.v1')` is byte-for-byte unchanged.
-- [ ] With DevTools Network open, clear the log after the page has loaded, then upload a small file.
-  - Expected: the only requests are same-origin JavaScript module requests for the site's own analyzer/worker chunks, shown as coming from this origin. There is no request to another host, no POST, and no request whose URL or body contains uploaded file names or contents. Export, filters, and **Clear results** add no request.
+- [ ] With DevTools Network open, clear the log after the page has loaded, then upload a small file, select a fix, open the review, and build the clean export.
+  - Expected: the only requests are same-origin JavaScript module requests for the site's own analyzer, review, export and worker chunks, shown as coming from this origin. There is no request to another host, no POST, and no request whose URL or body contains uploaded file names or contents. The diff review, downloads, filters, and **Clear results** add no request.
 - [ ] Open **Bug log** and the seeded checkout report. Expected: the same reports and saved diagnosis as before; code analysis did not change them. Run one Assistant example and expected: unchanged behaviour.
 - [ ] Navigate away from `/analyze` and back, and reload the page.
   - Expected: the result does not return; no report is stored.
@@ -1625,14 +1664,14 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
 
 - [ ] With the keyboard only, tab to **Analyze code** in the primary navigation and press `Enter`.
 - [ ] Tab to **Choose files** and press `Enter`; choose a small file in the operating-system picker.
-  - Expected: the flow completes; focus moves to the results heading; `Tab` reaches both filters, the snippet checkbox, both download buttons, **Clear results**, and the coverage `<details>` summary. Every stop has a visible focus ring.
+  - Expected: the flow completes; focus moves to the results heading; `Tab` reaches both filters, the snippet checkbox, both download buttons, every fix checkbox, **Review changes**, the diff toolbar, **Previous/Next change**, **Build clean export**, each download button, **Clear results**, and the coverage `<details>` summary. Every stop has a visible focus ring.
 - [ ] Open the coverage summary with `Enter` and close it with `Enter`.
-- [ ] At 1440 × 900 in the light theme, upload the sample folder. Expected: no control is clipped; the page looks consistent with the rest of the app.
-- [ ] At 320 CSS px in the dark theme, upload the sample folder and run:
+- [ ] At 1440 × 900 in the light theme, upload the sample folder and open the review. Expected: no control is clipped; the page looks consistent with the rest of the app.
+- [ ] At 320 CSS px in the dark theme, upload the sample folder, open the review, and run:
   ```js
   ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth })
   ```
-  Expected: `scrollWidth <= clientWidth`; findings, filters, export controls, and coverage stack without horizontal page scroll or clipped buttons. Long code evidence may scroll inside its own block, never the page.
+  Expected: `scrollWidth <= clientWidth`; findings, fix cards, filters, export controls, review toolbar, and coverage stack without horizontal page scroll or clipped buttons. Long diff lines wrap inside their row or scroll inside `.fix-diff-scroll`, never the page.
 - [ ] In both themes, confirm severity and confidence are not conveyed by colour alone — each badge also has its text — and that the redacted secret remains readable.
 
 ## 15. Production preview
