@@ -1556,6 +1556,70 @@ Zip the folder as `analyze-sample.zip`.
 - [ ] Start a large folder or zip, then click **Cancel**.
   - Expected: **Analysis cancelled** says nothing was kept; no results panel appears; no report downloads are offered.
 
+### Deep analysis engines (WebAssembly)
+
+The deep pass is a second run over the same upload. Keep DevTools open with the Network tab cleared after the page loads, and create this second scratch folder **outside this repository**, named `deep-sample`. The syntax-error files are meant to be broken; do not repair them.
+
+- `app.py` — `def load(:` on the first line, so Python cannot parse it at all.
+- `imports.py` — an unused `import` at the top and a variable assigned and never read.
+- `pw.py` — `password = ` followed by a value **you make up on the spot** (mix letters and digits, at least ten characters). Do not reuse any real credential, and do not put this folder under version control.
+- `Service.java` — a `try`/`catch` whose handler has an empty block.
+- `main.go` — a `return` followed by a statement it can never reach.
+- `api.php` — a SQL string built with `.` concatenation from a `$_GET` value, passed straight into `$conn->query(...)`.
+- `queries.py` — the same shape in Python: `cursor.execute("SELECT ... " + user_id)`, where the AST rule and Ruff's S608 both have an opinion.
+- `cond.c` — `if (x = 0)` (an assignment inside a condition).
+- `build.sh` — a script with a missing quote at the end.
+- `page.html` — an `<a>` whose `href="` quote is never closed, which the HTML grammar marks as an error. (A page whose only mistake is *unclosed tags* is legal to that grammar and produces no finding; the README says so rather than pretending otherwise.)
+- `theme.css` — a declaration missing its closing brace.
+- `config.yaml` — a sequence whose indentation is inconsistent. This one is a deliberate negative: the YAML grammar is on the "cannot be trusted to be error-free for valid files" list, so BugPilot records it as missing coverage instead of as a bug.
+- `notes.md` and `data.json` — files with no deep engine, to confirm they are left out of the plan.
+
+- [ ] Upload `deep-sample` with **Choose a folder** and wait for the built-in pass to finish.
+  - Expected: the summary heading **Results for N files** appears, and only then does the panel **Deep analysis engines** appear under the eyebrow **Optional second pass**.
+  - Expected in Network: the only engine-related request so far is `/assets/engines/manifest.json`. No `.wasm` file and no engine script has been requested — nothing heavy loads before the button is pressed.
+  - Expected: the panel's prose says the built-in pattern rules have already run, that the engines run as WebAssembly inside the tab, and that "your code is still not uploaded, not stored, and not executed".
+- [ ] Read the file list in the panel.
+  - Expected: one row per file this upload needs — **Worker loader script**, **Analysis worker script**, **tree-sitter runtime**, one row per grammar (`Bash grammar`, `C grammar`, `CSS grammar`, `Go grammar`, `HTML grammar`, `Java grammar`, `PHP grammar`, `Python grammar`, `YAML grammar`), and **Ruff (Python linter)** — each with `… compressed` after a size.
+  - Expected: markdown and JSON have no grammar row, because no engine reads them.
+  - Expected: the total line reads **About 4.2 MiB in total, compressed, served by this site.** for this folder. Compare each quoted size with `dist/assets/engines/manifest.json` (`node -e "console.table(require('./dist/assets/engines/manifest.json').files)"` from the `bugpilot` folder): the numbers are the build's own, not a hand-written table.
+- [ ] Click **Cancel, keep the pattern-rule report**.
+  - Expected: the panel disappears, the built-in findings and both downloads stay, and no `.wasm` request is made at any point.
+  - Expected: in the coverage panel the syntax tier of every engine language now reads `not available: The deep engines were not used for this upload; only the built-in rules ran.`
+- [ ] Upload `deep-sample` again and click **Run deep analysis**.
+  - Expected in Network: the engine scripts and exactly the quoted `.wasm` files are fetched from this origin, with `Content-Type: application/wasm` and the engine security headers (section 17); then the run proceeds.
+  - Expected progress: **Running deep analysis engines** with **Deep engines: probing WebAssembly support.** first, then **Deep engines: checking <file>.** and a file counter; **Cancel** stays available during the pass.
+  - Expected: the results are replaced by the deep report — the built-in findings are still there, plus engine findings.
+- [ ] Check the findings per language.
+  - `app.py`: a High syntax finding whose message starts **Syntax error:**; the tier row for `app.py` shows the syntax tier ran.
+  - `imports.py`: pattern-tier findings that name the Ruff codes, e.g. `(F401)` for the unused import and `(F841)` for the unread assignment.
+  - `pw.py`: a Critical finding for a possible hardcoded password. Expected: neither the message nor the evidence quote contains the value you typed.
+  - `Service.java`: the empty-catch finding; `main.go`: the unreachable-code finding; `api.php`: the SQL-concatenation finding; `cond.c`: the assignment-in-condition finding. Each names its `bugpilot/ast/…` rule and its tier.
+  - `queries.py`: the same SQL-concatenation rule, and where Ruff reports the same line the two are merged into one finding. The `Service.java` row also carries the line "1 pattern match(es) on this file were replaced by the syntax-tree result for the same line." — that is the de-duplication note, not an error.
+  - `build.sh`, `page.html`, `theme.css`: a syntax finding each, at the line the grammar points at. Spot-check one: the line number in the finding matches the broken line in the file, and the evidence is that line.
+  - `config.yaml`: **no** syntax finding, and an explicit note in the coverage panel instead — "The yaml grammar reported N construct(s) it could not match, starting at line 2 … recorded as missing coverage instead of as a bug." A grammar that also rejects valid files must not be allowed to raise a bug report.
+  - Expected: no engine finding carries a checkbox. Ruff's WebAssembly build offers no fixes, so Python rows are text-only and their risk class is `manual-only`.
+- [ ] Open the coverage panel (**What was and was not checked**).
+  - Expected: `— ran` for both tiers on every engine language, `Syntax — not available: No Markdown syntax engine is bundled.` on `notes.md`, and the YAML note above on `config.yaml`.
+  - Expected in the **exported** `report.json` (and the markdown export) under `limitations`: "No type checking or data-flow analysis ran. A linter is used only where the file coverage says so, and it reads one file at a time." Each Python finding also carries its own limitation naming the Ruff code and saying it does not follow values.
+  - Expected: `notes.md` and `data.json` are listed as pattern-rule-only or skipped, never as "checked by the deep engines".
+- [ ] In the page Console (top frame, not the worker) run:
+  ```js
+  await WebAssembly.compile(new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 0]))
+  ```
+  - Expected: **refused** by `script-src` with a CSP error mentioning `wasm-unsafe-eval`. That refusal is the proof that the main document keeps the unscoped policy while the engine worker is allowed to compile. Do not "fix" it by adding `'wasm-unsafe-eval'` to the main policy.
+- [ ] Simulate a browser that cannot compile WebAssembly. Serve the same `dist/` from the temporary header server used in section 17, but edit **only the engine rule's** `script-src` in that server's copy of the configuration, removing `'wasm-unsafe-eval'`. The engine worker then starts under a policy that refuses `WebAssembly.compile`, which is exactly what an unsupported or hardened browser does.
+  - Expected: the report still renders with every built-in finding, and an alert appears whose heading is **Deep engines did not run** and whose sentence is verbatim: **Deep analysis engines are unavailable in this browser or blocked by its security policy; basic checks still ran** — followed by **The findings above come from the pattern rules and cover all N analysed file(s). Syntax-tree and linter checks were not possible here.**
+  - Expected: the same sentence is in the report limitations, so it reaches `report.json` and `report.md`. Restore the configuration afterwards.
+  - Expected: the deep pass offers no second **Run deep analysis** button — the gate is not shown again for a result that came from a deep run — while **Clear results** still works, so the reader can start over.
+  - Measured here on 2026-11-03 (same build, header server on port 4188 with `'wasm-unsafe-eval'` removed from the engine rule only): the alert appeared with the verbatim sentence, `report.json` carried it in `limitations`, **no** `.wasm` file was requested after the probe failed, findings stayed at 7 before and after, and every engine file read `Syntax — not run: WebAssembly was refused by this browser or its security policy, so no deep engine ran on this file.`
+- [ ] Second degradation path, for completeness: block the URL pattern `assets/engines/*` in DevTools → Network → **Request blocking**, reload `/analyze`, upload `deep-sample` and press **Run deep analysis**.
+  - Expected: the built-in findings and both downloads still work and nothing is stored. The wording is **not** the sentence above, and that is deliberate: nothing was refused by the policy, the engine script simply never arrived, so each engine file reads `Syntax — not run: The deep-engine worker could not start (Failed to fetch dynamically imported module: <the engine client URL>).` and there is **no** page-level **Deep engines did not run** alert. `report.json` keeps only the standard limitation list and claims no engine finding.
+  - Measured here on 2026-11-03 (harness aborts `/assets/engines/**` after the manifest and the client script both fail): findings 7 → 7, no page-level alert, 2 failed requests logged in the Console as `net::ERR_FAILED`, and the same per-file message as above. Two browser console errors in this run are the harness's own blocked requests, not a defect.
+- [ ] Run a deep pass on the slice A `analyze-sample` folder and then a **Build clean export**.
+  - Expected: the patch, zip, changelog and both reports contain only the built-in safe fixes; no Ruff or tree-sitter finding is proposed as a change, and the engine findings do not appear as fixes.
+- [ ] While the deep pass runs, upload nothing else and watch Storage.
+  - Expected: `localStorage.getItem('bugpilot.bugs.v1')` is unchanged, no new key or IndexedDB database appears, and DevTools Network shows only requests to this origin — no request carries a file name or file contents.
+
 ### Fix selection, defaults, and the diff review
 
 Upload the sample folder in a fresh state and wait for **Step 2 · Automatic fixes**.
@@ -1702,6 +1766,7 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
 - [ ] Toggle the theme, navigate away and back, and reload. Expected: the theme persists for `localhost:4173`.
 - [ ] Analyze the Python `ModuleNotFoundError` example and the JavaScript `ReferenceError: userCount is not defined` example. Expected: both results render, with the same categories and confidence as in development.
 - [ ] On **Analyze code**, upload the small sample folder from section 14 and download both report formats. Expected: the same findings and exports as in development, with no CSP message about the analyzer, TypeScript, or worker chunks, and no request to another origin.
+- [ ] On the preview, upload `deep-sample` and press **Run deep analysis**. Expected: the pass completes and engine findings appear. The preview server does **not** read `vercel.json`, so it sends no CSP at all — this run proves only that the built engine chunks and `.wasm` files resolve and load from `dist/`; the policy itself is section 17's job. Watch Network anyway: every engine request is same-origin. Transfer sizes here are the raw ones, because the preview server does not compress; section 17 covers the gzip figures the gate quotes.
 - [ ] On **Bug log**, click **Export reports** and confirm the production build downloads a valid `bugpilot-export-YYYY-MM-DD.json` file. Open **Import reports**, choose that file, and expected: the preview matches the five sample reports and **Already in your log: 5**. Click **Add reports** and expected: **Import complete. Added 0, skipped 5, replaced 0.**, with no sample notice and no external request.
 - [ ] Scroll to the footer and expected: a page-specific joke is present.
 - [ ] Check the Console. Expected: no errors during load or navigation.
@@ -1787,7 +1852,16 @@ Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a devic
 
 ## 17. Security headers
 
-These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 15) reads that file, so a local preview will not show them. **Until the commit that adds the policy has been deployed and this section has been run, do not assume the live site sends it.** This section was added before the production response was inspected.
+These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 15) reads that file, so a local preview will not show them. **Until the commit that changed the policy has been deployed and this section has been run, do not assume the live site sends it.** To check the policy before deploying, serve `dist/` from a temporary Node server that reads `vercel.json` and applies its rules literally; that proves the policy fits the build, not that the host is sending it.
+
+### Two policies, one path each
+
+`vercel.json` now has two header rules, distinguished only by their `source`:
+
+- `/((?!assets/engines/).*)` — every path **except** the engine folder. `script-src 'self'`, no WebAssembly allowance, so the main document cannot compile one.
+- `/assets/engines/(.*)` — the engine scripts, worker entry and `.wasm` files only. Identical apart from `script-src 'self' 'wasm-unsafe-eval'`.
+
+Both rules carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and `Permissions-Policy`. Browsers intersect repeated `Content-Security-Policy` headers, so a path that matched both rules would lose WebAssembly entirely; **no path may be claimed by two rules**, and `scripts/check-live.mjs` fails if one is.
 
 ### Header response
 
@@ -1804,10 +1878,21 @@ These checks apply to the deployed Vercel site. The headers are defined in `verc
     - `X-Frame-Options`: `DENY`
     - `Permissions-Policy`: `camera=(), microphone=(), geolocation=()`
   - If `-Method Head` is rejected with a 405, repeat with `-Method Get` and read only `.Headers`; do not save the response body.
-- [ ] Repeat the command for the root `https://bugpilot-lac.vercel.app/`, for `https://bugpilot-lac.vercel.app/assistant`, and for a missing path such as `https://bugpilot-lac.vercel.app/missing-page`. Expected: all return the same CSP; deep links and the SPA fallback load the app instead of a 404.
-- [ ] Compare the policy with the block in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src`, no `'unsafe-eval'`, and no external hosts. Whitespace after semicolons is not significant.
-- [ ] If the header is missing, first confirm the deployment is actually the commit that changed `vercel.json`, and that Vercel marks it **Ready** as the current production deployment. Wait for the deployment to settle, hard-reload, and repeat. Do not conclude that the header works from the local preview or from the source file alone.
-- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: that one test file passes with no failures. This checks the committed configuration, not the live response.
+- [ ] Repeat the command for the root `https://bugpilot-lac.vercel.app/`, for `https://bugpilot-lac.vercel.app/assistant`, for `https://bugpilot-lac.vercel.app/analyze`, and for a missing path such as `https://bugpilot-lac.vercel.app/missing-page`. Expected: all return the same CSP; deep links and the SPA fallback load the app instead of a 404.
+- [ ] Take one engine asset from the build and request its own URL (list `dist/assets/engines/`, then ask the live site for one script and one `.wasm` file):
+
+  ```powershell
+  (Invoke-WebRequest -Uri https://bugpilot-lac.vercel.app/assets/engines/manifest.json -Method Head -UseBasicParsing).Headers
+  ```
+
+  - Expected: `Content-Security-Policy` for this path differs from the app routes in exactly one place — `script-src 'self' 'wasm-unsafe-eval'` — and the other four headers match them.
+  - Expected: the `.wasm` response carries `Content-Type: application/wasm` and `X-Content-Type-Options: nosniff`.
+  - Expected: `manifest.json` returns JSON listing every engine file with `path`, `kind`, `language`, `rawBytes` and `gzipBytes`, and every `path` in it starts with `/assets/engines/` (or `assets/engines/`).
+- [ ] Confirm the two rules do not overlap. Expected: the app-route response above contains **no** second `Content-Security-Policy` header, and the engine response contains exactly one. Two intersected policies on one path is a finding: the deep pass silently loses `'wasm-unsafe-eval'`.
+- [ ] Compare both policies with the blocks in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src` anywhere, no `'unsafe-eval'` anywhere, and `'wasm-unsafe-eval'` on the engine paths only. `connect-src`, `object-src`, `base-uri`, `form-action` and `frame-ancestors` are identical in both. Whitespace after semicolons is not significant.
+- [ ] If the header is missing or the engine policy lacks `'wasm-unsafe-eval'`, first confirm the deployment is actually the commit that changed `vercel.json`, and that Vercel marks it **Ready** as the current production deployment. Wait for the deployment to settle, hard-reload, and repeat. Do not conclude that the header works from the local preview or from the source file alone.
+- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: that one test file passes with no failures. It asserts both policy strings and both `source` patterns character-for-character, plus that no unsafe source appears — this checks the committed configuration, not the live response.
+- [ ] Run `node scripts/check-live.mjs` (optionally `LIVE_URL=http://127.0.0.1:<port> node scripts/check-live.mjs` against the temporary header server). Expected: the **Engine manifest** and **Engine headers** checks pass, every engine asset is same-origin with the engine policy, and the script exits `0`.
 
 ### Browser console check on every page
 
@@ -1820,4 +1905,9 @@ These checks apply to the deployed Vercel site. The headers are defined in `verc
   - Expected in WebKit/Safari: each `<select>` created by JavaScript produces one `style-src-attr` message (4 on `/bugs`, 3 on `/bugs/new`, 1 on a report detail and on `/assistant`). A minimal page that only calls `document.createElement('select')` reproduces this, so it is WebKit's own form-control handling, not an inline style written by the app. Treat any other CSP message — especially `style-src-elem`, or one whose source points to an element the app styled — as a real finding. Confirm that `<html>` has no `style` attribute after toggling the theme.
 - [ ] In both themes, repeat the main flows on the live site: create, edit, delete with confirmation, search/filter/sort, fix states, Python and JavaScript analyses plus **Copy code**, code analysis upload and both report downloads, export download, import preview and merge, toast, joke rotation, keyboard focus, and both dialogs.
   - Expected: behaviour matches the local build; the Console still has no CSP errors, and Network still shows only the site's own origin.
+- [ ] On the live site, run the deep pass from section 14 on `deep-sample` in a fresh Chromium profile with the Console set to **Preserve log**.
+  - Expected: **0** CSP violations. The engine worker compiles WebAssembly under its own policy, the `.wasm` files load as `application/wasm`, and the report shows engine findings.
+  - Expected: the page Console's own `WebAssembly.compile` call is still refused — that single refusal is the scoping working, and it is not a violation to "fix". A violation that says `wasm-unsafe-eval` **inside the deep pass** means the engine rule is not being applied to that path; check the `source` patterns before touching the policy.
+  - Repeat in Firefox and in Playwright WebKit (approximates Safari; physical Safari is untested). Expected: the same 0 violations on the deep pass; WebKit's per-`<select>` `style-src-attr` noise is unrelated to the engines and unchanged in count.
+- [ ] Compare the bytes actually moved with the gate's numbers. The gate quotes **build-time gzip sizes** (from `manifest.json`), so a local server that does not compress sends the raw bytes — for the same nine-language upload that is about **14.2 MiB transferred against 4.2 MiB quoted**, and Vercel serves the compressed figure. Expected: on the live site the `Content-Encoding` of an engine asset is `gzip` (or `br`), and the quoted total is the honest download size for a visitor.
 - [ ] If a violation appears, copy the complete console message (directive, blocked URL, and source file) before changing anything. Do not add `'unsafe-inline'`, `'unsafe-eval'`, or a broad external host as the first response. Identify the resource, add only the narrowest source or remove the dependency, then repeat the local checks and this section.

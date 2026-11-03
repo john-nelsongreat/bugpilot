@@ -27,7 +27,7 @@ This repository contains a working MVP, not a hosted service: the live demo is a
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
 - **Debug Assistant** at `/assistant`, backed by a local rule engine with 16 Python rules, 14 JavaScript rules, and one language-neutral Git rule. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
 - **Saved diagnoses**: after a recognised analysis loaded from a report, the Assistant previews every field and writes one diagnosis to that report when confirmed. The bug detail shows the category, signature, confidence, selected evidence, and saved date, and can remove the diagnosis without touching the proposed fix, fix state, status, or verification notes.
-- **Code analysis** at `/analyze`: upload a folder, a `.zip`, or loose files and get findings from 16 registered pattern/syntax rules plus a lazy TypeScript syntax check, with per-file coverage, skipped-file reasons, severity/file filters, and `report.md`/`report.json` downloads. Four deterministic fixers (credentials, JSON trailing commas, plain-`http://` URLs, mixed indentation) propose changes that are re-verified on in-memory copies; a lazy unified/side-by-side diff review follows, then an isolated clean export (`changes.patch`, `clean.zip`, `CHANGELOG.md`, and the report). Everything runs in the tab in web workers; uploaded text is never executed, uploaded, or persisted, and report exports contain no evidence quotes unless the user ticks the snippet box. See [Code analysis](#code-analysis).
+- **Code analysis** at `/analyze`: upload a folder, a `.zip`, or loose files and get findings from 16 registered pattern/syntax rules plus a lazy TypeScript syntax check, with per-file coverage, skipped-file reasons, severity/file filters, and `report.md`/`report.json` downloads. An opt-in second pass loads WebAssembly grammars (tree-sitter, 16 languages) and the Ruff Python linter in the tab, and quotes every file's size before downloading any of it. Four deterministic fixers (credentials, JSON trailing commas, plain-`http://` URLs, mixed indentation) propose changes that are re-verified on in-memory copies; a lazy unified/side-by-side diff review follows, then an isolated clean export (`changes.patch`, `clean.zip`, `CHANGELOG.md`, and the report). Everything runs in the tab in web workers; uploaded text is never executed, uploaded, or persisted, and report exports contain no evidence quotes unless the user ticks the snippet box. See [Code analysis](#code-analysis).
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
 - **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete, import, remove-diagnosis, and save-diagnosis dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
@@ -99,7 +99,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 - Tested in Chromium on Windows only; Firefox, Safari, and physical mobile devices are not covered.
 - No screen-reader pass yet; NVDA, Narrator, JAWS, and VoiceOver remain untested. See [Accessibility](#accessibility) for the full list.
 - The assistant recognises only the 31 documented rules: 16 Python, 14 JavaScript, and one language-neutral Git rule.
-- Code analysis is static: JavaScript/TypeScript is parsed for syntax only, JSON for strict syntax only, and every other language gets pattern rules without a parser. Automatic changes cover only the four fixers listed in [Automatic fix proposals](#automatic-fix-proposals); every other finding is manual-only. It is not a security audit and does not prove a file is safe.
+- Code analysis is static. JavaScript/TypeScript is parsed for syntax only, JSON for strict syntax only, and 16 further languages can be parsed by the opt-in WebAssembly grammars — which are parsers and a linter, not type checkers, and report nothing about Scala, TOML, XML, Markdown or plain text. Measured over the spike corpus, the whole pipeline found 34 of 174 seeded defects (19.5%), and 58 of the misses need type or data-flow analysis this app deliberately does not run. Automatic changes cover only the four fixers listed in [Automatic fix proposals](#automatic-fix-proposals); every engine finding and every Python finding is manual-only. It is not a security audit and does not prove a file is safe.
 
 ## Tech stack
 
@@ -116,6 +116,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 | Linting | oxlint 1.88.0 |
 | Archives | fflate 0.8.3 (MIT), used by the streaming zip reader and the clean-export zip writer |
 | Diffs | `diff` 9.0.0 (jsdiff, BSD-3-Clause), used only by the lazy review and clean-export chunks |
+| Analysis engines | `web-tree-sitter` 0.27.1 and `tree-sitter-wasm` 2.0.4 (16 grammars), plus `@astral-sh/ruff-wasm-web` 0.17.3 — all MIT, all WebAssembly, all lazy and opt-in. See [Engine licences](docs/ENGINE-LICENCES.md) |
 | Storage | Browser `localStorage` and `sessionStorage` only |
 
 ## Requirements
@@ -178,26 +179,55 @@ No environment variables or backend are required. Bug reports are stored in each
 
 ### Content Security Policy
 
-`vercel.json` sends this policy on every route, in the same global `/(.*)` header rule as the other security headers:
+`vercel.json` carries **two** header rules. The main-document rule is the pre-engine policy
+character-for-character, with only the engine directory carved out of its catch-all; a second,
+scoped rule adds `'wasm-unsafe-eval'` for the files under `assets/engines/` and nothing else.
 
 ```text
+source: /((?!assets/engines/).*)
 default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+source: /assets/engines/(.*)
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
+
+Both rules send the same four other headers: `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`,
+`Permissions-Policy: camera=(), microphone=(), geolocation=()`.
+
+**Why the allowance is scoped, not global.** WebAssembly needs `wasm-unsafe-eval` in
+`script-src`; `'unsafe-eval'` was never considered and `blob:` was not added. The change was
+kept out of the document policy because the page itself has no WebAssembly need — only the two
+engine worker scripts and the `.wasm` files they load do — and because a global allowance would
+have let any future injected script in the document compile WebAssembly, which is a strictly
+larger attack surface than "the four engine files can". The scoping is done with a negative
+lookahead in the main rule's `source`, so the two rules never both claim a path: a path under
+`assets/engines/` matches only the engine rule, everything else only the main rule. That matters
+because a browser **intersects** repeated `Content-Security-Policy` headers, so an overlapping
+rule would have silently re-blocked WebAssembly. `scripts/check-live.mjs` therefore resolves
+each rule against the path it probes and fails if a path is claimed by more than one rule.
+
+`src/csp.test.ts` asserts both strings exactly, asserts the main policy is the pre-engine
+string, asserts the only difference between the two is the `'wasm-unsafe-eval'` source, asserts
+neither policy contains `'unsafe-inline'`, `'unsafe-eval'`, `blob:`, `data:` in `script-src` or
+a wildcard source, and asserts that the two `source` patterns are mutually exclusive for a
+sample of real built paths.
 
 | Directive | Why it is set |
 | --- | --- |
 | `default-src 'self'` | Fallback for any fetch directive not listed below; only this origin is allowed. |
-| `script-src 'self'` | The build loads only same-origin module scripts: the main entry, the lazy Analyze-page, fix-review and clean-export chunks, and the analyzer and worker chunks. There are no inline scripts, inline event-handler attributes, `eval`, or `new Function`; neither `'unsafe-inline'` nor `'unsafe-eval'` is allowed. |
+| `script-src 'self'` (main) / `'self' 'wasm-unsafe-eval'` (engine) | The build loads only same-origin module scripts: the main entry, the lazy Analyze-page, fix-review and clean-export chunks, and the analyzer and worker chunks. There are no inline scripts, inline event-handler attributes, `eval`, or `new Function`; neither `'unsafe-inline'` nor `'unsafe-eval'` is allowed anywhere. `'wasm-unsafe-eval'` appears only on the engine chunks and the WebAssembly they compile, and it grants exactly that: no `eval` of JavaScript. |
 | `style-src 'self'` | The build loads one same-origin stylesheet. There are no `<style>` blocks and the app writes no inline styles at runtime. The light and dark `color-scheme` values live in `src/index.css` under `:root` and `:root[data-theme='dark']`; the theme code only sets `data-theme`, and a unit test asserts that toggling leaves no `style` attribute on `<html>`. |
 | `img-src 'self' data:` | Allows the self-hosted favicon and inert data-URI images, and blocks every external image. No data-URI image is in the current build; `data:` is retained from the requested baseline. |
 | `font-src 'self' data:` | Ten of the eleven `@font-face` files are self-hosted `.woff2` files. Vite inlines one Cyrillic-extended JetBrains Mono subset as `data:font/woff2` in the built CSS, so this allowance is required for that face. Rendering `Ѡ` (U+0460) confirmed the face loaded under this policy. |
-| `connect-src 'self'` | The app makes no `fetch`, XHR, or WebSocket request for data, and nothing can send reports, assistant text, uploads, or anything else to another host. Loading the lazy Analyze page and its workers fetches only same-origin static JavaScript chunks; those are `script-src` loads, not data connections. |
+| `connect-src 'self'` | The app makes no `fetch`, XHR, or WebSocket request for data, and nothing can send reports, assistant text, uploads, or anything else to another host. Loading the lazy Analyze page, its workers, the engine workers and the `.wasm` files fetches only same-origin static assets. |
 | `object-src 'none'` | Blocks plugins, `<object>`, and `<embed>` content. |
 | `base-uri 'self'` | Stops an injected `<base>` element from changing how relative URLs resolve. |
 | `form-action 'self'` | Restricts form submissions to this origin. The app's forms are handled by React and never post to a server. |
 | `frame-ancestors 'none'` | Prevents the app from being framed. `X-Frame-Options: DENY` is also kept for browsers that do not support this directive. |
 
-No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exception is needed. `blob:` was not added: a real export download was exercised under this policy, produced and revoked its object URL, and downloaded the JSON without a violation. The only allowance added to the requested baseline is `data:` in `font-src`, and it is required by the built font above.
+
+No `'unsafe-inline'` is used for scripts or styles anywhere, and no `style-src-attr` exception is needed. `blob:` was not added: a real export download was exercised under this policy, produced and revoked its object URL, and downloaded the JSON without a violation. Two allowances exist beyond the requested baseline, both measured rather than guessed: `data:` in `font-src`, required by the built font above, and `'wasm-unsafe-eval'` in the `script-src` of the engine rule only.
 
 **Browser coverage (2026-10-29).** The production build was served by a temporary stdlib-only Node server outside the repository with the exact `vercel.json` headers and SPA fallback. Fresh Chromium, Firefox, and Playwright WebKit contexts walked every route, the theme toggle, the Assistant (CORS triple, Python, JavaScript, and all eight bare JSON forms), the seeded checkout save flow, export, import, and toasts. Chromium and Firefox reported **0 CSP violations, 0 console errors, and 0 page errors**. Playwright WebKit reported no app-written inline style, but it emits one `style-src-attr` message per `<select>` element; the cause and the effect are recorded in the next paragraph. Playwright WebKit approximates Safari; physical Safari was not tested. Light and dark screenshots of Overview, Bug log, and the bug form were pixel-identical before and after `color-scheme` moved from JavaScript to CSS in all three engines.
 
@@ -205,7 +235,7 @@ No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exce
 
 **How it was checked locally.** On 2026-10-25 the production build was served by a temporary stdlib-only Node server outside the repository. It read the headers from `vercel.json` at startup, applied all of them, and used the same SPA fallback. Fresh Chromium contexts at 1440x700 with real 15px scrollbars loaded every route directly and exercised first-run seeding, create/edit/delete, search/filter/sort, fix states, both themes, the Debug Assistant (Python, JavaScript, unrecognised, empty, over-limit, copy, checklist, clear), export, import preview/merge and the replace gate, toasts, the joke rotation, keyboard focus, and the then-existing delete and import dialogs: **216 assertions, 0 CSP violations, 0 console errors, 0 page errors**, with requests only to the local server. A throwaway page then confirmed that an inline script, an external image, and an external `fetch` were each blocked and reported as a violation (exactly three expected violations). `src/csp.test.ts` also reads this file during `npm test` and fails if the global rule loses the policy, the required directives change, or an unsafe source appears.
 
-**What this does not prove.** `npm run dev` and `npm run preview` do **not** apply `vercel.json`; they serve no CSP. The policy reaches users only after a Vercel deployment, and the live response had not yet been inspected when this section was written. Re-run the header command in [Security headers](docs/MANUAL_TEST_CHECKLIST.md#16-security-headers) after deploying and confirm the policy string before treating the production site as protected. A local emulator proves the policy is compatible with the build, not that the host is sending it.
+**What this does not prove.** `npm run dev` and `npm run preview` do **not** apply `vercel.json`; they serve no CSP. The policy reaches users only after a Vercel deployment, and the live response had not yet been inspected when this section was written. Re-run the header command in [Security headers](docs/MANUAL_TEST_CHECKLIST.md#17-security-headers) after deploying and confirm the policy string before treating the production site as protected. A local emulator proves the policy is compatible with the build, not that the host is sending it.
 
 **Adding a new source later.** Add the narrowest origin or path to the specific directive it needs, not to `default-src`, and avoid broad `https:` entries. A new image host belongs in `img-src`; a new API belongs in `connect-src`; a new font belongs in `font-src`. Never add `'unsafe-inline'` to `script-src`; use a separate same-origin script, or a build-time hash if an inline script is unavoidable. If a style attribute becomes unavoidable, prefer `style-src-attr 'unsafe-inline'` over opening up `style-src`. Add `blob:` only if a feature is proven to need it, and only on the directive that needs it. Then rebuild, update `src/csp.test.ts` if an asserted directive changed, run `npm test`, and repeat the live header and console checks.
 
@@ -213,7 +243,7 @@ No `'unsafe-inline'` is used for scripts or styles, and no `style-src-attr` exce
 
 `.github/workflows/live-check.yml` runs `scripts/check-live.mjs` once a day at 06:17 UTC, and it can be run by hand from the repository's **Actions** tab (**Live site check** → **Run workflow**). The optional `url` input sends the same checks to another address; leaving it empty uses [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
 
-The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant`, `/analyze` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares all five security headers with the values in `vercel.json`, fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. Network errors are retried twice; redirects are reported and not followed.
+The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant`, `/analyze` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares the security headers with the values in `vercel.json` — resolving which header rule is supposed to describe each path, and failing if a path is claimed by more than one rule, because a browser intersects repeated `Content-Security-Policy` headers — fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. For the engines it GETs `/assets/engines/manifest.json`, checks its own headers against the engine rule, then fetches **every file the deployed manifest lists** and checks each one's headers, that the `.wasm` files are served as `application/wasm`, that the engine policy is the `'wasm-unsafe-eval'` one and the rest of the site is not, and that no policy anywhere gained `'unsafe-inline'`, `'unsafe-eval'` or `blob:`. Network errors are retried twice; redirects are reported and not followed.
 
 Run it locally with:
 
@@ -692,25 +722,139 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 
 `/analyze` is a local static-review page, separate from the Assistant. Upload a folder, a `.zip`, or loose files; BugPilot reads them in the tab, runs its own pattern rules, and asks the TypeScript parser for syntax diagnostics. Nothing is executed, uploaded, or persisted. Four deterministic fixers can propose text changes; each proposal is re-verified on an in-memory copy before it is offered, shown in a diff review, and only then available in a clean export. The page states its limits before any upload and prints the checks that were **not** performed for each language that was analysed.
 
-`/analyze` is a lazy route. The archive and rules workers, the TypeScript worker, the bundled TypeScript compiler, the jsdiff-backed review view, and the clean-export builder load as separate chunks only when the page needs them, so the main entry stays the small app shell.
+After that first pass the page can offer a **second, opt-in pass** that reads the real grammar of each file with tree-sitter WebAssembly, and lints Python with Ruff WebAssembly. Nothing heavy loads until the user presses **Run deep analysis** in the gate, which lists every file, its size, and the total first. See [Code analysis engines](#code-analysis-engines).
+
+`/analyze` is a lazy route. The archive and rules workers, the TypeScript worker, the bundled TypeScript compiler, the jsdiff-backed review view, the clean-export builder, the engine worker and every `.wasm` engine load as separate chunks only when the page needs them, so the main entry stays the small app shell.
 
 ### What runs, per language
 
 | Language (detected by extension, file name, shebang, or content sniff) | Syntax tier | Pattern tier |
 | --- | --- | --- |
-| JavaScript, JSX, TypeScript, TSX | TypeScript compiler parser (`ts.transpileModule`): syntax errors and warnings only | Generic and secret rules |
+| JavaScript, JSX, TypeScript, TSX | TypeScript compiler parser (`ts.transpileModule`): syntax errors and warnings only. No tree-sitter grammar is loaded for these two — a second parser would only duplicate findings | Generic and secret rules |
 | JSON | Strict `JSON.parse`; the first syntax error with line and column | Generic and secret rules |
-| Python, Java, Kotlin, C#, PHP, Ruby, Go, Rust, C, C++, Swift, Scala, Shell, SQL, YAML, TOML, XML, HTML, CSS, Markdown, plain text | Not available; the coverage panel says no syntax engine is bundled | The applicable generic rules and all eight secret rules |
+| Python | tree-sitter Python grammar (deep pass) **and** Ruff | Generic and secret rules, 5 AST queries, 21 Ruff rules |
+| Java, Kotlin, C#, PHP, Ruby, Go, Rust, C, C++, Swift, Shell, HTML, CSS | tree-sitter grammar for that language (deep pass) | Generic and secret rules plus the AST queries that apply |
+| SQL, YAML | tree-sitter parses them, but their **syntax verdict is not trusted** — the grammar's own report is recorded as coverage only | Generic and secret rules |
+| Scala, TOML, XML, Markdown, plain text | Not available; no permissive grammar is shipped, the coverage panel says so | The applicable generic rules and all eight secret rules |
 | Unrecognised file type | Not available | The applicable generic rules and all eight secret rules |
 
-- The TypeScript check is deliberately transpile-only: `transpileModule` never builds a program, resolves imports, reads `tsconfig.json`, or checks types. Unresolved names and type errors are not reported.
+- The TypeScript check is deliberately transpile-only: `transpileModule` never builds a program, resolves imports, reads `tsconfig.json`, or checks types. Unresolved names and type errors are not reported. The deep engines are grammar parsers and a linter, not type checkers either.
 - Content sniffing runs only when the name identifies nothing: XML, HTML, and complete JSON documents are recognised by their first bytes. A known extension is never overridden.
 - Text is decoded as UTF-8 (a BOM is removed), UTF-16 LE/BE, or Latin-1 as a fallback. Binary content is skipped.
-- Each rule call is isolated in a `try/catch`. A rule that throws adds a note for that file and the remaining rules still run. One file gets at most 1.5 s of rule time and 200 findings; the TypeScript check gets 5 s per file. When a cap stops work, the coverage notes say so.
+- Each rule call is isolated in a `try/catch`. A rule that throws adds a note for that file and the remaining rules still run. One file gets at most 1.5 s of rule time and 200 findings; the TypeScript check gets 5 s per file; the deep engines get 3 s per file, 120 s for the whole upload, and 100 hits per file. When a cap stops work, the coverage notes say so.
+
+### Code analysis engines
+
+Two WebAssembly engines run the optional deep pass. Both are read-only detectors: they add findings and coverage notes, and they never change a file.
+
+| Engine | Package and version | Role | Languages | What it cannot do |
+| --- | --- | --- | --- | --- |
+| tree-sitter | `web-tree-sitter` 0.27.1 + `tree-sitter-wasm` 2.0.4 (16 grammars) | Parses a file into a real syntax tree. Reports `ERROR`/`MISSING` nodes as syntax findings, and answers five saved-pattern queries for AST-level findings | 16 (see the table above) | It is a parser, not a compiler: no types, no imports, no data flow, no idea whether the code would run. A construct the grammar does not support looks exactly like a mistake. |
+| Ruff | `@astral-sh/ruff-wasm-web` 0.17.3 | Lints Python with 21 hand-picked rules and reports its own parse failure | Python | The WASM build exposes **no fixes** in every settings combination measured in the spike, so Python findings are detector-only. It reads one file at a time, so it sees no cross-file names. |
+
+JavaScript, TypeScript and JSON keep their slice-A engines (the TypeScript parser and `JSON.parse`); no tree-sitter grammar is loaded for them.
+
+**Licences.** Every engine binary is a build-time copy from `node_modules`; nothing is fetched from a registry at run time. All 19 shipped binaries are MIT — verified per grammar against its own upstream `LICENSE`, because the `tree-sitter-wasm` pack ships only its own root licence. [docs/ENGINE-LICENCES.md](docs/ENGINE-LICENCES.md) holds the table, the upstream pins, the `.scm` Apache-2.0 exclusion (BugPilot ships no query files from the pack), and the commands to re-verify.
+
+**Supply chain.** The three packages were installed once with `npm install --ignore-scripts`, so no lifecycle script ran, and they are the only dependencies this slice added. At build time the plugin in `vite.config.ts` (`bugpilot:engine-manifest`) walks `dist/assets/engines/` with `node:fs`, gzip-measures each file with `node:zlib`, and writes `assets/engines/manifest.json` — `readdirSync`, `statSync`, `readFileSync`, `gzipSync` and `writeFileSync` are the only operations it performs, with no child process, no network call and no eval. `src/csp.test.ts` asserts the two policy strings and that only the engine path carries `wasm-unsafe-eval`, and `scripts/check-live.mjs` fetches that manifest from a deployment and then fetches every file it lists, so a new or renamed engine asset is visible in both gates instead of being silently served under the loosened policy. The app never loads a `.wasm` URL that the build did not publish: every engine address comes from a `?url` import in `src/features/analyzer/engines/assets.ts`, so it is a hashed same-origin path baked into the bundle.
+
+#### How the engines load
+
+Nothing engine-shaped is fetched until an upload actually contains a language a grammar owns:
+
+1. The page classifies the upload. If no language has a deep engine, the gate is never shown.
+2. If some do, `EngineGate` reads `assets/engines/manifest.json` (3,638 bytes raw, 747 gzipped, always same-origin) and lists **each file with its build-measured compressed size** plus a total, and only then offers **Run deep analysis** / **Cancel, keep the pattern-rule report**. Cancel keeps the first-pass report untouched.
+3. On Run, a **feature probe** compiles and instantiates an 8-byte WebAssembly module (magic number and version, no sections) inside the engine worker. Only the engine worker scripts are served with `'wasm-unsafe-eval'`, so the probe runs where the permission either exists or does not.
+4. The engine worker then loads the tree-sitter runtime, and one grammar per language that is actually present — lazily, so a Python upload never pays for the 5.3 MB C# grammar. Ruff loads only when a Python file exists.
+5. Each file is parsed under the budgets below. A grammar that fails to load, a file that exceeds the budget, and an engine that throws are all recorded as coverage notes; the run finishes and the other files keep their findings.
+
+If the probe fails, the exact sentence **"Deep analysis engines are unavailable in this browser or blocked by its security policy; basic checks still ran"** is shown as an alert, the gate is not offered again for that upload, and every non-WebAssembly check from the first pass stays on screen. The reason codes are `available`, `no-webassembly`, `blocked-by-policy` and `worker-error`; a unit test simulates a browser with no `WebAssembly` at all and a `compile` that rejects, and a component test renders the blocked state.
+
+**Two failures, two honest messages.** Measured live under a policy with `'wasm-unsafe-eval'` removed from the engine paths, the alert above appeared, every engine file's coverage row read `Syntax — not run: WebAssembly was refused by this browser or its security policy, so no deep engine ran on this file.`, and no `.wasm` file was requested after the probe failed. Measured live under the normal policy with `/assets/engines/*` refused at the network layer, there is no alert blaming a security policy; the per-file row reads `Syntax — not run: The deep-engine worker could not start (Failed to fetch dynamically imported module: <the engine client URL>).` and names what actually failed. Both runs kept the first pass intact: 7 pattern-rule findings before and after, `Results for 16 files`, no engine finding claimed in `report.json`, and a `Clear results` path back to a fresh attempt. Manual checklist section 14 reproduces both.
+
+#### What each engine can report
+
+| Rule id | Tier | Severity / confidence | Engine | Languages | Finds |
+| --- | --- | --- | --- | --- | --- |
+| `tree-sitter/syntax-error` | syntax | High / medium (high when only one region) | tree-sitter | 16 grammars, SQL and YAML excluded from reporting | An `ERROR` node: the grammar could not fit the text into any rule. Position and span come from the tree; the cause does not. |
+| `tree-sitter/missing-node` | syntax | High / high | tree-sitter | as above | A `MISSING` node: the grammar names the token it expected and where it wanted it. |
+| `bugpilot/ast/empty-catch` | pattern | Medium / high | tree-sitter query | JS-family excluded; Java, C#, PHP, Ruby, Python, Go, C, C++ | A handler whose body is genuinely empty — not one whose body is a comment. |
+| `bugpilot/ast/python-bare-except` | pattern | Medium / high | tree-sitter query | Python | `except:` with no exception expression. |
+| `bugpilot/ast/unreachable-code` | pattern | Low / medium | tree-sitter query | Java, C, C++, Go, PHP, Ruby, C# | A statement after an unconditional `return`/`break`/`continue`/`raise`/`exit` in the same block. |
+| `bugpilot/ast/assignment-in-condition` | pattern | High / medium | tree-sitter query | Java, C, C++, PHP, Ruby, C#, Go | An assignment used as the controlling expression of `if`/`while`/`for`. |
+| `bugpilot/ast/sql-built-by-concatenation` | pattern | High / low | tree-sitter query | PHP, Python, Ruby, Java, C#, Go, JS-family | Query text assembled by string concatenation or interpolation. Shape only — no data flow, so a constant string is reported too. |
+| `ruff/<CODE>` | pattern | Per rule, from a table of 21 | Ruff | Python | The 21 selected rules; the Ruff code stays in the message, e.g. `(F401)`. |
+| `ruff/syntax-error` | syntax | High / high | Ruff | Python | Ruff's own parse failure for the file. |
+
+Every AST finding carries its confidence reason, an evidence quote that is redacted when credential-shaped, a manual-only fix, and per-file limits. Nothing in the engine path claims a cause the parse tree does not show: the explanation says the position came from the tree and the reason is not in it. Findings on the same line as a pattern-rule match are superseded by the engine finding instead of doubled.
+
+Ruff's 21 rules are `F401 F811 F821 F841 E711 E712 E722 B006 B007 B008 S105 S106 S107 S110 S301 S307 S324 S602 S605 S607 S608`, each with a BugPilot-written description, severity and confidence. Because the WASM build offers no fix, **no Python finding can reach the clean export**: the fix text is manual-only, the risk class is `manual-only`, and the example code is empty by construction (asserted in tests).
+
+#### Sizes, measured at build time
+
+`npm run build` writes `dist/assets/engines/manifest.json` with the raw and gzip size of every engine file; the gate quotes those numbers, and `scripts/check-live.mjs` reads the same file against a deployment. Total published: 20 files, 36,777,211 bytes raw, 6,300,829 bytes gzipped. A single-language upload pays only for that grammar:
+
+| Grammar | Compressed | What an upload of only that language downloads |
+| --- | --- | --- |
+| html | 6.9 KiB | 126 KiB |
+| css | 21 KiB | 140 KiB |
+| yaml | 35 KiB | 154 KiB |
+| go | 40 KiB | 159 KiB |
+| java | 52 KiB | 171 KiB |
+| python | 67 KiB | 3.7 MiB (adds Ruff) |
+| c | 73 KiB | 192 KiB |
+| php | 107 KiB | 226 KiB |
+| rust | 117 KiB | 236 KiB |
+| ruby | 163 KiB | 282 KiB |
+| bash (shell) | 181 KiB | 299 KiB |
+| cpp | 278 KiB | 397 KiB |
+| swift | 296 KiB | 415 KiB |
+| c_sharp | 312 KiB | 431 KiB |
+| sql | 319 KiB | 438 KiB |
+| kotlin | 320 KiB | 439 KiB |
+
+The shared part of every plan is 119 KiB: the engine client (0.9 KiB), the engine worker (36 KiB) and the tree-sitter runtime (82 KiB). Ruff is 3.6 MiB compressed / 9.6 MiB raw on its own, which is why the gate quotes it before anything loads. Every download is capped at 12 MiB per file and aborts past that ceiling.
+
+**Bundle cost.** Measured against a build of the previous commit in a throwaway git worktree, same `node_modules`: the main entry chunk is **unchanged at 592,164 bytes raw / 172,273 bytes gzipped** (only the embedded lazy-chunk hash differs, at the same length). The lazily loaded `AnalyzePage` chunk grew from 29,999 to 34,365 gzipped bytes (+4,366 B, the gate UI and the coverage rows) and the engine worker chunk is new at 37,255 gzipped bytes (133,831 raw) under `assets/engines/`. The 3 kB budget was written for the main bundle, which it does not affect; the Analyze-page growth is stated rather than hidden.
+
+#### Budgets
+
+| Cap | Value | What happens at the cap |
+| --- | --- | --- |
+| Deep pass time, one file | 3 s | The file is recorded as not finished and the note says the budget stopped it; remaining files continue |
+| Deep pass time, whole upload | 120 s | The run stops and the coverage panel lists the files never reached |
+| One file | 2 MiB | Skipped by the reader before the engines, as in the first pass |
+| One engine download | 12 MiB and a 30 s ceiling | Refused; the language is recorded as unavailable |
+| Engine findings, one file | 100 hits, 12 syntax regions | Extra regions are dropped with "N more syntax error region(s) … not listed" |
+| Grammars per upload | one load per language, cached per worker | A second file in the same language does not re-download it |
+
+There is no measured heap-size ceiling: memory is bounded indirectly, by the 2 MiB file cap, the 12 MiB asset cap, the hit caps, and one grammar per language. That is a limit of this build, not a claim of protection.
+
+#### Measured accuracy
+
+The deep pass was run over the spike's 53-file / 174-defect corpus (`analyzer-spike/s4`, read-only, nothing copied into this repository) with the shipped pipeline — the real rule worker, the real TypeScript worker, the real engine worker — under the spike's own matching definition. Numbers, with the spike's five-analyzer union for comparison:
+
+| Measure | BugPilot (this build) | Spike union (5 analyzers) |
+| --- | --- | --- |
+| Seeded defects found | **34 / 174 = 19.5%** | 40 / 174 = 23% |
+| Found on the rule name alone (not line proximity) | 25 / 174 = 14.4% | — |
+| Precision over 57 findings | 70.2% (40 matched) | — |
+| False positives | 17, **all** of them `bugpilot/generic/todo-marker`, an intentional style finding | the spike flagged findings on clean files |
+| Findings on the 13 clean files | **0** | >0 |
+| Tier 1 (syntax) | 6 / 10 = 60% | — |
+| Tier 2 (lint) | 24 / 93 = 26% | — |
+| Tier 3 (type / data flow) | 4 / 71 = 6% | — |
+| Cold whole-corpus run | 17.75 s for 67 KiB, 15 `.wasm` reads, heap 27.0 → 32.8 MB | — |
+
+Per language (found / seeded, BugPilot vs spike union): Python 12/25 vs 18, PHP 4/8, JavaScript 3/12 vs 8, C 2/9, C# 2/10, Java 2/12, Ruby 2/11, Shell 2/12, TypeScript 2/16 vs 10, Go 1/10, HTML 1/10, YAML 1/9, C++ 0/9, Rust 0/9, SQL 0/12.
+
+Why BugPilot scores below the spike union: the spike's extra hits came from ESLint (banned here by the app's own CSP), from `tsc` **program** modes (type and module errors, which BugPilot deliberately does not report), and from Biome (rejected in the spike). Rules were not tuned to the corpus; the only changes made while measuring were genuine defect fixes. What is still missed, by reason: 69 defects where an in-scope rule existed but did not fire, 58 needing type or data-flow analysis, 9 needing cross-file or runtime information, 3 where a grammar parsed the file and reported nothing, and 1 in SQL, where the grammar's verdict is deliberately not trusted.
+
+Timings for synthetic mixed-language projects (same Node harness, engine grammars already warm): 1 MiB across 8 files ran in 3.81 s and produced 17 findings (heap 45.8 → 36.6 MB); 5 MiB across 40 files ran in 9.48 s, analysed 40/40 files, and produced 80 findings (heap 74.7 → 74.6 MB). A cold browser start additionally pays the network cost of the `.wasm` files in the table above; the harness pre-loaded the tree-sitter runtime from disk because Node has no CSP, so 15 of those reads were grammars and Ruff — in the browser the runtime is a 16th fetch.
 
 ### Rules
 
-There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id synthesised by the worker:
+There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id synthesised by the worker. The opt-in deep pass adds 29 ids — 2 tree-sitter syntax ids, 5 tree-sitter query ids, and 22 Ruff ids (`ruff/syntax-error` plus one `ruff/<CODE>` for each of the 21 selected rules) — listed in [What each engine can report](#what-each-engine-can-report) rather than here, because they never run until the user approves the engine download.
 
 | Rule id | Tier | Severity | Languages | Finds |
 | --- | --- | --- | --- | --- |
@@ -778,6 +922,7 @@ Exactly one exported function authorises the export: `authorizeCleanExport()` in
 | Loose files or folder-drop sources collected | 2,000 plus one sentinel, so an over-limit drop is refused rather than silently truncated |
 | Rule time / findings per file | 1.5 s / 200 |
 | TypeScript syntax check per file | 5 s |
+| Deep engine pass | 3 s per file, 120 s per upload, 100 findings per file, 12 syntax regions per file, 12 MiB and 30 s per engine download — see [Budgets](#budgets) |
 
 The reader is a streaming zip reader. It refuses, with a plain-language message, traversal (`..`), absolute paths, Windows drive letters, backslash separators, NUL bytes, duplicate names, symbolic links, nested archives, encrypted entries, ZIP64, data descriptors, unsupported compression, checksum mismatches, and damaged indexes before or while reading. It skips binaries, empty entries, directory entries, files over 2 MiB, and anything under `.git`, `node_modules`, `dist`, `build`, `.next`, `coverage`, `__pycache__`, `.venv`, `venv`, `vendor`, `target`, `bin`, or `obj`. Only `.zip` archives are read; `.tar`, `.gz`, `.7z`, `.rar`, and similar files are treated as ordinary files or refused as nested archives.
 
@@ -793,16 +938,18 @@ The coverage panel lists every uploaded entry: analysed or skipped, its detected
 
 ### Privacy
 
-- Files are read in this tab by same-origin web workers. No code is executed: the only parsers are BugPilot's regex/text rules, `JSON.parse`, and the TypeScript parser. Fixes are computed by string edits and never run.
-- Uploaded text is never sent to a server, never written to `localStorage` or `sessionStorage`, never written to IndexedDB, and never added to the bug log or a saved diagnosis. The page tests spy on `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, `WebSocket`, and `indexedDB.open` across upload, fix selection, the diff review, the clean-export build and downloads, Clear, and a route change, and compare the full `localStorage`/`sessionStorage` contents before and after; all of those checks must stay quiet and byte-identical. Loading the page and its workers fetches only same-origin static JavaScript chunks, which contain no uploaded text.
+- Files are read in this tab by same-origin web workers. **No uploaded code is executed**: the only parsers are BugPilot's regex/text rules, `JSON.parse`, the TypeScript parser, and — after the user approves the gate — the tree-sitter and Ruff WebAssembly grammars. Fixes are computed by string edits and never run.
+- The WebAssembly engines are BugPilot's own build output, served from this origin. They are compiled and run by the browser inside the engine worker, which is why only `assets/engines/` carries `'wasm-unsafe-eval'`. They receive the file text and return diagnostics; they cannot open a socket, and they are given no host object.
+- Uploaded text is never sent to a server, never written to `localStorage` or `sessionStorage`, never written to IndexedDB, and never added to the bug log or a saved diagnosis. The page tests spy on `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, `WebSocket`, and `indexedDB.open` across upload, fix selection, the diff review, the clean-export build and downloads, Clear, and a route change, and compare the full `localStorage`/`sessionStorage` contents before and after; all of those checks must stay quiet and byte-identical. Loading the page and its workers fetches only same-origin static JavaScript chunks and, in the approved deep pass only, same-origin static `.wasm` files — none of which contain uploaded text. A component test asserts that the only `fetch` call an engine-gate interaction makes is `/assets/engines/manifest.json`, and that no request carries the file's content.
 - The in-memory report keeps the redacted evidence quotes needed for the on-screen findings. The analysed text is also retained in memory as `sources` so fixes can be computed and re-verified; it is never written to storage and is dropped on Clear or when the page unmounts. Nothing survives a reload.
 - Exports are the only way data leaves the page, and they are browser downloads chosen by the user. The report-only files contain no source file contents other than evidence quotes, and only when the snippet box was ticked. The clean export is different by design: `clean.zip` contains the analysed text files with fixes applied, and `changes.patch` quotes the original lines, including any original credential value that was removed. Both are built only after the user ticks the outputs and presses **Build clean export**; the changelog, report and manifest never reproduce a credential value.
-- There is no code execution, no package installation, no network fetch of a user URL, and no AI provider.
+- There is no execution of uploaded code, no package installation, no network fetch of a user URL, and no AI provider. The only binaries the page runs are its own WebAssembly engines, and they run only after the user approves their download.
 
 ### Deliberate non-goals
 
-- No type checking, module resolution, project-wide analysis, data-flow, or taint analysis.
-- No syntax parser for any language other than JavaScript/TypeScript (via the TypeScript parser) and JSON (via `JSON.parse`).
+- No syntax parser for any language other than JavaScript/TypeScript (via the TypeScript parser), JSON (via `JSON.parse`) and the 16 opt-in tree-sitter grammars. There is no XML, TOML, Scala, Markdown or plain-text parser, and no parser runs at all unless the user approves the engine download.
+- No type checking, module resolution, project-wide analysis, data-flow, or taint analysis — in the first pass or in the deep pass. The engines read one file at a time and report only what a syntax tree or a single-file lint rule can show.
+- No Python automatic fixes. Ruff's WASM build exposes no fix in any settings combination measured, so every Python finding is detector-only and cannot enter the clean export.
 - No general auto-fixing or formatting: only the four fixers above. No refactoring, dependency upgrades, renames, logic rewrites, or semantic changes beyond replacing a credential literal with an environment lookup. No automatic apply to the user's project, no commit, and no write outside the browser download.
 - No server-side gate or credit accounting; the gate is client-side and bypassable, as stated above.
 - No code execution, tests, builds, or package installation.
@@ -818,17 +965,21 @@ src/features/analyzer/
 ├─ analysis/       Finding model, rule engine, coverage, report model, session orchestration, workers, clients, and fix verification
 │  └─ typescript/  Classic worker and client for the syntax-only TypeScript check
 ├─ cleanExport/    The one authorisation gate and the in-memory builder for patch, zip, changelog and report
+├─ engines/        WebAssembly feature probe, engine worker + client + protocol, per-language grammar registry,
+│                  lazy grammar/Ruff loading with byte ceilings and budgets, tree-sitter syntax findings,
+│                  AST queries, the 21-rule Ruff mapping, credential redaction for engine quotes, and the
+│                  download plan that reads the build's engine manifest
 ├─ export/         Export filtering and the Markdown/JSON writers and download helpers
 ├─ fixes/          Fix candidates, the four fixers, overlap resolution, and text-edit helpers
 ├─ review/         jsdiff-backed unified/side-by-side model, line mapping and credential masking, plus the diff worker and its client
 ├─ rules/          Generic, secret, and JSON syntax rules plus shared text helpers
-├─ ui/             AnalyzeResults, FixReview, CleanExportPanel, and their download helpers
+├─ ui/             AnalyzeResults, EngineGate, FixReview, CleanExportPanel, and their download helpers
 ├─ upload/         File, folder-picker, and drag-and-drop source collection
 ├─ languages.ts    Labels, TypeScript-family detection, tier availability, and per-language not-checked lists
 └─ types.ts        Finding, coverage, and report types
 ```
 
-`src/pages/AnalyzePage.tsx` owns the page state, upload inputs, progress, cancellation, and report downloads. The worker entry points are `src/features/analyzer/archive/worker.ts`, `src/features/analyzer/analysis/worker.ts`, `src/features/analyzer/analysis/typescript/tsWorkerEntry.ts`, and `src/features/analyzer/review/diffEntry.ts`. `FixReview` and `CleanExportPanel` are lazy imports from `AnalyzeResults`, so jsdiff and fflate stay out of the main entry.
+`src/pages/AnalyzePage.tsx` owns the page state, upload inputs, progress, cancellation, and report downloads. The worker entry points are `src/features/analyzer/archive/worker.ts`, `src/features/analyzer/analysis/worker.ts`, `src/features/analyzer/analysis/typescript/tsWorkerEntry.ts`, `src/features/analyzer/engines/engineWorkerEntry.ts`, and `src/features/analyzer/review/diffEntry.ts`. `FixReview` and `CleanExportPanel` are lazy imports from `AnalyzeResults`, so jsdiff and fflate stay out of the main entry. Only `engineWorkerEntry*` and `engineClient*` chunks and every `.wasm` file are emitted into `assets/engines/` — the two roots are named in `vite.config.ts`, so engine glue they share stays under the main policy and the `'wasm-unsafe-eval'` allowance cannot creep outward by accident.
 
 ### How to add a rule
 
@@ -957,7 +1108,7 @@ None of the following exists in the current app:
 
 ## Manual test checklist
 
-Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, code analysis (mixed-folder and zip upload, hostile-archive refusals, filters, both report downloads, fix selection and defaults, unified and side-by-side review, clean patch/zip/changelog/report downloads, `git apply` round trip, guard-failure case, Clear, and DevTools privacy), keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, and the production preview.
+Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, code analysis (mixed-folder and zip upload, hostile-archive refusals, filters, both report downloads, fix selection and defaults, unified and side-by-side review, clean patch/zip/changelog/report downloads, `git apply` round trip, guard-failure case, Clear, and DevTools privacy), the deep analysis engines (the size gate and its Cancel, a per-language mixed folder, the blocked-WebAssembly message, and the still-refused `WebAssembly.compile` in the page itself), keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, the production preview, and the two security-header policies on app routes and on `assets/engines/`.
 
 ## License
 
