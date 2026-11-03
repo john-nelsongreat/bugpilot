@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CRASH_TITLE,
   DEFAULT_LIVE_URL,
+  ENGINE_MANIFEST_PATH,
   GUARD_TITLE,
   MAX_RETRIES,
   REQUIRED_HEADERS,
@@ -9,28 +12,70 @@ import {
   WORKFLOW_MESSAGE_LIMIT,
   buildStepSummary,
   classifyAssetResponse,
+  classifyEngineResponse,
   classifyRouteResponse,
   classifyTiming,
   compareRequiredHeaders,
   crashMessage,
   describeUrlSource,
+  engineProbeTargets,
   escapeWorkflowData,
   escapeWorkflowProperty,
+  expectedHeadersForPath,
   extractAssetUrls,
   extractGlobalHeaders,
+  extractHeaderRules,
   failureAnnotation,
   formatRunHeader,
   formatSummaryCell,
   formatWorkflowError,
   guardResult,
+  headerValues,
+  isGlobalSource,
   isHtmlContentType,
   isTimeoutError,
+  matchesSource,
   normalizeBaseUrl,
+  parseEngineManifest,
+  policiesDifferOnlyInScriptSrc,
+  rawHeadersToObject,
   readRepositoryCommit,
   resolveStepSummaryPath,
   shouldRetry,
   truncateWorkflowMessage,
 } from './check-live.mjs'
+
+const MAIN_SOURCE = '/((?!assets/engines/).*)'
+const ENGINE_SOURCE = '/assets/engines/(.*)'
+const MAIN_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+const ENGINE_CSP = MAIN_CSP.replace(
+  "script-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+)
+
+function headerList(extra = {}) {
+  return [
+    { key: 'Content-Security-Policy', value: MAIN_CSP },
+    { key: 'X-Content-Type-Options', value: 'nosniff' },
+    { key: 'X-Frame-Options', value: 'DENY' },
+    { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+    { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+    ...Object.entries(extra).map(([key, value]) => ({ key, value })),
+  ]
+}
+
+function twoRuleConfig() {
+  return {
+    headers: [
+      { source: MAIN_SOURCE, headers: headerList() },
+      {
+        source: ENGINE_SOURCE,
+        headers: headerList({ 'Content-Security-Policy': ENGINE_CSP }),
+      },
+    ],
+  }
+}
 
 const VALID_HTML = [
   '<!doctype html>',
@@ -118,6 +163,209 @@ describe('extractGlobalHeaders', () => {
     const result = extractGlobalHeaders({ headers: [] })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/global headers/i)
+  })
+
+  it('accepts the engine-scoped global source', () => {
+    expect(isGlobalSource(MAIN_SOURCE)).toBe(true)
+    expect(isGlobalSource(ENGINE_SOURCE)).toBe(false)
+    expect(extractGlobalHeaders(twoRuleConfig()).headers['content-security-policy']).toBe(
+      MAIN_CSP,
+    )
+  })
+})
+
+describe('header rule selection', () => {
+  it('understands only the source shapes BugPilot ships', () => {
+    expect(matchesSource(MAIN_SOURCE, '/analyze')).toBe('yes')
+    expect(matchesSource(MAIN_SOURCE, '/assets/engines/x.wasm')).toBe('no')
+    expect(matchesSource(ENGINE_SOURCE, '/assets/engines/x.wasm')).toBe('yes')
+    expect(matchesSource(ENGINE_SOURCE, '/assets/x.js')).toBe('no')
+    expect(matchesSource('/(.*)', '/anything')).toBe('yes')
+    expect(matchesSource('/regex{2}/(.*)', '/assets/x.js')).toBe('unknown')
+  })
+
+  it('resolves one rule per path so no response carries two policies', () => {
+    const { rules } = extractHeaderRules(twoRuleConfig())
+
+    for (const path of ['/', '/analyze', '/assets/index-abc123.js', ENGINE_MANIFEST_PATH]) {
+      const result = expectedHeadersForPath(rules, path)
+      expect(result.ok, path).toBe(true)
+      expect(result.matched ?? [result.rule.source]).toHaveLength(1)
+    }
+    expect(expectedHeadersForPath(rules, '/assets/engines/a.wasm').rule.source).toBe(
+      ENGINE_SOURCE,
+    )
+    expect(
+      expectedHeadersForPath(rules, '/assets/engines/a.wasm').headers[
+        'content-security-policy'
+      ],
+    ).toBe(ENGINE_CSP)
+  })
+
+  it('reports a path covered by two rules as a failure instead of picking one', () => {
+    const overlapping = [
+      { source: '/(.*)', headers: { 'content-security-policy': MAIN_CSP } },
+      { source: ENGINE_SOURCE, headers: { 'content-security-policy': ENGINE_CSP } },
+    ]
+
+    const result = expectedHeadersForPath(overlapping, '/assets/engines/a.wasm')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/matches 2 header rules/)
+  })
+
+  it('refuses to guess an unrecognised source shape', () => {
+    const result = expectedHeadersForPath(
+      [{ source: '/weird{2}/(.*)', headers: {} }],
+      '/assets/engines/a.wasm',
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/unrecognised source shape/)
+  })
+
+  it('requires the engine policy to differ only in script-src', () => {
+    const { rules } = extractHeaderRules(twoRuleConfig())
+    const main = rules.find((rule) => rule.source === MAIN_SOURCE)
+    const engine = rules.find((rule) => rule.source === ENGINE_SOURCE)
+
+    expect(policiesDifferOnlyInScriptSrc(main.headers, engine.headers).pass).toBe(true)
+    expect(
+      policiesDifferOnlyInScriptSrc(
+        { 'content-security-policy': ENGINE_CSP },
+        engine.headers,
+      ).reason,
+    ).toMatch(/scope is not narrowed/)
+    expect(
+      policiesDifferOnlyInScriptSrc(main.headers, {
+        'content-security-policy': ENGINE_CSP.replace("object-src 'none'", "object-src 'self'"),
+      }).reason,
+    ).toMatch(/differ outside script-src/)
+    expect(policiesDifferOnlyInScriptSrc(main.headers, {}).reason).toMatch(/missing/)
+  })
+})
+
+describe('engine manifest and probes', () => {
+  const files = [
+    { path: '/assets/engines/engineClient-a.js', kind: 'engine-client', gzipBytes: 900 },
+    { path: '/assets/engines/engineWorkerEntry-b.js', kind: 'engine-worker', gzipBytes: 36000 },
+    { path: '/assets/engines/web-tree-sitter-c.wasm', kind: 'tree-sitter-core' },
+    { path: '/assets/engines/tree-sitter-python-d.wasm', kind: 'grammar', language: 'python' },
+    { path: '/assets/engines/tree-sitter-java-e.wasm', kind: 'grammar', language: 'java' },
+    { path: '/assets/engines/ruff_wasm_bg-f.wasm', kind: 'ruff', language: 'python' },
+  ]
+
+  it('parses the build manifest', () => {
+    expect(parseEngineManifest(JSON.stringify({ schemaVersion: 1, files })).files).toHaveLength(6)
+    expect(parseEngineManifest('{oops').ok).toBe(false)
+    expect(parseEngineManifest('{"files":[]}').ok).toBe(false)
+    expect(parseEngineManifest('{"schemaVersion":1}').error).toMatch(/files/)
+  })
+
+  it('probes every script and one module per kind and language', () => {
+    const targets = engineProbeTargets(files)
+    expect(targets.map((target) => target.path)).toEqual([
+      '/assets/engines/engineClient-a.js',
+      '/assets/engines/engineWorkerEntry-b.js',
+      '/assets/engines/web-tree-sitter-c.wasm',
+      '/assets/engines/tree-sitter-python-d.wasm',
+      '/assets/engines/tree-sitter-java-e.wasm',
+      '/assets/engines/ruff_wasm_bg-f.wasm',
+    ])
+    expect(targets[0].expect).toBe('script')
+    expect(targets[2].expect).toBe('wasm')
+  })
+
+  it('keeps duplicate CSP headers visible, which is the point of the raw probe', () => {
+    const raw = [
+      'content-security-policy',
+      MAIN_CSP,
+      'Content-Security-Policy',
+      ENGINE_CSP,
+      'content-type',
+      'application/wasm',
+    ]
+    expect(headerValues(raw, 'Content-Security-Policy')).toEqual([MAIN_CSP, ENGINE_CSP])
+    expect(headerValues(raw, 'content-type')).toEqual(['application/wasm'])
+    expect(headerValues(raw, 'x-nothing')).toEqual([])
+    expect(rawHeadersToObject(raw)['content-type']).toBe('application/wasm')
+  })
+
+  function engineTargetResponse(overrides = {}) {
+    const target = { path: '/assets/engines/x.wasm', kind: 'grammar', language: 'go', expect: 'wasm' }
+    const cspValues = overrides.cspValues ?? [ENGINE_CSP]
+    const rawHeaders = [
+      'content-type',
+      overrides.contentType ?? 'application/wasm',
+      'x-content-type-options',
+      'nosniff',
+      'x-frame-options',
+      'DENY',
+      'referrer-policy',
+      'strict-origin-when-cross-origin',
+      'permissions-policy',
+      'camera=(), microphone=(), geolocation=()',
+      ...cspValues.flatMap((value) => ['content-security-policy', value]),
+    ]
+    const base = {
+      target,
+      status: 200,
+      contentType: overrides.contentType ?? 'application/wasm',
+      cspValues,
+      headerResults: compareRequiredHeaders(
+        extractHeaderRules(twoRuleConfig()).rules[1].headers,
+        rawHeadersToObject(rawHeaders),
+      ),
+      elapsedMs: 120,
+      method: 'HEAD',
+    }
+    return classifyEngineResponse({ ...base, ...overrides, cspValues })
+  }
+
+  it('passes a correctly served engine module', () => {
+    const result = engineTargetResponse()
+    expect(result.pass).toBe(true)
+    expect(result.observed).toContain('grammar/go')
+  })
+
+  it('fails a response that carries two policies', () => {
+    const result = engineTargetResponse({ cspValues: [MAIN_CSP, ENGINE_CSP] })
+    expect(result.pass).toBe(false)
+    expect(result.failures.join(' ')).toMatch(/expected exactly 1/)
+  })
+
+  it('fails the main policy served for an engine file', () => {
+    const result = engineTargetResponse({ cspValues: [MAIN_CSP] })
+    expect(result.pass).toBe(false)
+    expect(result.failures.join(' ')).toMatch(/Content-Security-Policy: different value/)
+  })
+
+  it('fails a 404 page and a wrong content type', () => {
+    expect(engineTargetResponse({ status: 404 }).failures.join(' ')).toMatch(/HTTP 404/)
+    expect(
+      engineTargetResponse({ contentType: 'text/html; charset=utf-8' }).failures.join(' '),
+    ).toMatch(/text\/html/)
+    expect(engineTargetResponse({ contentType: 'application/octet-stream' }).failures.join(
+      ' ',
+    )).toMatch(/application\/wasm/)
+  })
+
+  it('fails a slow engine request', () => {
+    expect(engineTargetResponse({ elapsedMs: SLOW_REQUEST_MS + 1 }).pass).toBe(false)
+  })
+
+  it('reads the two real rules from vercel.json and keeps them apart', () => {
+    const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
+    const { rules } = extractHeaderRules(config)
+
+    expect(rules.map((rule) => rule.source)).toEqual([MAIN_SOURCE, ENGINE_SOURCE])
+    expect(expectedHeadersForPath(rules, '/analyze').headers['content-security-policy']).toBe(
+      MAIN_CSP,
+    )
+    expect(
+      expectedHeadersForPath(rules, '/assets/engines/engineWorkerEntry-x.js').headers[
+        'content-security-policy'
+      ],
+    ).toBe(ENGINE_CSP)
+    expect(policiesDifferOnlyInScriptSrc(rules[0].headers, rules[1].headers).pass).toBe(true)
   })
 })
 

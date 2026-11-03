@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -19,6 +21,10 @@ export const REQUIRED_HEADERS = Object.freeze([
   'Referrer-Policy',
   'Permissions-Policy',
 ])
+/** Scripts and WebAssembly that define a worker need their own policy; see vercel.json. */
+export const ENGINE_PATH_PREFIX = '/assets/engines/'
+export const ENGINE_MANIFEST_PATH = '/assets/engines/manifest.json'
+export const WASM_CONTENT_TYPE = 'application/wasm'
 export const REQUEST_TIMEOUT_MS = 10_000
 export const MAX_RETRIES = 2
 export const RETRY_DELAY_MS = 1_000
@@ -81,29 +87,246 @@ export function extractGlobalHeaders(vercelConfig) {
   const block = blocks.find(
     (candidate) =>
       candidate &&
-      (candidate.source === '/(.*)' || candidate.source === '/:path*'),
+      typeof candidate.source === 'string' &&
+      isGlobalSource(candidate.source),
   )
 
   if (!block || !Array.isArray(block.headers) || block.headers.length === 0) {
     return {
       ok: false,
       error:
-        'No global headers "/(.*)" block was found in the Vercel configuration.',
+        'No global headers block was found in the Vercel configuration; expected source "/(.*)" or "/((?!assets/engines/).*)".',
     }
   }
 
-  const headers = {}
-  for (const header of block.headers) {
-    if (
-      header &&
-      typeof header.key === 'string' &&
-      typeof header.value === 'string'
-    ) {
-      headers[header.key.toLowerCase()] = header.value
+  return { ok: true, headers: headerMapOf(block) }
+}
+
+/**
+ * Every header rule in the configuration, in file order. Vercel applies each rule whose
+ * source matches the path, and a browser intersects repeated `Content-Security-Policy`
+ * headers, so a path covered by two rules would end up with the stricter of the two
+ * policies. The live check therefore has to know which rule is supposed to win.
+ */
+export function extractHeaderRules(vercelConfig) {
+  const blocks = Array.isArray(vercelConfig?.headers) ? vercelConfig.headers : []
+  const rules = blocks
+    .filter(
+      (block) =>
+        block &&
+        typeof block.source === 'string' &&
+        Array.isArray(block.headers),
+    )
+    .map((block) => ({ source: block.source, headers: headerMapOf(block) }))
+
+  if (rules.length === 0) {
+    return { ok: false, error: 'No header rules were found in the Vercel configuration.', rules: [] }
+  }
+  return { ok: true, rules }
+}
+
+const GLOBAL_SOURCES = new Set(['/(.*)', '/:path*'])
+const GUARDED_GLOBAL_SOURCE = /^\/\(\(\?!([^)]*?)\)\.\*\)$/
+// A literal prefix only: quantifiers, parameters and nested groups are path-to-regexp
+// features this check does not implement, so a source using them is reported as unknown.
+const SCOPED_PREFIX_SOURCE = /^\/([^()*+?{}:]*?)\(.*\)$/
+
+/**
+ * Whether one `source` pattern is the catch-all rule. `/((?!assets/engines/).*)` is the
+ * same catch-all with the engine directory carved out, so it must be treated as global for
+ * everything else.
+ */
+export function isGlobalSource(source) {
+  if (GLOBAL_SOURCES.has(source)) return true
+  const guarded = GUARDED_GLOBAL_SOURCE.exec(source)
+  return guarded !== null && !guarded[1].startsWith('/')
+}
+
+/**
+ * Does one rule cover one pathname? Returns `'yes'`, `'no'` or `'unknown'` — an unrecognised
+ * pattern shape is reported instead of guessed at, because guessing here would let the check
+ * pass or fail for the wrong reason. Only the three shapes BugPilot ships are understood.
+ */
+export function matchesSource(source, pathname) {
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`
+  const guarded = GUARDED_GLOBAL_SOURCE.exec(source)
+  if (guarded) return path.startsWith(`/${guarded[1]}`) ? 'no' : 'yes'
+  if (GLOBAL_SOURCES.has(source)) return 'yes'
+  const scoped = SCOPED_PREFIX_SOURCE.exec(source)
+  if (scoped) return path.startsWith(`/${scoped[1]}`) ? 'yes' : 'no'
+  return 'unknown'
+}
+
+/** Which rule should describe this path, and how many rules actually claim it. */
+export function expectedHeadersForPath(rules, pathname) {
+  const matched = []
+  const unknown = []
+  for (const rule of rules) {
+    const verdict = matchesSource(rule.source, pathname)
+    if (verdict === 'yes') matched.push(rule)
+    else if (verdict === 'unknown') unknown.push(rule.source)
+  }
+
+  if (matched.length > 1) {
+    return {
+      ok: false,
+      error: `${pathname} matches ${matched.length} header rules (${matched
+        .map((rule) => rule.source)
+        .join(', ')}); Vercel would send several policies and the browser intersects them`,
+      matched: matched.map((rule) => rule.source),
+    }
+  }
+  if (matched.length === 0) {
+    return {
+      ok: false,
+      error: unknown.length > 0
+        ? `No rule could be evaluated for ${pathname}; unrecognised source shape(s): ${unknown.join(', ')}`
+        : `No header rule covers ${pathname}`,
+      matched: [],
+    }
+  }
+  return { ok: true, rule: matched[0], headers: matched[0].headers, unknown }
+}
+
+/** The engine policy must differ from the main policy only in `script-src`. */
+export function policiesDifferOnlyInScriptSrc(mainHeaders, engineHeaders) {
+  const main = String(mainHeaders?.['content-security-policy'] ?? '')
+  const engine = String(engineHeaders?.['content-security-policy'] ?? '')
+  if (main === '' || engine === '') {
+    return { pass: false, reason: 'one of the two policies is missing from vercel.json' }
+  }
+  const strip = (policy) => policy.replace(/script-src[^;]+(;|$)/g, '')
+  if (strip(main) !== strip(engine)) {
+    return { pass: false, reason: 'the two policies differ outside script-src' }
+  }
+  if (!engine.includes("'wasm-unsafe-eval'")) {
+    return { pass: false, reason: 'the engine policy does not allow wasm-unsafe-eval' }
+  }
+  if (main.includes("'wasm-unsafe-eval'")) {
+    return { pass: false, reason: 'the main policy allows wasm-unsafe-eval, so the scope is not narrowed' }
+  }
+  return { pass: true, reason: 'match' }
+}
+
+export function parseEngineManifest(text) {
+  let manifest
+  try {
+    manifest = JSON.parse(text)
+  } catch (error) {
+    return { ok: false, error: `manifest.json is not valid JSON: ${error?.message ?? error}` }
+  }
+  if (!manifest || !Array.isArray(manifest.files)) {
+    return { ok: false, error: 'manifest.json has no "files" array' }
+  }
+  const files = manifest.files.filter(
+    (entry) => entry && typeof entry.path === 'string' && typeof entry.kind === 'string',
+  )
+  if (files.length === 0) {
+    return { ok: false, error: 'manifest.json lists no engine files' }
+  }
+  return { ok: true, schemaVersion: manifest.schemaVersion, files }
+}
+
+/**
+ * Which engine files to probe live. Every script, one WebAssembly module per kind, and one
+ * grammar per language: they all come from the same rule, so a sample proves the rule without
+ * downloading every megabyte again.
+ */
+export function engineProbeTargets(files) {
+  const targets = []
+  const seenKinds = new Set()
+  for (const entry of files) {
+    const isScript = entry.path.endsWith('.js')
+    const key = entry.kind === 'grammar' ? `grammar:${entry.language ?? '?'}` : entry.kind
+    if (!isScript && seenKinds.has(key)) continue
+    seenKinds.add(key)
+    targets.push({
+      path: entry.path,
+      kind: entry.kind,
+      language: entry.language ?? null,
+      expect: isScript ? 'script' : entry.path.endsWith('.wasm') ? 'wasm' : 'other',
+    })
+  }
+  return targets
+}
+
+/**
+ * One engine response is only correct if the server sent exactly one policy — the engine one —
+ * and the same four other headers as the rest of the site.
+ */
+export function classifyEngineResponse({
+  target,
+  status,
+  contentType,
+  cspValues,
+  headerResults,
+  elapsedMs,
+  method,
+}) {
+  const failures = []
+
+  if (status !== 200) failures.push(`HTTP ${status} (expected 200) via ${method}`)
+  if (cspValues.length !== 1) {
+    failures.push(
+      `${cspValues.length} Content-Security-Policy header(s), expected exactly 1: ${JSON.stringify(
+        cspValues,
+      )}`,
+    )
+  }
+  for (const result of headerResults) {
+    if (!result.pass) {
+      failures.push(
+        `${result.header}: ${result.reason}; expected ${JSON.stringify(
+          result.expected,
+        )}, observed ${JSON.stringify(result.actual)}`,
+      )
     }
   }
 
-  return { ok: true, headers }
+  const baseType = String(contentType ?? '').split(';')[0].trim().toLowerCase()
+  if (baseType === 'text/html') {
+    failures.push('content type is text/html, so the engine file was not served as a file')
+  } else if (target.expect === 'wasm' && baseType !== WASM_CONTENT_TYPE) {
+    failures.push(`content type ${JSON.stringify(baseType)} is not ${WASM_CONTENT_TYPE}`)
+  } else if (target.expect === 'script' && !JAVASCRIPT_CONTENT_TYPES.has(baseType)) {
+    failures.push(`content type ${JSON.stringify(baseType)} is not a JavaScript type`)
+  }
+
+  const timing = classifyTiming(elapsedMs)
+  if (!timing.pass) {
+    failures.push(
+      `request took ${elapsedMs} ms, above the ${SLOW_REQUEST_MS} ms limit`,
+    )
+  }
+
+  return {
+    pass: failures.length === 0,
+    failures,
+    observed: `${target.kind}${target.language ? `/${target.language}` : ''}; HTTP ${status}; ${
+      baseType || '(no content type)'
+    }; ${cspValues.length} CSP header(s); ${elapsedMs} ms via ${method}`,
+  }
+}
+
+/** Values of one header from a raw `res.rawHeaders` list, duplicates preserved. */
+export function headerValues(rawHeaders, name) {
+  const wanted = name.toLowerCase()
+  const values = []
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    if (String(rawHeaders[index]).toLowerCase() === wanted) {
+      values.push(String(rawHeaders[index + 1]))
+    }
+  }
+  return values
+}
+
+/** Pairs from a raw header list, later wins, so it can be compared with vercel.json. */
+export function rawHeadersToObject(rawHeaders) {
+  const object = {}
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    object[String(rawHeaders[index]).toLowerCase()] = String(rawHeaders[index + 1])
+  }
+  return object
 }
 
 export function compareRequiredHeaders(expected, actual) {
@@ -515,6 +738,20 @@ function normalizeHeaderMap(headers) {
   return map
 }
 
+function headerMapOf(block) {
+  const headers = {}
+  for (const header of block?.headers ?? []) {
+    if (
+      header &&
+      typeof header.key === 'string' &&
+      typeof header.value === 'string'
+    ) {
+      headers[header.key.toLowerCase()] = header.value
+    }
+  }
+  return headers
+}
+
 function parseAttributes(source) {
   const attributes = {}
   let match
@@ -572,6 +809,64 @@ async function request(url) {
       await sleep(RETRY_DELAY_MS)
     }
   }
+}
+
+/**
+ * `fetch` merges repeated response headers into one comma-joined value, which is exactly the
+ * detail this check has to count: two `Content-Security-Policy` headers are intersected by the
+ * browser and would silently re-block WebAssembly. Engine files are therefore probed with a raw
+ * request that keeps the duplicates separate. Redirects are not followed.
+ */
+export function rawRequest(url, method = 'HEAD', timeoutMs = REQUEST_TIMEOUT_MS) {
+  const startedAt = performance.now()
+  const target = new URL(url)
+  const send = target.protocol === 'http:' ? httpRequest : httpsRequest
+
+  return new Promise((resolvePromise) => {
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      resolvePromise({
+        ...result,
+        method,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      })
+    }
+
+    const req = send(target, { method, headers: { accept: '*/*' } }, (res) => {
+      const rawHeaders = res.rawHeaders ?? []
+      const status = res.statusCode ?? 0
+      // The headers are the whole point; a WebAssembly module is megabytes, so drop the body.
+      res.destroy()
+      finish({ ok: true, status, rawHeaders, error: null })
+    })
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`timed out after ${timeoutMs} ms`))
+    })
+    req.on('error', (error) => finish({ ok: false, status: 0, rawHeaders: [], error }))
+    req.end()
+  })
+}
+
+/** Same retry policy as the fetch requests: a cold TLS handshake is not a failing site. */
+async function requestRawWithRetry(url, method) {
+  let last = null
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    last = await rawRequest(url, method)
+    if (last.ok) return last
+    if (attempt + 1 < MAX_RETRIES) await sleep(RETRY_DELAY_MS)
+  }
+  return last ?? (await rawRequest(url, method))
+}
+
+/** HEAD is enough for headers; fall back to GET when a server refuses it. */
+async function probeHeaders(url) {
+  const head = await requestRawWithRetry(url, 'HEAD')
+  if (head.ok && head.status !== 405 && head.status !== 501) return head
+  const get = await requestRawWithRetry(url, 'GET')
+  return get.ok ? get : head
 }
 
 function headerDetails(headerResults) {
@@ -670,15 +965,29 @@ async function main() {
     return
   }
 
-  const expected = extractGlobalHeaders(vercelConfig)
-  if (!expected.ok) {
-    await reportGuard('vercel.json', expected.error)
+  const rulesResult = extractHeaderRules(vercelConfig)
+  if (!rulesResult.ok) {
+    await reportGuard('vercel.json', rulesResult.error)
+    process.exitCode = 1
+    return
+  }
+  const rules = rulesResult.rules
+  const globalRule = rules.find((rule) => isGlobalSource(rule.source))
+  const engineRule = rules.find((rule) =>
+    rule.source.includes(ENGINE_PATH_PREFIX.trimStart('/')),
+  )
+
+  if (!globalRule) {
+    await reportGuard(
+      'vercel.json',
+      'No global headers block was found in the Vercel configuration; expected source "/(.*)" or "/((?!assets/engines/).*)".',
+    )
     process.exitCode = 1
     return
   }
 
   const missingHeaders = REQUIRED_HEADERS.filter(
-    (header) => !(header.toLowerCase() in expected.headers),
+    (header) => !(header.toLowerCase() in globalRule.headers),
   )
   if (missingHeaders.length > 0) {
     await reportGuard(
@@ -693,6 +1002,18 @@ async function main() {
   const record = (label, pass, observed, details = []) => {
     results.push({ label, pass, observed, details })
   }
+
+  // The two policies are a deliberate split: the engine directory is the only place a
+  // WebAssembly module may compile. If vercel.json ever loosens anything else, or tightens the
+  // engine policy into something the worker cannot use, the live site would break quietly.
+  const scope = policiesDifferOnlyInScriptSrc(globalRule?.headers, engineRule?.headers)
+  record(
+    'vercel.json policy split',
+    scope.pass && engineRule !== undefined,
+    engineRule
+      ? `${engineRule.source}: ${scope.reason}`
+      : `no rule for ${ENGINE_PATH_PREFIX} in vercel.json`,
+  )
 
   console.log('BugPilot live site check')
   console.log(`Base URL: ${base.baseUrl}`)
@@ -738,11 +1059,17 @@ async function main() {
       routeResult.failures,
     )
 
+    const forPath = expectedHeadersForPath(rules, route)
+    if (!forPath.ok) {
+      record(`Headers ${route}`, false, forPath.error)
+      continue
+    }
+
     const responseHeaders = Object.fromEntries(
       outcome.response.headers.entries(),
     )
     const headerResults = compareRequiredHeaders(
-      expected.headers,
+      forPath.headers,
       responseHeaders,
     )
     const headersPass = headerResults.every((result) => result.pass)
@@ -750,11 +1077,32 @@ async function main() {
     record(
       `Headers ${route}`,
       headersPass,
-      `${matched}/${REQUIRED_HEADERS.length} match vercel.json`,
+      `${matched}/${REQUIRED_HEADERS.length} match ${forPath.rule.source}`,
       headerDetails(headerResults),
     )
 
     if (route === '/') rootHtml = outcome.body
+  }
+
+  // One policy header, not two: a browser intersects duplicates, and a second (stricter)
+  // policy on the main document would block the engine worker before it starts.
+  const rootProbe = await probeHeaders(new URL('/', base.baseUrl).href)
+  if (!rootProbe.ok) {
+    record(
+      'Main document CSP count',
+      false,
+      `raw request failed: ${errorMessage(rootProbe.error)}`,
+    )
+  } else {
+    const policies = headerValues(rootProbe.rawHeaders, 'content-security-policy')
+    record(
+      'Main document CSP count',
+      policies.length === 1 && !policies.some((value) => value.includes("'wasm-unsafe-eval'")),
+      `${policies.length} CSP header(s), wasm-unsafe-eval ${
+        policies.some((value) => value.includes("'wasm-unsafe-eval'")) ? 'present' : 'absent'
+      }`,
+      policies,
+    )
   }
 
   if (rootHtml === '') {
@@ -820,6 +1168,93 @@ async function main() {
         }`,
         assetResult.failures,
       )
+    }
+  }
+
+  // ---- engine files -------------------------------------------------------------
+  // The deployed build writes assets/engines/manifest.json at build time, so the live check
+  // probes the files the browser will really fetch instead of made-up paths. Every one of them
+  // must carry the engine policy exactly once.
+  const manifestOutcome = await request(new URL(ENGINE_MANIFEST_PATH, base.baseUrl).href)
+  if (manifestOutcome.error !== null) {
+    record(
+      'Engine manifest',
+      false,
+      `network error: ${errorMessage(manifestOutcome.error)}; ${manifestOutcome.elapsedMs} ms`,
+    )
+    record('Engine headers', false, 'not checked: no engine manifest')
+  } else if (manifestOutcome.response.status !== 200) {
+    record(
+      'Engine manifest',
+      false,
+      `HTTP ${manifestOutcome.response.status} for ${ENGINE_MANIFEST_PATH}`,
+    )
+    record('Engine headers', false, 'not checked: no engine manifest')
+  } else {
+    const parsed = parseEngineManifest(manifestOutcome.body)
+    if (!parsed.ok) {
+      record('Engine manifest', false, parsed.error)
+      record('Engine headers', false, 'not checked: unreadable engine manifest')
+    } else {
+      const manifestHeaders = Object.fromEntries(
+        manifestOutcome.response.headers.entries(),
+      )
+      const manifestForPath = expectedHeadersForPath(rules, ENGINE_MANIFEST_PATH)
+      const manifestHeaderResults = manifestForPath.ok
+        ? compareRequiredHeaders(manifestForPath.headers, manifestHeaders)
+        : []
+      record(
+        'Engine manifest',
+        parsed.files.length > 0 &&
+          manifestHeaderResults.every((result) => result.pass),
+        `schema ${parsed.schemaVersion}; ${parsed.files.length} file(s); ${
+          manifestForPath.ok
+            ? `${manifestHeaderResults.filter((result) => result.pass).length}/${
+                REQUIRED_HEADERS.length
+              } headers match ${manifestForPath.rule.source}`
+            : manifestForPath.error
+        }`,
+        [
+          ...(parsed.files.length === 0 ? ['manifest lists no files'] : []),
+          ...headerDetails(manifestHeaderResults),
+        ],
+      )
+
+      if (!engineRule) {
+        record('Engine headers', false, 'no engine rule in vercel.json to compare with')
+      } else {
+        for (const target of engineProbeTargets(parsed.files)) {
+          const url = new URL(target.path, base.baseUrl).href
+          const probe = await probeHeaders(url)
+          if (!probe.ok) {
+            record(
+              `Engine ${target.path}`,
+              false,
+              `raw request failed: ${errorMessage(probe.error)}`,
+            )
+            continue
+          }
+          const policies = headerValues(probe.rawHeaders, 'content-security-policy')
+          const classified = classifyEngineResponse({
+            target,
+            status: probe.status,
+            contentType: headerValues(probe.rawHeaders, 'content-type')[0] ?? null,
+            cspValues: policies,
+            headerResults: compareRequiredHeaders(
+              engineRule.headers,
+              rawHeadersToObject(probe.rawHeaders),
+            ),
+            elapsedMs: probe.elapsedMs,
+            method: probe.method,
+          })
+          record(
+            `Engine ${target.path}`,
+            classified.pass,
+            classified.observed,
+            classified.failures,
+          )
+        }
+      }
     }
   }
 
