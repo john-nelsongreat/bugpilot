@@ -29,6 +29,12 @@ export interface AnalysisSessionResult {
   report: AnalyzerReport | null
   /** Archive reader counters; kept for the coverage panel even when a refusal stopped the run. */
   stats: ArchiveReadStats | null
+  /**
+   * In-memory copy of the analysed text so the fix review can build edits after the run.
+   * It lives only in this result object: nothing is written to storage, and the page
+   * replaces the result on Clear or route change so the strings become collectable.
+   */
+  sources?: readonly ArchiveEntry[]
 }
 
 export interface UploadArchiveInput {
@@ -98,8 +104,8 @@ function describeStartError(error: unknown): string {
 
 /**
  * Reads the upload, runs the pattern rules in the analyzer worker, then the optional TypeScript
- * syntax check, and returns a report. Decoded file text is not kept in the result, so the page
- * never holds source after the run ends.
+ * syntax check, and returns a report. The analysed text is returned only as in-memory sources
+ * so the fix review can compute edits; nothing is stored and Clear drops the whole result.
  */
 export async function analyzeUpload(
   input: UploadInput,
@@ -224,7 +230,7 @@ export async function analyzeUpload(
     coverage,
   })
 
-  return { status: 'completed', message: null, report, stats }
+  return { status: 'completed', message: null, report, stats, sources: entries }
 }
 
 function countFindings(analyses: readonly FileAnalysis[]): number {

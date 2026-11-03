@@ -97,22 +97,22 @@ export const NOT_CHECKED_BY_LANGUAGE: Record<SourceLanguage, string[]> = {
   javascript: [
     'No lint rules (unused variables, unreachable code, risky equality).',
     'No type checking, import resolution, data-flow or taint analysis.',
-    'No automatic code changes or clean-version export.',
+    'Automatic changes are limited to the verified fixers in the README; every other finding is manual-only.',
   ],
   jsx: [
     'No React or JSX semantics, hooks checks, or accessibility checks.',
     'No type checking, import resolution, data-flow or taint analysis.',
-    'No automatic code changes or clean-version export.',
+    'Automatic changes are limited to the verified fixers in the README; every other finding is manual-only.',
   ],
   typescript: [
     'No type checking: unresolved imports and undefined names are deliberately suppressed.',
     'No lint rules, data-flow, taint analysis, or project-wide checks.',
-    'No automatic code changes or clean-version export.',
+    'Automatic changes are limited to the verified fixers in the README; every other finding is manual-only.',
   ],
   tsx: [
     'No React or JSX semantics, hooks checks, or accessibility checks.',
     'No type checking: syntax diagnostics only.',
-    'No lint rules, data-flow, taint analysis, or automatic fixes.',
+    'Automatic changes are limited to the verified fixers in the README; every other finding is manual-only.',
   ],
   python: [
     'No Python syntax, indentation, import, or type checks.',

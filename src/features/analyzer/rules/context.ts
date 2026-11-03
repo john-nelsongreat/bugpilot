@@ -127,6 +127,7 @@ const PLACEHOLDER_PATTERNS: readonly RegExp[] = [
   /redacted/i,
   /^fake[_-]?/i,
   /^\$\{.*\}$/,
+  /^\$[A-Za-z_][A-Za-z0-9_]*$/,
   /^\{\{.*\}\}$/,
   /^<.*>$/,
   /^process\.env\./i,
