@@ -1512,7 +1512,7 @@ Run this after the saved-diagnosis flow above. Save a diagnosis again if the ear
 
 Use a disposable profile and keep DevTools open. Create every sample file and archive in a scratch folder **outside this repository**. The page never executes uploaded code, and no sample needs to be committed.
 
-### Sample folder, loose files, and zip
+### Sample folder, loose files, and archives
 
 Create a folder named `analyze-sample` with these files. Invent the fake key yourself; never paste a real credential.
 
@@ -1528,7 +1528,16 @@ Create a folder named `analyze-sample` with these files. Invent the fake key you
 - `node_modules/skip-me.js` — any JavaScript file.
 - `big.log` — more than 2 MiB of text (for the per-file skip check).
 
-Zip the folder as `analyze-sample.zip`.
+Zip the folder as `analyze-sample.zip`. From the scratch folder, also build the other supported containers from the same files (Git Bash supplies `tar` and `gzip`):
+
+```bash
+tar -cf analyze-sample.tar analyze-sample
+tar -czf analyze-sample.tar.gz analyze-sample
+gzip -c analyze-sample/notes.txt > notes.txt.gz
+cp analyze-sample.tar.gz mislabeled.zip
+```
+
+`notes.txt.gz` is one lone gzip stream, not a tar. `mislabeled.zip` is a gzip file whose name claims zip — the reader must decide from the bytes and report the disagreement.
 
 - [ ] Open **Analyze code** in the sidebar.
   - Expected: `/analyze`; tab title **Analyze code · BugPilot**; headings **Analyze code** and **Upload code to check**; the **Local analysis only.** statement; the limits list; **No files checked yet**.
@@ -1537,7 +1546,7 @@ Zip the folder as `analyze-sample.zip`.
   - Expected: focus moves to **Results for N files**; the summary shows findings, files analysed, files skipped, and critical/high counts.
   - Expected findings include: JavaScript and TypeScript syntax errors (High), a Critical secret finding, JSON syntax (High), merge-conflict markers (High), empty `except` (Low), insecure `http://` URL (Low), and TODO marker (Low).
   - Expected: the secret's evidence is redacted to its first two and last two characters. The full fake key never appears on the page.
-  - Expected: the coverage list names every file. `image.png` is **Skipped** as binary, `node_modules/skip-me.js` is **Skipped** as a vendored folder, and `big.log` is **Skipped** with the per-file ceiling reason. Analysed files list their language and the syntax/pattern tiers that ran or were unavailable.
+  - Expected: the coverage list names every file under `analyze-sample/`. `analyze-sample/image.png` is **Skipped** as binary, `analyze-sample/node_modules/skip-me.js` is **Skipped** as a vendored folder, and `analyze-sample/big.log` is **Skipped** with the per-file ceiling reason. Analysed files list their language and the syntax/pattern tiers that ran or were unavailable.
   - Expected: **No findings does not mean no bugs** lists the checks that were not performed for each analysed language.
 - [ ] Change **Severity** and **File**, then click **Reset filters**.
   - Expected: the **Showing X of Y findings** status and the visible groups follow the filters; reset restores all groups.
@@ -1551,10 +1560,50 @@ Zip the folder as `analyze-sample.zip`.
   - Expected: findings, coverage, filters, and both download buttons disappear; **No files checked yet** returns; saved reports in **Bug log** are unchanged.
 - [ ] Upload `analyze-sample.zip` with **Choose files** (not the folder picker).
   - Expected: the same findings and skipped reasons, with entries named inside the zip.
+- [ ] Repeat with `analyze-sample.tar` and `analyze-sample.tar.gz`.
+  - Expected: the same findings and skipped reasons as the zip. Entry names carry the archive's own paths (a `tar` built from the folder shows `analyze-sample/app.js`), and every analysed file is still listed with its own language and tiers. The coverage panel names the container as tar or gzip.
+- [ ] Upload `notes.txt.gz`.
+  - Expected: one analysed file named `notes.txt`, with the insecure-http URL (Low) and TODO marker (Low). The coverage panel says the upload was a gzip and shows one file. The file's text is read after inflating, never shown as an archive.
+- [ ] Upload `mislabeled.zip`, then download `report.md` and `report.json`.
+  - Expected: the analysis still runs, because the signature decides. No refusal. The downloaded `report.md` (under **Limitations**) and `report.json` (`limitations`) include a sentence saying the file is named `.zip` but its contents are a gzip archive, and that BugPilot works out the format from the contents, not the name.
+- [ ] Upload `analyze-sample.tar` renamed to `analyze-sample.gz` (or the gzip renamed to `.tar`), then download a report.
+  - Expected: the reader opens the format its bytes really are and adds the same kind of naming note to the downloaded report's limitations; nothing is refused just because the suffix is wrong.
 - [ ] Drag a loose `.js` file and then the whole folder onto the drop area.
   - Expected: both start the same analysis; the drag highlight clears when the pointer leaves.
 - [ ] Start a large folder or zip, then click **Cancel**.
   - Expected: **Analysis cancelled** says nothing was kept; no results panel appears; no report downloads are offered.
+
+### Paste, notebooks, sensitive names, generated files, and multiple uploads
+
+Use a third scratch folder outside the repository for these samples. Invent every fake value yourself.
+
+- [ ] Switch to the **Paste code** tab, choose **Python**, leave the virtual name empty, and paste:
+  ```python
+  api_key = "<type your own made-up value here>"
+  # TODO: move this key out of the source
+  ```
+  Replace the bracketed placeholder with a made-up random string of at least 24 mixed-case
+  letters and digits, typed by you; never use a real key. A placeholder word such as `example`
+  is deliberately ignored by the rule, so the value has to look random.
+  - Expected: the run completes for one file named `pasted/snippet.py`. The findings include the credential rule with a redacted quote and the TODO marker; the full string never appears on the page, and the reviewed diff masks it. The paste never becomes a real file and no picker opens.
+- [ ] Paste the same text with the virtual name `../../keys.py`.
+  - Expected: the report names it `snippet.py` or `keys.py` — never `../../` — because only the last segment of the virtual name is kept.
+- [ ] Paste an empty box. Expected: **Nothing was pasted, so there is no text to check.** Paste more than 1 MiB of text. Expected: an **Upload refused** message quoting the byte count and the 1 MiB paste ceiling, with **Nothing was analysed and nothing was kept.**
+- [ ] Create `analysis.ipynb` as a small real notebook with three cells: a Python code cell containing `See http://insecure-demo.dev/docs`, a second code cell whose saved `stream` output contains a made-up credential-shaped string, and a Markdown cell. Upload it with **Choose files**.
+  - Expected: the coverage panel lists `analysis.ipynb#cell-1` and `analysis.ipynb#cell-2`, and the stored output as its own row (`analysis.ipynb#cell-2.output-1`). The Markdown cell is not analysed.
+  - Expected: the output row produces only credential findings, with the message **A credential-shaped value appears in this cell’s stored output.**, empty evidence, no fix checkbox, and the limitation that stored output is never quoted or kept. Neither the stored text nor any part of it appears anywhere on the page or in either export.
+  - Expected: a code-cell finding that would normally offer a fix has no checkbox and says the change must be made in Jupyter; the clean export contains no notebook cell.
+- [ ] Upload a broken notebook: the same JSON with a missing comma. Expected: one JSON syntax finding, no quoted text, and a note saying BugPilot read the notebook as JSON only and never edits it.
+- [ ] Create a folder `sensitive-sample` containing a `.env` file with an invented password, an `id_rsa` file (contents can be any text), a `server.p12` file (any bytes), `package-lock.json` (valid JSON), `bundle.min.js` (one file with a long minified line), `node_modules/.env` with another invented value, and `src/app.js` with `const total = ;`.
+  - Expected: `.env` produces the High `bugpilot/sensitive/env-file` finding, `id_rsa` the Critical `bugpilot/sensitive/private-key-name` finding, and `server.p12` the High `bugpilot/sensitive/keystore` finding. None of them quotes the file, and all carry a manual-only "remove, add to .gitignore, rotate" direction.
+  - Expected: `package-lock.json` and `bundle.min.js` are **Skipped** with a generated-file reason naming the lockfile and the minified bundle. `node_modules/.env` is **Skipped** as a vendored folder yet still produces its High sensitive-name finding, because a name scan runs on skipped files too.
+  - Expected: `src/app.js` still produces its JavaScript syntax finding.
+- [ ] Tick **Include generated and vendored files** and upload the same folder again.
+  - Expected: `package-lock.json` and `bundle.min.js` are now analysed, subject to the same size limits, and appear in the findings/coverage instead of the skipped list. A `.git` folder is still never read at any setting, and its reason says so.
+- [ ] Create two folders, `multi-a` and `multi-b`, each with a different `src/app.js` (one with a syntax error, one with an insecure `http://` URL). Choose folder `multi-a`, then click **Add another upload to this run** and choose `multi-b`.
+  - Expected: one run covers both, files are named `upload-1/multi-a/src/app.js` and `upload-2/multi-b/src/app.js` (the picked folder name is part of each path), and both findings appear. Neither file overwrites the other.
+- [ ] With those files already picked, try to add `analyze-sample.zip` through **Add another upload to this run**.
+  - Expected: the archive is not merged into the run; the message says BugPilot opens one archive per run, so Clear and pick the archive on its own, or add loose files and folders here.
 
 ### Deep analysis engines (WebAssembly)
 
@@ -1660,48 +1709,103 @@ Upload the sample folder in a fresh state and wait for **Step 2 · Automatic fix
 
 ### Hostile archives and the declared limits
 
-These archives are generated locally and never committed. Save this script as `bugpilot\hostile-zips.mjs` temporarily, run `node hostile-zips.mjs` from the `bugpilot` folder, then delete the script. It writes the zips to `%TEMP%\bugpilot-sample-zips` and needs the already-installed `fflate`.
+These archives are generated locally and never committed. Save this script as `bugpilot\hostile-archives.mjs` temporarily, run `node hostile-archives.mjs` from the `bugpilot` folder, then delete the script. It writes the samples to `%TEMP%\bugpilot-hostile` and uses the already-installed `fflate`.
 
 ```js
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomFillSync } from 'node:crypto'
-import { zipSync, strToU8 } from 'fflate'
+import { gzipSync, zipSync, strToU8 } from 'fflate'
 
-const out = join(tmpdir(), 'bugpilot-sample-zips')
+const out = join(tmpdir(), 'bugpilot-hostile')
 mkdirSync(out, { recursive: true })
 const write = (name, data) => writeFileSync(join(out, name), data)
+const concat = (...parts) => {
+  const joined = new Uint8Array(parts.reduce((n, part) => n + part.length, 0))
+  let at = 0
+  for (const part of parts) { joined.set(part, at); at += part.length }
+  return joined
+}
+const tarHeader = (name, size) => {
+  const header = new Uint8Array(512)
+  header.set(strToU8(name), 0)
+  header.set(strToU8('0000644'), 100)
+  header.set(strToU8('0000000'), 108)
+  header.set(strToU8('0000000'), 116)
+  header.set(strToU8(size.toString(8).padStart(11, '0')), 124)
+  header.set(strToU8('00000000000'), 136)
+  header.fill(0x20, 148, 156)
+  header[156] = 0x30
+  header.set(strToU8('ustar'), 257)
+  header.set(strToU8('00'), 263)
+  let sum = 0
+  for (const byte of header) sum += byte
+  header.set(strToU8(sum.toString(8).padStart(6, '0') + '\u0000 '), 148)
+  return header
+}
+const tarOf = (name, text) => {
+  const body = strToU8(text)
+  return concat(tarHeader(name, body.length), body, new Uint8Array((512 - (body.length % 512)) % 512), new Uint8Array(1024))
+}
 
 write('hostile-traversal.zip', zipSync({ '../escape.txt': strToU8('x') }))
 write('hostile-nested.zip', zipSync({ 'inner.zip': strToU8('not really a zip') }))
 const many = {}
-for (let i = 0; i < 2500; i += 1) many[`f${i}.txt`] = strToU8('x')
+for (let i = 0; i < 6000; i += 1) many[`f${i}.txt`] = strToU8('x')
 write('hostile-many.zip', zipSync(many))
 write('hostile-bomb.zip', zipSync({ 'bomb.txt': new Uint8Array(8 * 1024 * 1024) }))
-const alphabet = Buffer.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/')
-const raw = randomFillSync(new Uint8Array(6 * 1024 * 1024))
-for (let i = 0; i < raw.length; i += 1) raw[i] = alphabet[raw[i] & 63]
-for (let i = 1000; i < raw.length; i += 1001) raw[i] = 10
+write('hostile-7z.zip', concat(new Uint8Array([0x37, 0x7b, 0xa3, 0xab, 0x27, 0x1c]), new Uint8Array(64)))
+write('hostile-rar.zip', concat(new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]), new Uint8Array(64)))
+write('hostile-bidi.zip', zipSync({
+  ['src/invoice\u202Egnp.js']: strToU8('See http://insecure-demo.dev/docs\n'),
+  ['src/hidden\u200Bpart.js']: strToU8('// TODO: hidden name\n'),
+  ['<img src=x onerror=alert(1)>.js']: strToU8('const value = ;\n'),
+  ['src/[click](x)*.js']: strToU8('See http://insecure-demo.dev/docs\n'),
+  [`deep/${'x'.repeat(300)}.js`]: strToU8('const value = ;\n'),
+}))
+write('hostile-newline.zip', zipSync({ ['src/a\nb.js']: strToU8('See http://insecure-demo.dev/docs\n') }))
+write('hostile-traversal.tar', tarOf('../escape.txt', 'x'))
+write('hostile-truncated.tar', tarOf('cut.txt', 'x'.repeat(2048)).slice(0, 700))
+write('hostile-truncated.tar.gz', gzipSync(tarOf('cut.txt', 'x'.repeat(2048))).slice(0, 60))
+write('hostile-members.tar.gz', concat(gzipSync(tarOf('a.txt', 'a')), gzipSync(tarOf('b.txt', 'b'))))
+write('gzip-bomb.txt.gz', gzipSync(new Uint8Array(8 * 1024 * 1024)))
+const line = strToU8('plain sample text for the archive size check\n')
+const raw = new Uint8Array(6 * 1024 * 1024)
+for (let at = 0; at < raw.length; at += line.length) raw.set(line.subarray(0, Math.min(line.length, raw.length - at)), at)
 const big = {}
 for (let i = 0; i < 4; i += 1) big[`big-${i}.txt`] = raw.subarray(i * 1572864, (i + 1) * 1572864)
 write('large-ok.zip', zipSync(big))
+write('hostile-huge.zip', zipSync({ 'padding.bin': randomFillSync(new Uint8Array(26 * 1024 * 1024)) }))
 console.log(out)
 ```
 
 Run each upload in a fresh tab state (click **Clear results** between attempts) and watch the Console and the page for freezing.
 
 - [ ] `hostile-bomb.zip`: expected **Upload refused**, with **An entry claims to expand far more than a normal text file does, so BugPilot refused it before unpacking anything.** and **Nothing was analysed and nothing was kept.**
-- [ ] `hostile-traversal.zip`: expected **Upload refused**, with a message saying a name points out of the archive with `..`.
+- [ ] `gzip-bomb.txt.gz`: expected **Upload refused**, saying an entry expanded far more than its own header admitted while it was being unpacked. The refusal happens before the 8 MiB is held.
+- [ ] `hostile-traversal.zip` and `hostile-traversal.tar`: expected **Upload refused**, with a message saying a name points out of the archive with `..`.
 - [ ] `hostile-nested.zip`: expected **Upload refused**, with **The entry "inner.zip" is itself an archive. BugPilot does not open archives inside archives, so the upload is refused.**
-- [ ] `hostile-many.zip`: expected **Upload refused**, saying the archive holds more than 2000 entries and that reading stopped at that count.
+- [ ] `hostile-many.zip`: expected **Upload refused**, saying the archive holds more than 5000 entries and that reading stopped at that count. Confirm the page stayed responsive while counting.
+- [ ] `hostile-truncated.tar`: expected **Upload refused**, saying the archive is cut off inside `cut.txt` and that nothing was read from it.
+- [ ] `hostile-truncated.tar.gz`: expected **Upload refused**, saying the compressed data is damaged or incomplete and that nothing was unpacked.
+- [ ] `hostile-members.tar.gz`: expected **Upload refused**, saying it is two or more gzip streams joined into one file and that BugPilot reads a single gzip stream.
+- [ ] `hostile-7z.zip` and `hostile-rar.zip`: expected **Upload refused**. Each file is named `.zip` but carries a `.7z` or `.rar` signature, so the refusal names the family, says BugPilot does not decode `.7z`/`.rar` in the browser, and advises re-archiving as `.zip` or `.tar.gz`. A naming note before the refusal says the format comes from the contents, not the name.
+- [ ] Upload `hostile-huge.zip` (26 MiB, over the 25 MiB archive ceiling). Expected: **Upload refused** with the archive byte-ceiling message, before analysis starts.
 - [ ] While each refusal is processed, the page stays responsive: the theme toggle still responds, the progress/limit text does not freeze, and no browser tab warning about an unresponsive page appears. Memory in DevTools does not keep climbing after the refusal.
-- [ ] Upload `large-ok.zip` (about 4.7 MB compressed; four files of 1.5 MiB each).
-  - Expected: the run completes; all four files are analysed (none is skipped for size), and the only findings are Low large-file findings. No refusal.
-- [ ] Upload a folder containing the 6 MiB of `big-*.txt` text from `large-ok.zip` plus an extra text file over 2 MiB.
-  - Expected: files over 2 MiB are skipped with the per-file ceiling reason; smaller files are analysed; the run does not stop.
-- [ ] Upload an archive larger than 10 MiB (for example, a zip of the same large files plus padding).
-  - Expected: **Upload refused** with the archive byte-ceiling message, before analysis starts.
+- [ ] Upload `hostile-bidi.zip` and open the results.
+  - Expected: every hostile name is shown literally, never interpreted: `src/invoice\u202Egnp.js`, `src/hidden\u200Bpart.js`, the `<img …>` name as text rather than an element, `src/[click](x)*.js`, and the long `deep/…` name shortened to at most 72 characters, ending in `…`. Hovering a shortened name shows the full name in the browser tooltip.
+  - Expected: the Markdown report escapes the HTML and bracket characters (`&lt;img …&gt;`, `\[click\]`), contains the full long name, and contains no raw U+202E or U+200B character. `report.json` stays valid JSON and keeps the original names. No name is rendered as markup anywhere.
+- [ ] Still in `hostile-bidi.zip`, tick only the `http://` → `https://` change for `src/[click](x)*.js`, open the review, and build the clean export.
+  - Expected: the export builds, and `changes.patch` uses the original path (raw brackets), while the changelog and report escape the name. `git apply --check` on a scratch repository accepts the patch, as in the clean-export section.
+- [ ] Tick the `http://` → `https://` change for `src/invoice\u202Egnp.js` as well and build the clean export again.
+  - Expected: **Clean export blocked** before any file is offered, because the path contains an invisible character. The message names `src/invoice\u202Egnp.js`, says Git cannot apply a patch with that path safely, and offers **Download report only**. No patch, zip or changelog is produced.
+- [ ] Upload `hostile-newline.zip`, tick the `http://` → `https://` change, open the review, and build the clean export.
+  - Expected: **Clean export blocked** before any file is offered, because the path contains a line break. The message names `src/a\u000Ab.js`, says Git cannot apply a patch with that path safely, and offers **Download report only**. No patch, zip or changelog is produced.
+- [ ] Upload `large-ok.zip` (about 19 KB on disk; four files of 1.5 MiB each, 6 MiB in total).
+  - Expected: the run completes; all four files are analysed (none is skipped for size), each gets a Low large-file finding, and there is no refusal.
+- [ ] Extract `large-ok.zip` into a scratch folder, add an extra `.txt` file over 2 MiB, and upload that folder.
+  - Expected: the extra file is skipped with the per-file ceiling reason; the four 1.5 MiB files are analysed; the run does not stop.
 
 ### Privacy and data retention
 
@@ -1715,7 +1819,7 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
   await snapshot()
   ```
   Copy the result. Do not toggle the theme and do not navigate during the check. The footer rotates a session-only joke index every 60 seconds, so finish within a minute or repeat behind a clock; that footer key is the only thing allowed to change.
-- [ ] Run an analysis, use both filters, download both reports (with and without snippets), tick fixes, open the review, build the clean export, download every output, and click **Clear results**.
+- [ ] Run an analysis, use both filters, download both reports (with and without snippets), tick fixes, open the review, build the clean export, download every output, run a paste and a notebook upload, add a second upload to a run, and click **Clear results**.
 - [ ] Run `await snapshot()` again and compare.
   - Expected: identical strings; `databases` is still empty. `localStorage.getItem('bugpilot.bugs.v1')` is byte-for-byte unchanged.
 - [ ] With DevTools Network open, clear the log after the page has loaded, then upload a small file, select a fix, open the review, and build the clean export.

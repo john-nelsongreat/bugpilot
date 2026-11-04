@@ -27,7 +27,7 @@ This repository contains a working MVP, not a hosted service: the live demo is a
 - **Local persistence** in `localStorage`, including first-run sample reports and a recovery copy when stored JSON is unreadable. The original stored value is not overwritten when it cannot be read.
 - **Debug Assistant** at `/assistant`, backed by a local rule engine with 16 Python rules, 14 JavaScript rules, and one language-neutral Git rule. It returns a category, confidence, evidence, debugging steps, a possible fix, verification steps, limitations, and alternatives. A report with an error message can open the Assistant with **Analyse with Assistant**; the report's error text, language, steps, and actual behavior are prefilled, and analysis still requires **Analyze**.
 - **Saved diagnoses**: after a recognised analysis loaded from a report, the Assistant previews every field and writes one diagnosis to that report when confirmed. The bug detail shows the category, signature, confidence, selected evidence, and saved date, and can remove the diagnosis without touching the proposed fix, fix state, status, or verification notes.
-- **Code analysis** at `/analyze`: upload a folder, a `.zip`, or loose files and get findings from 16 registered pattern/syntax rules plus a lazy TypeScript syntax check, with per-file coverage, skipped-file reasons, severity/file filters, and `report.md`/`report.json` downloads. An opt-in second pass loads WebAssembly grammars (tree-sitter, 16 languages) and the Ruff Python linter in the tab, and quotes every file's size before downloading any of it. Four deterministic fixers (credentials, JSON trailing commas, plain-`http://` URLs, mixed indentation) propose changes that are re-verified on in-memory copies; a lazy unified/side-by-side diff review follows, then an isolated clean export (`changes.patch`, `clean.zip`, `CHANGELOG.md`, and the report). Everything runs in the tab in web workers; uploaded text is never executed, uploaded, or persisted, and report exports contain no evidence quotes unless the user ticks the snippet box. See [Code analysis](#code-analysis).
+- **Code analysis** at `/analyze`: upload folders, loose files, `.zip`, `.tar`, `.tar.gz`/`.tgz` archives or package archives, or paste a snippet, and get findings from 16 registered pattern/syntax rules, eleven sensitive-file-name rules, and a lazy TypeScript syntax check, with per-file coverage, skipped-file reasons, severity/file filters, and `report.md`/`report.json` downloads. Several uploads can be checked in one run under `upload-N/` prefixes; Jupyter notebooks are split into cells; generated and vendored files are skipped by default with an override. An opt-in second pass loads WebAssembly grammars (tree-sitter, 16 languages) and the Ruff Python linter in the tab, and quotes every file's size before downloading any of it. Four deterministic fixers (credentials, JSON trailing commas, plain-`http://` URLs, mixed indentation) propose changes that are re-verified on in-memory copies; a lazy unified/side-by-side diff review follows, then an isolated clean export (`changes.patch`, `clean.zip`, `CHANGELOG.md`, and the report). Everything runs in the tab in web workers; uploaded text is never executed, uploaded, or persisted, and report exports contain no evidence quotes unless the user ticks the snippet box. See [Code analysis](#code-analysis) and [Upload security model](#upload-security-model).
 - **Light and dark themes**, seeded from the system preference on first visit and saved after the user toggles.
 - **Accessibility and interaction details**: skip link, labelled controls, focus-visible styling, focus-trapped delete, import, remove-diagnosis, and save-diagnosis dialogs with focus return to their triggers, status announcements, a document title per route, auto-dismissing toast, a WCAG contrast test for the theme tokens, and axe-core checks over every page and dialog state. See [Accessibility](#accessibility).
 - **Rotating footer joke**: one joke per page, changing every 60 seconds and after a reload or return to the page.
@@ -114,7 +114,7 @@ I built BugPilot with an AI coding assistant and planned its prompts with anothe
 | Styling | Hand-written CSS with custom properties; no CSS framework |
 | Tests | Vitest 5.0.5, Testing Library, jsdom 30.1.3, axe-core 4.14.0 (dev only) |
 | Linting | oxlint 1.88.0 |
-| Archives | fflate 0.8.3 (MIT), used by the streaming zip reader and the clean-export zip writer |
+| Archives | fflate 0.8.3 (MIT), used by the streaming zip and gzip readers and the clean-export zip writer |
 | Diffs | `diff` 9.0.0 (jsdiff, BSD-3-Clause), used only by the lazy review and clean-export chunks |
 | Analysis engines | `web-tree-sitter` 0.27.1 and `tree-sitter-wasm` 2.0.4 (16 grammars), plus `@astral-sh/ruff-wasm-web` 0.17.3 — all MIT, all WebAssembly, all lazy and opt-in. See [Engine licences](docs/ENGINE-LICENCES.md) |
 | Storage | Browser `localStorage` and `sessionStorage` only |
@@ -720,7 +720,7 @@ After adding a rule like this to the `pythonRules` array, a false-positive test 
 
 ## Code analysis
 
-`/analyze` is a local static-review page, separate from the Assistant. Upload a folder, a `.zip`, or loose files; BugPilot reads them in the tab, runs its own pattern rules, and asks the TypeScript parser for syntax diagnostics. Nothing is executed, uploaded, or persisted. Four deterministic fixers can propose text changes; each proposal is re-verified on an in-memory copy before it is offered, shown in a diff review, and only then available in a clean export. The page states its limits before any upload and prints the checks that were **not** performed for each language that was analysed.
+`/analyze` is a local static-review page, separate from the Assistant. Upload folders, loose files, `.zip`, `.tar`, `.tar.gz`/`.tgz` or package archives, add several uploads to one run, or paste a snippet; BugPilot reads them in the tab, runs its own pattern rules and sensitive-file-name rules, splits Jupyter notebooks into cells, and asks the TypeScript parser for syntax diagnostics. Nothing is executed, uploaded, or persisted. Four deterministic fixers can propose text changes; each proposal is re-verified on an in-memory copy before it is offered, shown in a diff review, and only then available in a clean export. The page states its limits before any upload and prints the checks that were **not** performed for each language that was analysed.
 
 After that first pass the page can offer a **second, opt-in pass** that reads the real grammar of each file with tree-sitter WebAssembly, and lints Python with Ruff WebAssembly. Nothing heavy loads until the user presses **Run deep analysis** in the gate, which lists every file, its size, and the total first. See [Code analysis engines](#code-analysis-engines).
 
@@ -854,7 +854,7 @@ Timings for synthetic mixed-language projects (same Node harness, engine grammar
 
 ### Rules
 
-There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id synthesised by the worker. The opt-in deep pass adds 29 ids — 2 tree-sitter syntax ids, 5 tree-sitter query ids, and 22 Ruff ids (`ruff/syntax-error` plus one `ruff/<CODE>` for each of the 21 selected rules) — listed in [What each engine can report](#what-each-engine-can-report) rather than here, because they never run until the user approves the engine download.
+There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id synthesised by the worker, and eleven sensitive-file-name rule ids produced outside the registry. The opt-in deep pass adds 29 ids — 2 tree-sitter syntax ids, 5 tree-sitter query ids, and 22 Ruff ids (`ruff/syntax-error` plus one `ruff/<CODE>` for each of the 21 selected rules) — listed in [What each engine can report](#what-each-engine-can-report) rather than here, because they never run until the user approves the engine download.
 
 | Rule id | Tier | Severity | Languages | Finds |
 | --- | --- | --- | --- | --- |
@@ -869,6 +869,8 @@ There are 16 registered pattern/syntax rules plus one TypeScript syntax rule id 
 | `bugpilot/typescript/syntax` | syntax | High (parser warnings: Medium) | JS/JSX/TS/TSX | TypeScript parser errors and warnings, syntax only |
 
 The eight secret rules are `bugpilot/secret/aws-access-key`, `github-token`, `slack-token`, `stripe-live-key`, `private-key-block`, `jwt`, `connection-string`, and `credential-assignment`. All are `pattern` tier and `Critical`, and all run on every text language. Evidence quotes are redacted to two leading and two trailing characters. Placeholder values and low-entropy literals are filtered; an assignment's confidence moves from medium to high only when its literal is long enough and has enough entropy.
+
+Eleven sensitive-file-name rules (`bugpilot/sensitive/*`) report a credential store by its name: dotenv files, private-key file names, keystores, Terraform state, `.npmrc`, `.pypirc`, `wp-config.php`, and generic credential files. They are produced by a dedicated name scan, not the rule registry, because they must also fire for a file the reader skipped or a generated-file rule set aside — a vendored folder can still hold a live key. They never quote the file, and they carry a manual-only "remove, ignore, rotate" direction.
 
 Every rule has positive tests, lookalike tests that must not match, and prose-style negative tests that mention the pattern in a sentence without it being code, plus a registry test that checks ids, metadata, and empty-file quietness. Test fixtures never contain a literal credential-shaped string; fake secrets are assembled at runtime from fragments.
 
@@ -908,23 +910,38 @@ Before any file is offered, the builder re-runs the verification on the selected
 
 Exactly one exported function authorises the export: `authorizeCleanExport()` in `features/analyzer/cleanExport/gate.ts`, called only by the UI entry point. In this build it always allows the export, because everything runs in the tab. **This client-side gate is advisory and bypassable** by editing the loaded JavaScript or calling the builder directly; it is not a security or billing boundary. A future daily-credit system would check a server-issued signed token inside that one function; no server, account or credit logic exists now. An architecture test asserts that only the UI entry imports the gate and that the builder imports no React, UI or page code.
 
+### Upload security model
+
+Uploaded bytes are treated as hostile input. The defence is layered, and every layer is enforced before the next one sees the data.
+
+1. **Intake.** Each upload is screened on its announced names before a byte is read: traversal (`..`), absolute paths, Windows drive letters, backslash separators, NUL bytes, names over 1,024 characters, duplicate names, and archives nested in a folder are refused for that upload only. Several folders and loose-file sets can be added to one run; when more than one upload is present each gets an `upload-N/` prefix, an untrusted upload is set aside with a reason, and the others are still read. An archive has to be picked on its own. A pasted snippet is capped at 1 MiB of UTF-8, keeps only the last segment of its virtual name (80 characters), and enters the same reader as a picked file.
+2. **Format detection.** The format is decided from the bytes, never from the name. Zip local headers and end-of-directory records are searched only in bounded windows at each end (to allow self-extracting stubs); a non-empty tar is accepted only when its first header carries `ustar` **and** its checksum adds up (an empty tar is just zero blocks); gzip is two magic bytes. A name that disagrees with the contents is reported, not obeyed. Supported: `.zip` and the zip-based package families (`.whl`, `.jar`, `.war`, `.aar`, `.apk`, `.nupkg`, `.vsix`), `.tar`, and a single gzip stream (`.gz`, `.tgz`). A `.7z`, `.rar`, `.bz2`, `.xz` or `.zst` signature is refused as soon as the bytes are read, with the family named when the file entered the container reader; a picked `.7z` or `.rar` is refused as an archive before it is opened. No decoder ships. A gzip stream is opened exactly one layer: what comes out must be a tar or one text file; a zip, another gzip, or an archive inside an archive is refused.
+3. **Readers.** The zip reader walks the central directory and then re-checks each local header; the tar reader re-validates every header it walks (checksum, octal fields, base-256 sizes, bounded PAX/GNU long names); the gzip reader checks the header, enforces the ratio ceilings while inflating, verifies the CRC and refuses a second member. All three share one refusal vocabulary with plain-language messages. They refuse traversal, absolute paths, drive letters, backslashes, NUL bytes, duplicate names, nested archives, encrypted entries, ZIP64, data descriptors, unsupported compression, checksum mismatches, damaged indexes, truncated bodies, multi-member gzip and inconsistent sizes. A zip entry that is a symbolic link refuses the archive; tar links, devices and volume records are skipped as special entries. Binaries, empty entries, directory entries, files over 2 MiB, ignored folders and generated files are skipped with a reason, never silently dropped.
+4. **Bounded work.** Reading is streaming and counted on records actually walked, not on what an archive declares. The ceilings are in the table below; the 180 s wall clock stops an upload that would otherwise keep the tab busy, and the declared and actual expansion ratios stop both a lying header and a lying stream. `navigator.deviceMemory` at 2 GiB or less halves the four memory ceilings (archive, total, single file, entry count); the ratio and time limits are unchanged, because a slow machine needs the same protection, not a shorter fuse. Uploaded text is held in memory only. The analysed text is kept in full for the review below 32 MiB; above that only the files a finding points at are kept. The deep pass reads the upload again from its original handles rather than holding a second copy of a large upload; when a handle has gone stale, text kept under the 32 MiB rule stands in for it.
+5. **No execution, ever.** Uploaded code is never evaluated, compiled, imported or run. The only readers are pattern/text rules, `JSON.parse`, the TypeScript parser, the opt-in tree-sitter grammars and Ruff. Notebooks are parsed as JSON; each code cell becomes its own virtual file and each stored output is seen only by the credential rules. Nothing is previewed or rendered as HTML.
+6. **Output safety.** The Markdown report and `CHANGELOG.md` escape Markdown and HTML, and every on-screen name, message and quote marks control, bidi and zero-width characters as `\uXXXX` so a hostile file name cannot reorder text or hide a finding. Code evidence keeps its tabs and newlines but marks every other control character, and is fenced with a backtick run longer than any run inside it. Long file names are shortened to 72 characters on screen; the full name is the tooltip, and the report exports keep it. `report.json` stays valid JSON with the original names. `changes.patch` keeps original paths so `git apply` can find the files, but the clean export is blocked before any file is offered when a path contains a line break, a control or invisible character, a backslash, an absolute path or drive letter, a `..` segment, or a path segment starting with `-`. The patch itself quotes the original lines, including a removed credential; the changelog, manifest and reports never reproduce one.
+7. **No network, no storage.** The page makes no request that carries uploaded text, and writes nothing to `localStorage`, `sessionStorage` or IndexedDB. Exports are browser downloads the user chooses. The clean-export gate is client-side and advisory only, as stated above.
+
 ### Limits, applied before analysis
 
 | Cap | Value |
 | --- | --- |
-| Archive file | 10 MiB |
-| Total decoded text across the upload | 50 MiB |
+| Archive file | 25 MiB |
+| Total decoded text across the upload | 150 MiB |
 | One file | 2 MiB; a larger file is skipped with a reason, not fatal |
-| Archive entries walked | 2,000; reading stops as soon as the cap is exceeded |
-| One entry name | 1,024 bytes |
+| Archive entries walked | 5,000; reading stops as soon as the cap is exceeded |
+| One entry name | 1,024 bytes inside an archive; 1,024 characters for a picked file name |
 | Declared expansion ratio | 60 : 1, refused before inflating |
 | Actual expansion ratio while inflating | 300 : 1, refused at that point |
-| Loose files or folder-drop sources collected | 2,000 plus one sentinel, so an over-limit drop is refused rather than silently truncated |
+| Wall clock for one read | 180 s; the upload is stopped rather than left running |
+| Loose files or folder-drop sources collected | 5,000 plus one sentinel, so an over-limit drop is refused rather than silently truncated |
+| Retained analysed text | 32 MiB; above it only files with findings are kept for the review |
+| Pasted snippet | 1 MiB of UTF-8, measured before analysis |
 | Rule time / findings per file | 1.5 s / 200 |
 | TypeScript syntax check per file | 5 s |
 | Deep engine pass | 3 s per file, 120 s per upload, 100 findings per file, 12 syntax regions per file, 12 MiB and 30 s per engine download — see [Budgets](#budgets) |
 
-The reader is a streaming zip reader. It refuses, with a plain-language message, traversal (`..`), absolute paths, Windows drive letters, backslash separators, NUL bytes, duplicate names, symbolic links, nested archives, encrypted entries, ZIP64, data descriptors, unsupported compression, checksum mismatches, and damaged indexes before or while reading. It skips binaries, empty entries, directory entries, files over 2 MiB, and anything under `.git`, `node_modules`, `dist`, `build`, `.next`, `coverage`, `__pycache__`, `.venv`, `venv`, `vendor`, `target`, `bin`, or `obj`. Only `.zip` archives are read; `.tar`, `.gz`, `.7z`, `.rar`, and similar files are treated as ordinary files or refused as nested archives.
+On a device that reports 2 GiB of memory or less, the archive, total, single-file and entry-count caps are halved. The reader itself is described in the [upload security model](#upload-security-model); it reads zip, tar and one gzip layer, and refuses every other archive family by name.
 
 ### Report, coverage, and export
 
@@ -938,10 +955,10 @@ The coverage panel lists every uploaded entry: analysed or skipped, its detected
 
 ### Privacy
 
-- Files are read in this tab by same-origin web workers. **No uploaded code is executed**: the only parsers are BugPilot's regex/text rules, `JSON.parse`, the TypeScript parser, and — after the user approves the gate — the tree-sitter and Ruff WebAssembly grammars. Fixes are computed by string edits and never run.
+- Files are read in this tab by same-origin web workers. **No uploaded code is executed**: the only parsers are BugPilot's regex/text rules, `JSON.parse` (also used to split a notebook into cells), the TypeScript parser, and — after the user approves the gate — the tree-sitter and Ruff WebAssembly grammars. Fixes are computed by string edits and never run. Uploaded text is never previewed or rendered as HTML.
 - The WebAssembly engines are BugPilot's own build output, served from this origin. They are compiled and run by the browser inside the engine worker, which is why only `assets/engines/` carries `'wasm-unsafe-eval'`. They receive the file text and return diagnostics; they cannot open a socket, and they are given no host object.
-- Uploaded text is never sent to a server, never written to `localStorage` or `sessionStorage`, never written to IndexedDB, and never added to the bug log or a saved diagnosis. The page tests spy on `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, `WebSocket`, and `indexedDB.open` across upload, fix selection, the diff review, the clean-export build and downloads, Clear, and a route change, and compare the full `localStorage`/`sessionStorage` contents before and after; all of those checks must stay quiet and byte-identical. Loading the page and its workers fetches only same-origin static JavaScript chunks and, in the approved deep pass only, same-origin static `.wasm` files — none of which contain uploaded text. A component test asserts that the only `fetch` call an engine-gate interaction makes is `/assets/engines/manifest.json`, and that no request carries the file's content.
-- The in-memory report keeps the redacted evidence quotes needed for the on-screen findings. The analysed text is also retained in memory as `sources` so fixes can be computed and re-verified; it is never written to storage and is dropped on Clear or when the page unmounts. Nothing survives a reload.
+- Uploaded text is never sent to a server, never written to `localStorage` or `sessionStorage`, never written to IndexedDB, and never added to the bug log or a saved diagnosis. The page tests spy on `fetch`, `XMLHttpRequest`, `navigator.sendBeacon`, `WebSocket`, and `indexedDB.open` across upload, paste, multiple sources, fix selection, the diff review, the clean-export build and downloads, Clear, and a route change, and compare the full `localStorage`/`sessionStorage` contents before and after; all of those checks must stay quiet and byte-identical. Loading the page and its workers fetches only same-origin static JavaScript chunks and, in the approved deep pass only, same-origin static `.wasm` files — none of which contain uploaded text. A component test asserts that the only `fetch` call an engine-gate interaction makes is `/assets/engines/manifest.json`, and that no request carries the file's content.
+- The in-memory report keeps the redacted evidence quotes needed for the on-screen findings. The analysed text is also retained in memory as `sources` so fixes can be computed and re-verified: in full below 32 MiB, and above that only the files a finding points at, with the deep pass reading the rest again from the original handles. It is never written to storage and is dropped on Clear or when the page unmounts. Nothing survives a reload.
 - Exports are the only way data leaves the page, and they are browser downloads chosen by the user. The report-only files contain no source file contents other than evidence quotes, and only when the snippet box was ticked. The clean export is different by design: `clean.zip` contains the analysed text files with fixes applied, and `changes.patch` quotes the original lines, including any original credential value that was removed. Both are built only after the user ticks the outputs and presses **Build clean export**; the changelog, report and manifest never reproduce a credential value.
 - There is no execution of uploaded code, no package installation, no network fetch of a user URL, and no AI provider. The only binaries the page runs are its own WebAssembly engines, and they run only after the user approves their download.
 
@@ -953,7 +970,7 @@ The coverage panel lists every uploaded entry: analysed or skipped, its detected
 - No general auto-fixing or formatting: only the four fixers above. No refactoring, dependency upgrades, renames, logic rewrites, or semantic changes beyond replacing a credential literal with an environment lookup. No automatic apply to the user's project, no commit, and no write outside the browser download.
 - No server-side gate or credit accounting; the gate is client-side and bypassable, as stated above.
 - No code execution, tests, builds, or package installation.
-- No archives inside archives, ZIP64, encrypted archives, password prompts, or `.tar`/`.gz`/`.7z`/`.rar` reading.
+- No archives inside archives, ZIP64, encrypted archives, password prompts, or reading `.7z`, `.rar`, `.bz2`, `.xz` or `.zst` files. `.zip` (and zip-based packages), `.tar`, `.tar.gz`/`.tgz` and one gzip layer are read; a gzip is never opened further than the tar or text it contains.
 - Secret detection is best-effort pattern matching. A clean run is not a security audit and does not prove that a file contains no secret.
 - No persistence of an analysis; only the bug log and its saved diagnoses persist.
 
@@ -961,8 +978,11 @@ The coverage panel lists every uploaded entry: analysed or skipped, its detected
 
 ```text
 src/features/analyzer/
-├─ archive/        Streaming zip guard and reader, decoding, language classification, loose-file intake, worker and client
-├─ analysis/       Finding model, rule engine, coverage, report model, session orchestration, workers, clients, and fix verification
+├─ archive/        Signature-based format detection, streaming zip guard and reader, strict tar reader,
+│                  streaming gzip reader, shared bounds/refusal vocabulary, Jupyter notebook splitting,
+│                  path checks, decoding, language classification, loose-file intake, worker and client
+├─ analysis/       Finding model, rule engine, coverage, report model, sensitive-file scan, generated-file
+│                  split, session orchestration, workers, clients, and fix verification
 │  └─ typescript/  Classic worker and client for the syntax-only TypeScript check
 ├─ cleanExport/    The one authorisation gate and the in-memory builder for patch, zip, changelog and report
 ├─ engines/        WebAssembly feature probe, engine worker + client + protocol, per-language grammar registry,
@@ -972,14 +992,15 @@ src/features/analyzer/
 ├─ export/         Export filtering and the Markdown/JSON writers and download helpers
 ├─ fixes/          Fix candidates, the four fixers, overlap resolution, and text-edit helpers
 ├─ review/         jsdiff-backed unified/side-by-side model, line mapping and credential masking, plus the diff worker and its client
-├─ rules/          Generic, secret, and JSON syntax rules plus shared text helpers
+├─ rules/          Generic, secret, sensitive-file-name, and JSON syntax rules plus shared text helpers
+├─ sanitize/       Control/bidi/zero-width marking, Markdown/HTML escaping, safe truncation, and patch-path checks
 ├─ ui/             AnalyzeResults, EngineGate, FixReview, CleanExportPanel, and their download helpers
-├─ upload/         File, folder-picker, and drag-and-drop source collection
+├─ upload/         File, folder-picker, drag-and-drop and pasted-text collection, plus multi-upload namespacing
 ├─ languages.ts    Labels, TypeScript-family detection, tier availability, and per-language not-checked lists
 └─ types.ts        Finding, coverage, and report types
 ```
 
-`src/pages/AnalyzePage.tsx` owns the page state, upload inputs, progress, cancellation, and report downloads. The worker entry points are `src/features/analyzer/archive/worker.ts`, `src/features/analyzer/analysis/worker.ts`, `src/features/analyzer/analysis/typescript/tsWorkerEntry.ts`, `src/features/analyzer/engines/engineWorkerEntry.ts`, and `src/features/analyzer/review/diffEntry.ts`. `FixReview` and `CleanExportPanel` are lazy imports from `AnalyzeResults`, so jsdiff and fflate stay out of the main entry. Only `engineWorkerEntry*` and `engineClient*` chunks and every `.wasm` file are emitted into `assets/engines/` — the two roots are named in `vite.config.ts`, so engine glue they share stays under the main policy and the `'wasm-unsafe-eval'` allowance cannot creep outward by accident.
+`src/pages/AnalyzePage.tsx` owns the page state, upload inputs, paste tab, multiple uploads, progress, cancellation, and report downloads. The worker entry points are `src/features/analyzer/archive/worker.ts`, `src/features/analyzer/analysis/worker.ts`, `src/features/analyzer/analysis/typescript/tsWorkerEntry.ts`, `src/features/analyzer/engines/engineWorkerEntry.ts`, and `src/features/analyzer/review/diffEntry.ts`. `FixReview` and `CleanExportPanel` are lazy imports from `AnalyzeResults`, so jsdiff and fflate stay out of the main entry. Only `engineWorkerEntry*` and `engineClient*` chunks and every `.wasm` file are emitted into `assets/engines/` — the two roots are named in `vite.config.ts`, so engine glue they share stays under the main policy and the `'wasm-unsafe-eval'` allowance cannot creep outward by accident.
 
 ### How to add a rule
 
