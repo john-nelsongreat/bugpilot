@@ -217,7 +217,7 @@ export function AnalyzePage({
   useEffect(() => {
     folderInputRef.current?.setAttribute('webkitdirectory', '')
     folderInputRef.current?.setAttribute('directory', '')
-  }, [])
+  }, [intakeMode])
 
   useEffect(() => {
     return () => {
