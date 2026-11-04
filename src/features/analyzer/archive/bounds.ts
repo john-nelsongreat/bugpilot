@@ -123,6 +123,15 @@ export function validateName(name: string): void {
 /** Work the loops may do between awaits; long enough that 2 000 records stay fast. */
 const SLICE_MS = 12
 
+/** Whether the read has used up its wall clock. Readers that cannot throw ask this directly. */
+export function isWallClockSpent(limits: ArchiveLimits, started: number): boolean {
+  return Date.now() - started >= limits.maxWallClockMs
+}
+
+export function wallClockSeconds(limits: ArchiveLimits): number {
+  return Math.round(limits.maxWallClockMs / 1000)
+}
+
 export interface ReadRun {
   limits: ArchiveLimits
   stats: ArchiveReadStats
@@ -156,6 +165,7 @@ export function finishRun(run: ReadRun, refusal: ArchiveRefusal | null, entries:
 
 export async function breathe(run: ReadRun): Promise<void> {
   if (run.signal?.aborted) refuse('cancelled')
+  if (isWallClockSpent(run.limits, run.started)) refuse('wall_clock_exceeded', wallClockSeconds(run.limits))
   if (Date.now() - run.sliceStarted < SLICE_MS) return
   await new Promise((resolve) => setTimeout(resolve, 0))
   run.sliceStarted = Date.now()

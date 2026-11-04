@@ -5,6 +5,7 @@
 export const ARCHIVE_REFUSAL_CODES = [
   'archive_too_large',
   'entry_count_exceeded',
+  'wall_clock_exceeded',
   'total_uncompressed_exceeded',
   'declared_ratio_exceeded',
   'actual_ratio_exceeded',
@@ -58,6 +59,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `This archive is ${n} bytes, over the byte ceiling BugPilot reads in the browser. Split it into a smaller archive or pick the files you want checked.`,
   entry_count_exceeded: (n) =>
     `This archive holds more than ${n} entries. BugPilot stops reading at that count so a huge archive cannot fill the tab.`,
+  wall_clock_exceeded: (n) =>
+    `BugPilot spent more than ${n} second(s) reading this upload and stopped, so nothing was kept. A very large or deeply nested upload looks like this from the inside, so pick a smaller folder or split the archive.`,
   total_uncompressed_exceeded: (n) =>
     `The files add up to more than ${n} bytes, which is over the ceiling BugPilot keeps in the browser. A zip bomb looks like this, so nothing was read.`,
   declared_ratio_exceeded: () =>

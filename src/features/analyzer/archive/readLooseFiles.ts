@@ -1,4 +1,5 @@
 import { detectLanguage, type LanguageSource, type SourceLanguage } from './classify'
+import { isWallClockSpent, wallClockSeconds } from './bounds'
 import { decodeBytes, looksBinary, type TextEncoding } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
 import type { ArchiveEntry, ArchiveReadProgress, ArchiveReadResult, ArchiveReadStats, ArchiveRefusal, ArchiveSkippedEntry } from './guard'
@@ -68,6 +69,7 @@ export async function readLooseFiles(
   let declaredTotal = 0
   for (const item of sources) {
     if (signal?.aborted) return fail('cancelled')
+    if (isWallClockSpent(limits, started)) return fail('wall_clock_exceeded', wallClockSeconds(limits))
     stats.walkedRecords += 1
     if (stats.walkedRecords > limits.maxEntryCount) return fail('entry_count_exceeded', limits.maxEntryCount)
     const pathProblem = relativePathRefusal(item.path)
@@ -94,6 +96,9 @@ export async function readLooseFiles(
 
   for (const item of accepted) {
     if (signal?.aborted) return fail('cancelled')
+    // A folder read spends its time inside the browser's own file reads, which no slice yield
+    // can interrupt, so the clock is checked here rather than only between chunks.
+    if (isWallClockSpent(limits, started)) return fail('wall_clock_exceeded', wallClockSeconds(limits))
     const bytes = await item.read()
     if (bytes.length > item.size) return fail('declared_size_understated')
     if (stats.producedBytes + bytes.length > limits.maxTotalUncompressedBytes) {

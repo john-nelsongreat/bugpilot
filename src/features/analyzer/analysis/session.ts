@@ -1,5 +1,15 @@
-import type { ArchiveEntry, ArchiveReadProgress, ArchiveReadResult, ArchiveReadStats } from '../archive/guard'
-import { DEFAULT_ARCHIVE_LIMITS } from '../archive/limits'
+import type {
+  ArchiveEntry,
+  ArchiveReadProgress,
+  ArchiveReadResult,
+  ArchiveReadStats,
+  ArchiveSkippedEntry,
+} from '../archive/guard'
+import {
+  DEFAULT_ARCHIVE_LIMITS,
+  MAX_RETAINED_TEXT_BYTES,
+  type ArchiveLimits,
+} from '../archive/limits'
 import { readLooseFiles, type IntakeSource, type ReadLooseFilesOptions } from '../archive/readLooseFiles'
 import { createArchiveClient, type ArchiveClientReadOptions } from '../archive/workerClient'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../engines/featureProbe'
@@ -28,6 +38,9 @@ export interface SessionProgress {
 
 export type SessionStatus = 'completed' | 'cancelled' | 'refused' | 'error'
 
+/** `'all'` keeps every analysed file; `'findings'` keeps only the files a finding points at. */
+export type Retention = 'all' | 'findings'
+
 export interface AnalysisSessionResult {
   status: SessionStatus
   message: string | null
@@ -40,6 +53,19 @@ export interface AnalysisSessionResult {
    * replaces the result on Clear or route change so the strings become collectable.
    */
   sources?: readonly ArchiveEntry[]
+  /**
+   * Which of the two retention rules produced `sources`. The page needs it to know whether the
+   * text it is holding can stand in for the upload when a browser handle goes stale.
+   */
+  retention?: Retention
+  /** Entries the reader set aside, kept beside `sources` so a re-run can rebuild the same coverage. */
+  skipped?: readonly ArchiveSkippedEntry[]
+  /**
+   * Set when the read stopped because the browser would not re-open a file this tab picked earlier.
+   * The page reads it to decide whether the pass can continue on text it still holds instead of
+   * ending in a dead end the user cannot act on.
+   */
+  handleStale?: boolean
 }
 
 export interface UploadArchiveInput {
@@ -57,7 +83,19 @@ export interface UploadFilesInput {
   sources: readonly IntakeSource[]
 }
 
-export type UploadInput = UploadArchiveInput | UploadFilesInput
+/**
+ * Text this tab already read. Used when a second pass cannot re-open the original handle (the
+ * browser reports `NotReadableError` once a file is moved, deleted or its tab is restored), so the
+ * deep pass can still run on exactly the bytes the first pass saw rather than failing outright.
+ */
+export interface UploadPreReadInput {
+  kind: 'pre-read'
+  entries: readonly ArchiveEntry[]
+  skipped: readonly ArchiveSkippedEntry[]
+  stats: ArchiveReadStats
+}
+
+export type UploadInput = UploadArchiveInput | UploadFilesInput | UploadPreReadInput
 
 export interface AnalyzeUploadOptions {
   /** Bytes handed to the reader; used for the report header. */
@@ -70,6 +108,10 @@ export interface AnalyzeUploadOptions {
    * plan and the user agreed. `'off'` keeps the slice A behaviour exactly.
    */
   engines?: 'off' | 'approved'
+  /** Ceilings for this machine; the page passes the device-scaled set. */
+  limits?: ArchiveLimits
+  /** How much analysed text may stay in memory for the fix review. */
+  maxRetainedBytes?: number
 }
 
 export interface SessionDeps {
@@ -131,6 +173,20 @@ function describeStartError(error: unknown): string {
 }
 
 /**
+ * A handle the browser will not open again. `DOMException` does not extend `Error` everywhere, so
+ * the name is the only reliable signal that a file was moved or deleted after it was picked.
+ */
+export function isStaleHandleError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  return (error as { name?: unknown }).name === 'NotReadableError'
+}
+
+/** What a stale handle means for the user, and what they can do about it. */
+export const STALE_HANDLE_MESSAGE =
+  'The browser would not re-open a file from this upload — it was probably moved or deleted after you picked it. ' +
+  'Nothing new was read and nothing was kept. Choose the same folder or archive again.'
+
+/**
  * A refusal, in the order the user needs it: first that the file was not what its name said, then
  * what BugPilot decided to do about it.
  */
@@ -153,31 +209,45 @@ export async function analyzeUpload(
   const signal = options.signal
   const emit = (progress: SessionProgress): void => options.onProgress?.(progress)
   const readOptions = {
-    limits: DEFAULT_ARCHIVE_LIMITS,
+    limits: options.limits ?? DEFAULT_ARCHIVE_LIMITS,
     signal,
     onProgress: (progress: ArchiveReadProgress) => emit(readingProgress(progress)),
   }
 
   if (signal?.aborted) return cancelled()
 
-  let read: ArchiveReadResult
-  try {
-    read =
-      input.kind === 'archive'
-        ? await (deps.readArchive ?? defaultReadArchive)(input.bytes, { ...readOptions, name: input.name ?? '' })
-        : await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
-  } catch (error) {
-    return failed('error', describeStartError(error), null)
-  }
-  if (signal?.aborted) return cancelled()
-  if (read.refusal) {
-    if (read.refusal.code === 'cancelled') return cancelled()
-    return failed('refused', describeRefusal(read), read.stats)
-  }
+  let entries: readonly ArchiveEntry[]
+  let skipped: readonly ArchiveSkippedEntry[]
+  let stats: ArchiveReadStats
+  let note: string | null = null
 
-  const entries: ArchiveEntry[] = read.entries
-  const skipped = read.skipped
-  const stats = read.stats
+  if (input.kind === 'pre-read') {
+    entries = input.entries
+    skipped = input.skipped
+    stats = input.stats
+  } else {
+    let read: ArchiveReadResult
+    try {
+      read =
+        input.kind === 'archive'
+          ? await (deps.readArchive ?? defaultReadArchive)(input.bytes, { ...readOptions, name: input.name ?? '' })
+          : await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
+    } catch (error) {
+      if (isStaleHandleError(error)) {
+        return { status: 'error', message: STALE_HANDLE_MESSAGE, report: null, stats: null, handleStale: true }
+      }
+      return failed('error', describeStartError(error), null)
+    }
+    if (signal?.aborted) return cancelled()
+    if (read.refusal) {
+      if (read.refusal.code === 'cancelled') return cancelled()
+      return failed('refused', describeRefusal(read), read.stats)
+    }
+    entries = read.entries
+    skipped = read.skipped
+    stats = read.stats
+    note = read.note ?? null
+  }
 
   let analyses: FileAnalysis[] = []
   if (entries.length > 0) {
@@ -262,7 +332,7 @@ export async function analyzeUpload(
   const engineStatus = new Map<string, EngineStatus>()
   // The reader's note travels into the report so the result page states, in its own words, that
   // the file was not the format its name claimed.
-  const extraLimitations: string[] = read.note ? [read.note] : []
+  const extraLimitations: string[] = note ? [note] : []
 
   if (engineFiles.length > 0 && options.engines === 'approved') {
     const createClient = deps.createEngineClient ?? loadDefaultEngineClient
@@ -329,7 +399,38 @@ export async function analyzeUpload(
     extraLimitations,
   })
 
-  return { status: 'completed', message: null, report, stats, sources: entries }
+  const retained = retainedSources(entries, analyses, options.maxRetainedBytes ?? MAX_RETAINED_TEXT_BYTES)
+
+  return {
+    status: 'completed',
+    message: null,
+    report,
+    stats,
+    sources: retained.sources,
+    retention: retained.retention,
+    skipped,
+  }
+}
+
+/**
+ * How much of the analysed text stays in memory for the fix review. Below the budget every file is
+ * kept, so a deep pass can reuse what the first pass read; above it only the files a finding points
+ * at are kept, because a 100 MiB folder held in full would cost more than the tab can spare.
+ */
+function retainedSources(
+  entries: readonly ArchiveEntry[],
+  analyses: readonly FileAnalysis[],
+  maxRetainedBytes: number,
+): { sources: readonly ArchiveEntry[]; retention: Retention } {
+  let held = 0
+  for (const entry of entries) held += entry.bytes
+  if (held <= maxRetainedBytes) return { sources: entries, retention: 'all' }
+
+  const implicated = new Set<string>()
+  for (const analysis of analyses) {
+    for (const finding of analysis.findings) implicated.add(finding.file)
+  }
+  return { sources: entries.filter((entry) => implicated.has(entry.name)), retention: 'findings' }
 }
 
 function countFindings(analyses: readonly FileAnalysis[]): number {

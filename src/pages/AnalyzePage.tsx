@@ -2,14 +2,18 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent 
 import { AlertTriangle, FileSearch, FolderOpen, ShieldCheck, Upload, X } from 'lucide-react'
 import {
   analyzeUpload,
+  isStaleHandleError,
+  STALE_HANDLE_MESSAGE,
   type AnalysisSessionResult,
   type AnalyzeUploadOptions,
   type SessionPhase,
   type SessionProgress,
   type UploadInput,
+  type UploadPreReadInput,
 } from '../features/analyzer/analysis/session'
 import type { SourceLanguage } from '../features/analyzer/archive/classify'
-import { DEFAULT_ARCHIVE_LIMITS } from '../features/analyzer/archive/limits'
+import { limitsForDevice, MAX_RETAINED_TEXT_BYTES } from '../features/analyzer/archive/limits'
+import { wallClockSeconds } from '../features/analyzer/archive/bounds'
 import { isContainerName } from '../features/analyzer/archive/format'
 import type { ArchiveReadStats } from '../features/analyzer/archive/guard'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../features/analyzer/engines/featureProbe'
@@ -70,7 +74,14 @@ function defaultDownloadReportFile(
 function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`
   if (bytes < 1_048_576) return `${Math.round(bytes / 1_024)} KiB`
-  return `${Math.round(bytes / 1_048_576)} MiB`
+  const mebibytes = bytes / 1_048_576
+  return `${Number.isInteger(mebibytes) ? mebibytes : mebibytes.toFixed(1)} MiB`
+}
+
+/** Device Memory is a Chromium-only hint; an absent value means "use the normal ceilings". */
+function deviceMemoryGiB(): number | undefined {
+  const reported = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+  return typeof reported === 'number' ? reported : undefined
 }
 
 function cancelledResult(stats: ArchiveReadStats | null): AnalysisSessionResult {
@@ -141,6 +152,12 @@ export function AnalyzePage({
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const retryRef = useRef<(() => Promise<PreparedUpload>) | null>(null)
+  /**
+   * The text the last completed pass kept in memory, ready to be analysed again. A second pass
+   * normally re-reads the original handles; this is what it falls back to when the browser reports
+   * that the file is gone. It is dropped with the result, so it never outlives Clear.
+   */
+  const heldReadRef = useRef<{ input: UploadPreReadInput; archiveBytes: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const uploadHeadingRef = useRef<HTMLHeadingElement>(null)
@@ -171,7 +188,7 @@ export function AnalyzePage({
     }
   }, [running])
 
-  const limits = DEFAULT_ARCHIVE_LIMITS
+  const limits = useMemo(() => limitsForDevice(deviceMemoryGiB()), [])
 
   const analysedLanguages = useMemo(() => {
     const found = new Set<SourceLanguage>()
@@ -188,6 +205,41 @@ export function AnalyzePage({
 
   const enginesBlocked = result?.report?.limitations.includes(ENGINES_UNAVAILABLE_MESSAGE) ?? false
 
+  /**
+   * The pass re-run when a browser handle goes stale. Only a run that kept every file's text can
+   * stand in for the upload, so `heldReadRef` is empty whenever the retention rule trimmed it.
+   */
+  function heldPass(): PreparedUpload | null {
+    const held = heldReadRef.current
+    if (held === null) return null
+    const prepared: PreparedUpload = {
+      input: held.input,
+      archiveBytes: held.archiveBytes,
+      retry: () => Promise.resolve(prepared),
+    }
+    return prepared
+  }
+
+  function staleResult(): AnalysisSessionResult {
+    return { status: 'error', message: STALE_HANDLE_MESSAGE, report: null, stats: null, handleStale: true }
+  }
+
+  function rememberRead(outcome: AnalysisSessionResult, archiveBytes: number): void {
+    if (outcome.retention !== 'all' || outcome.stats === null || !outcome.sources) {
+      heldReadRef.current = null
+      return
+    }
+    heldReadRef.current = {
+      input: {
+        kind: 'pre-read',
+        entries: outcome.sources,
+        skipped: outcome.skipped ?? [],
+        stats: outcome.stats,
+      },
+      archiveBytes,
+    }
+  }
+
   async function runPass(prepare: () => Promise<PreparedUpload>, mode: PassMode): Promise<void> {
     if (busyRef.current) return
 
@@ -202,7 +254,25 @@ export function AnalyzePage({
     setResult(null)
 
     try {
-      const prepared = await prepare()
+      let prepared: PreparedUpload | null
+      try {
+        prepared = await prepare()
+      } catch (error) {
+        prepared = isStaleHandleError(error) ? heldPass() : null
+        if (prepared === null) {
+          setResult({
+            status: 'error',
+            message: isStaleHandleError(error)
+              ? STALE_HANDLE_MESSAGE
+              : error instanceof Error
+                ? error.message
+                : 'The upload could not be read.',
+            report: null,
+            stats: null,
+          })
+          return
+        }
+      }
       if (runTokenRef.current !== token) return
       if (controller.signal.aborted) {
         setResult(cancelledResult(null))
@@ -214,19 +284,27 @@ export function AnalyzePage({
         archiveBytes: prepared.archiveBytes,
         signal: controller.signal,
         generatedAt: now(),
+        limits,
         onProgress: (next) => {
           if (runTokenRef.current === token) setProgress(next)
         },
       }
       if (mode === 'deep') options.engines = 'approved'
 
-      const outcome = await analyze(prepared.input, options)
+      let outcome = await analyze(prepared.input, options)
+      if (outcome.handleStale === true) {
+        const held = heldPass()
+        if (held === null) outcome = staleResult()
+        else outcome = await analyze(held.input, { ...options, archiveBytes: held.archiveBytes })
+      }
       if (runTokenRef.current !== token) return
       const final =
         controller.signal.aborted && outcome.status !== 'cancelled'
           ? cancelledResult(outcome.stats)
           : outcome
       setResult(final)
+      if (final.status === 'completed') rememberRead(final, prepared.archiveBytes)
+      else heldReadRef.current = null
       if (mode === 'deep' && final.status !== 'completed') setDeepPass(false)
     } catch (error) {
       if (runTokenRef.current !== token) return
@@ -250,6 +328,7 @@ export function AnalyzePage({
     setDeepPass(false)
     setGateDismissed(false)
     retryRef.current = null
+    heldReadRef.current = null
     await runPass(prepare, 'basic')
   }
 
@@ -271,6 +350,7 @@ export function AnalyzePage({
     abortRef.current?.abort()
     abortRef.current = null
     retryRef.current = null
+    heldReadRef.current = null
     busyRef.current = false
     setRunning(false)
     setProgress(null)
@@ -492,6 +572,15 @@ export function AnalyzePage({
               <li>
                 Folder drops and the folder picker are checked against the same limits as an
                 archive.
+              </li>
+              <li>
+                Reading one upload gets {wallClockSeconds(limits)} seconds. Past that BugPilot stops
+                and keeps nothing, so a huge or deeply nested folder cannot hang the tab.
+              </li>
+              <li>
+                The analysed text stays in this tab for the fix review while it fits{' '}
+                {formatBytes(MAX_RETAINED_TEXT_BYTES)}; above that only the files a finding points at
+                are kept, and Clear drops even those.
               </li>
             </ul>
           </div>
