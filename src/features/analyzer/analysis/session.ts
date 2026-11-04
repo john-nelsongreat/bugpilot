@@ -45,6 +45,11 @@ export interface AnalysisSessionResult {
 export interface UploadArchiveInput {
   kind: 'archive'
   bytes: Uint8Array
+  /**
+   * The name the file was picked or dropped under. The reader decides the format from the bytes and
+   * uses the name only to tell the user when the two disagree.
+   */
+  name?: string
 }
 
 export interface UploadFilesInput {
@@ -126,6 +131,16 @@ function describeStartError(error: unknown): string {
 }
 
 /**
+ * A refusal, in the order the user needs it: first that the file was not what its name said, then
+ * what BugPilot decided to do about it.
+ */
+function describeRefusal(read: ArchiveReadResult): string {
+  const refusal = read.refusal
+  if (!refusal) return ''
+  return read.note ? `${read.note} ${refusal.message}` : refusal.message
+}
+
+/**
  * Reads the upload, runs the pattern rules in the analyzer worker, then the optional TypeScript
  * syntax check, and returns a report. The analysed text is returned only as in-memory sources
  * so the fix review can compute edits; nothing is stored and Clear drops the whole result.
@@ -149,7 +164,7 @@ export async function analyzeUpload(
   try {
     read =
       input.kind === 'archive'
-        ? await (deps.readArchive ?? defaultReadArchive)(input.bytes, readOptions)
+        ? await (deps.readArchive ?? defaultReadArchive)(input.bytes, { ...readOptions, name: input.name ?? '' })
         : await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
   } catch (error) {
     return failed('error', describeStartError(error), null)
@@ -157,7 +172,7 @@ export async function analyzeUpload(
   if (signal?.aborted) return cancelled()
   if (read.refusal) {
     if (read.refusal.code === 'cancelled') return cancelled()
-    return failed('refused', read.refusal.message, read.stats)
+    return failed('refused', describeRefusal(read), read.stats)
   }
 
   const entries: ArchiveEntry[] = read.entries
@@ -245,7 +260,9 @@ export async function analyzeUpload(
 
   const engineFiles = entries.filter((entry) => hasDeepEngine(entry.language))
   const engineStatus = new Map<string, EngineStatus>()
-  const extraLimitations: string[] = []
+  // The reader's note travels into the report so the result page states, in its own words, that
+  // the file was not the format its name claimed.
+  const extraLimitations: string[] = read.note ? [read.note] : []
 
   if (engineFiles.length > 0 && options.engines === 'approved') {
     const createClient = deps.createEngineClient ?? loadDefaultEngineClient

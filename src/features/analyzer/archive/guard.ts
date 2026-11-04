@@ -1,13 +1,43 @@
 import { Inflate } from 'fflate'
+import {
+  RefuseArchive,
+  SkipSingle,
+  breathe,
+  createRun,
+  enforceChunkBounds,
+  finishRun,
+  refuse,
+  reportProgress,
+  skipEntry,
+  toRefusal,
+  validateName,
+  type ArchiveEntry,
+  type ArchiveReadResult,
+  type ArchiveRefusal,
+  type ArchiveSkippedEntry,
+  type ReadOptions,
+  type ReadRun,
+} from './bounds'
 import { crc32, crc32Finish } from './crc32'
-import { detectLanguage, type LanguageSource, type SourceLanguage } from './classify'
-import { decodeBytes, looksBinary, type TextEncoding } from './decode'
+import { detectLanguage } from './classify'
+import { decodeBytes, looksBinary } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
-import { archiveReasonMessage, type ArchiveRefusalCode, type ArchiveSkipCode } from './reasons'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive, relativePathRefusal } from './paths'
+import { archiveReasonMessage, type ArchiveSkipCode } from './reasons'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive } from './paths'
 
 export { DEFAULT_ARCHIVE_LIMITS }
 export type { ArchiveLimits }
+export type {
+  ArchiveEntry,
+  ArchiveReadProgress,
+  ArchiveReadResult,
+  ArchiveReadStats,
+  ArchiveRefusal,
+  ArchiveSkippedEntry,
+  LanguageSource,
+  SourceLanguage,
+  TextEncoding,
+} from './bounds'
 
 const SIG_LOCAL_HEADER = 0x04034b50
 const SIG_CENTRAL_HEADER = 0x02014b50
@@ -28,112 +58,6 @@ const UNIX_DIRECTORY = 0x4000
 const DOS_DIRECTORY_BIT = 0x0010
 const METHOD_STORE = 0
 const METHOD_DEFLATE = 8
-
-/** Work the loops may do between awaits; long enough that 2 000 records stay fast. */
-const SLICE_MS = 12
-
-export interface ArchiveRefusal {
-  code: ArchiveRefusalCode
-  message: string
-}
-
-export interface ArchiveEntry {
-  name: string
-  text: string
-  language: SourceLanguage
-  languageSource: LanguageSource
-  encoding: TextEncoding
-  bytes: number
-}
-
-export interface ArchiveSkippedEntry {
-  name: string
-  code: ArchiveSkipCode
-  message: string
-}
-
-export interface ArchiveReadProgress {
-  phase: 'walk' | 'extract'
-  walkedRecords: number
-  extractedEntries: number
-  producedBytes: number
-}
-
-export interface ArchiveReadStats {
-  /** Central-directory records actually read, not the count the archive declares. */
-  walkedRecords: number
-  /** Uncompressed bytes actually held after the read. */
-  producedBytes: number
-  entries: number
-  skipped: number
-  durationMs: number
-  /** Largest number of bytes one entry accumulated before it was accepted or refused. */
-  peakEntryBytes: number
-}
-
-export interface ArchiveReadResult {
-  refusal: ArchiveRefusal | null
-  entries: ArchiveEntry[]
-  skipped: ArchiveSkippedEntry[]
-  stats: ArchiveReadStats
-}
-
-export interface ReadArchiveOptions {
-  limits?: ArchiveLimits
-  signal?: AbortSignal
-  onProgress?: (progress: ArchiveReadProgress) => void
-}
-
-interface CentralRecord {
-  name: string
-  nameBytes: Uint8Array
-  flags: number
-  method: number
-  crc: number
-  compressedSize: number
-  uncompressedSize: number
-  externalAttrs: number
-  localHeaderOffset: number
-}
-
-class RefuseArchive extends Error {
-  readonly code: ArchiveRefusalCode
-  readonly subject: string | number
-  readonly extra?: string
-
-  constructor(code: ArchiveRefusalCode, subject: string | number = '', extra?: string) {
-    super(code)
-    this.code = code
-    this.subject = subject
-    this.extra = extra
-  }
-}
-
-class SkipSingle extends Error {
-  readonly code: ArchiveSkipCode
-
-  constructor(code: ArchiveSkipCode) {
-    super(code)
-    this.code = code
-  }
-}
-
-function refuse(code: ArchiveRefusalCode, subject: string | number = '', extra?: string): never {
-  throw new RefuseArchive(code, subject, extra)
-}
-
-function skipEntry(code: ArchiveSkipCode): never {
-  throw new SkipSingle(code)
-}
-
-/**
- * Names come from an untrusted archive, so every path decision is made on the decoded string
- * before any byte of that entry is unpacked.
- */
-function validateName(name: string): void {
-  const code = relativePathRefusal(name)
-  if (code) refuse(code)
-}
 
 function unixFileType(externalAttrs: number): number {
   return (externalAttrs >>> 16) & UNIX_FILE_TYPE_MASK
@@ -195,32 +119,23 @@ function concat(chunks: Uint8Array[], total: number): Uint8Array {
   return out
 }
 
-interface Run {
-  limits: ArchiveLimits
-  stats: ArchiveReadStats
-  signal?: AbortSignal
-  started: number
-  sliceStarted: number
-  onProgress?: (progress: ArchiveReadProgress) => void
+interface CentralRecord {
+  name: string
+  nameBytes: Uint8Array
+  flags: number
+  method: number
+  crc: number
+  compressedSize: number
+  uncompressedSize: number
+  externalAttrs: number
+  localHeaderOffset: number
 }
 
-async function breathe(run: Run): Promise<void> {
-  if (run.signal?.aborted) refuse('cancelled')
-  if (Date.now() - run.sliceStarted < SLICE_MS) return
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  run.sliceStarted = Date.now()
+function report(run: ReadRun, phase: 'walk' | 'extract'): void {
+  reportProgress(run, phase)
 }
 
-function report(run: Run, phase: 'walk' | 'extract'): void {
-  run.onProgress?.({
-    phase,
-    walkedRecords: run.stats.walkedRecords,
-    extractedEntries: run.stats.entries,
-    producedBytes: run.stats.producedBytes,
-  })
-}
-
-async function walkCentralDirectory(bytes: Uint8Array, view: DataView, centralOffset: number, centralSize: number, run: Run): Promise<CentralRecord[]> {
+async function walkCentralDirectory(bytes: Uint8Array, view: DataView, centralOffset: number, centralSize: number, run: ReadRun): Promise<CentralRecord[]> {
   const { limits } = run
   const records: CentralRecord[] = []
   const end = centralOffset + centralSize
@@ -271,7 +186,7 @@ function printableName(bytes: Uint8Array, centralPos: number, nameLength: number
   }
 }
 
-function classifyDeclared(record: CentralRecord, run: Run, declaredBudget: number): 'skip' | 'accept' {
+function classifyDeclared(record: CentralRecord, run: ReadRun, declaredBudget: number): 'skip' | 'accept' {
   const { limits } = run
   validateName(record.name)
   if (isNestedArchive(record.name)) refuse('nested_archive', record.name)
@@ -312,12 +227,10 @@ function localDataRange(bytes: Uint8Array, view: DataView, record: CentralRecord
   return [dataStart, record.compressedSize]
 }
 
-async function extractRecord(bytes: Uint8Array, view: DataView, record: CentralRecord, run: Run): Promise<ArchiveEntry> {
+async function extractRecord(bytes: Uint8Array, view: DataView, record: CentralRecord, run: ReadRun): Promise<ArchiveEntry> {
   const { limits } = run
   const [dataStart, compressedSize] = localDataRange(bytes, view, record)
   const source = bytes.subarray(dataStart, dataStart + compressedSize)
-  const producedLimit = limits.maxSingleFileUncompressedBytes
-  const ratioLimit = limits.maxActualRatio * compressedSize
 
   let out: Uint8Array
   if (record.method === METHOD_STORE) {
@@ -327,20 +240,16 @@ async function extractRecord(bytes: Uint8Array, view: DataView, record: CentralR
     const chunks: Uint8Array[] = []
     let produced = 0
     let finished = false
-    run.stats.peakEntryBytes = Math.max(run.stats.peakEntryBytes, 0)
     // The bounds are checked inside the inflate callback, so a bomb stops on the byte that
     // crosses the line instead of after the stream ends.
     const inflate = new Inflate((chunk, final) => {
       if (chunk.length > 0) {
-        const next = produced + chunk.length
-        run.stats.peakEntryBytes = Math.max(run.stats.peakEntryBytes, next)
-        if (next > ratioLimit) refuse('actual_ratio_exceeded')
-        if (next > record.uncompressedSize) refuse('declared_size_understated')
-        if (next > producedLimit) skipEntry('single_file_too_large')
-        if (run.stats.producedBytes + next > limits.maxTotalUncompressedBytes) {
-          refuse('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes)
-        }
-        produced = next
+        enforceChunkBounds(
+          run,
+          { produced, chunkLength: chunk.length, declaredSize: record.uncompressedSize, compressedSize },
+          run.stats.producedBytes,
+        )
+        produced += chunk.length
         chunks.push(chunk)
       }
       if (final) finished = true
@@ -375,32 +284,11 @@ async function extractRecord(bytes: Uint8Array, view: DataView, record: CentralR
   }
 }
 
-export async function readArchive(bytes: Uint8Array, options: ReadArchiveOptions = {}): Promise<ArchiveReadResult> {
-  const run: Run = {
-    limits: options.limits ?? DEFAULT_ARCHIVE_LIMITS,
-    stats: { walkedRecords: 0, producedBytes: 0, entries: 0, skipped: 0, durationMs: 0, peakEntryBytes: 0 },
-    signal: options.signal,
-    started: Date.now(),
-    sliceStarted: Date.now(),
-    onProgress: options.onProgress,
-  }
+export async function readArchive(bytes: Uint8Array, options: ReadOptions = {}): Promise<ArchiveReadResult> {
+  const run = createRun(options)
   const entries: ArchiveEntry[] = []
   const skipped: ArchiveSkippedEntry[] = []
-  const finish = (refusal: ArchiveRefusal | null): ArchiveReadResult => {
-    run.stats.durationMs = Date.now() - run.started
-    return {
-      refusal,
-      entries: refusal ? [] : entries,
-      skipped: refusal ? [] : skipped,
-      stats: run.stats,
-    }
-  }
-  const toRefusal = (error: unknown): ArchiveRefusal => {
-    if (error instanceof RefuseArchive) {
-      return { code: error.code, message: archiveReasonMessage(error.code, error.subject, error.extra) }
-    }
-    return { code: 'worker_error', message: archiveReasonMessage('worker_error') }
-  }
+  const finish = (refusal: ArchiveRefusal | null): ArchiveReadResult => finishRun(run, refusal, entries, skipped)
 
   try {
     // The size ceiling is checked before a single header is parsed, so an oversized upload

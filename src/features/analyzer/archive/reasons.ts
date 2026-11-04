@@ -19,10 +19,16 @@ export const ARCHIVE_REFUSAL_CODES = [
   'nested_archive',
   'encrypted_entry',
   'not_a_zip',
+  'not_a_tar',
+  'unsupported_format',
   'zip64_not_supported',
   'corrupt_central_directory',
   'corrupt_local_header',
   'corrupt_deflate_stream',
+  'corrupt_tar_header',
+  'corrupt_gzip_stream',
+  'multi_member_gzip',
+  'archive_truncated',
   'crc_mismatch',
   'unsupported_compression',
   'data_descriptor_not_supported',
@@ -37,6 +43,7 @@ export const ARCHIVE_SKIP_CODES = [
   'ignored_folder',
   'empty_entry',
   'directory_entry',
+  'special_entry',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -78,7 +85,13 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
   encrypted_entry: (name) =>
     `The entry "${name}" is encrypted. BugPilot does not ask for or handle archive passwords, so nothing was unpacked.`,
   not_a_zip: () =>
-    'This does not look like a .zip archive: the end-of-directory record is missing. BugPilot only reads .zip files.',
+    'This does not look like a .zip archive: the end-of-directory record is missing. BugPilot only reads .zip, .tar and .gz files.',
+  not_a_tar: () =>
+    'This does not look like a .tar archive: its first block does not carry the tar header signature. BugPilot only reads .zip, .tar and .gz files.',
+  unsupported_format: (kind) =>
+    kind === ''
+      ? 'BugPilot could not recognise this file: it does not carry the signature of a .zip, .tar or .gz archive, and it is not plain text. Only those formats are read in the browser.'
+      : `This is a .${kind} archive. BugPilot does not decode .${kind} files in the browser. Re-archive the project as a .zip or a .tar.gz and upload that instead.`,
   zip64_not_supported: () =>
     'This archive uses the ZIP64 format, which this reader does not support. Nothing was unpacked.',
   corrupt_central_directory: () =>
@@ -87,6 +100,16 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `The local header for "${name}" does not match the archive index, so the archive is refused.`,
   corrupt_deflate_stream: (name) =>
     `The compressed data for "${name}" is damaged or was cut off, so reading stopped.`,
+  corrupt_tar_header: (name, extra) =>
+    `A header block in this archive is damaged${name ? ` ("${name}")` : ''}${extra ? `: ${extra}` : ''}. BugPilot stopped reading and unpacked nothing, because a header it cannot trust could point anywhere in the file.`,
+  corrupt_gzip_stream: (name, extra) =>
+    `The compressed data in "${name || 'this file'}" is damaged or incomplete${extra ? `: ${extra}` : ''}. BugPilot checked the gzip header and the checksum at the end of the stream and unpacked nothing. Re-create the .gz file and upload that.`,
+  multi_member_gzip: (name) =>
+    `"${name || 'this file'}" is two or more gzip streams joined into one file. BugPilot reads a single gzip stream, so nothing was unpacked. Split the file, or re-create the archive as one .zip or .tar.gz.`,
+  archive_truncated: (name) =>
+    name === ''
+      ? 'This archive stops partway through: a header or a file body promises more bytes than the file contains. BugPilot read nothing from it. Re-download or re-create the archive.'
+      : `This archive is cut off inside "${name}": the header promises more bytes than the file contains. BugPilot read nothing from it. Re-download or re-create the archive.`,
   crc_mismatch: (name) =>
     `The contents of "${name}" do not match the checksum stored in the archive, so the archive is refused.`,
   unsupported_compression: (name, extra) =>
@@ -105,6 +128,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `"${name}" is inside a generated or vendored folder (for example node_modules or dist), which BugPilot skips by default.`,
   empty_entry: (name) => `"${name}" has no content to read.`,
   directory_entry: () => 'Folder entries are not read as files.',
+  special_entry: (name, extra) =>
+    `"${name}" is a ${extra ?? 'special entry'}, not an ordinary file. BugPilot never follows links, creates devices or reads archive volume records, so it skipped this entry and kept going.`,
 }
 
 /**

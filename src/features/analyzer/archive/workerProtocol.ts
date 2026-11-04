@@ -1,6 +1,6 @@
-import { readArchive, type ArchiveReadResult } from './guard'
 import type { ArchiveLimits } from './limits'
-import type { ArchiveReadProgress } from './guard'
+import { readContainer } from './container'
+import type { ArchiveReadProgress, ArchiveReadResult } from './bounds'
 
 /**
  * The slice of a worker that the protocol needs. Keeping it an interface means the same code
@@ -15,6 +15,11 @@ export interface ReadArchiveRequest {
   type: 'read-archive'
   id: number
   bytes: ArrayBuffer
+  /**
+   * The name the user gave the file. It is a claim the reader checks against the bytes, never the
+   * decision, and a request without one is simply a file whose name says nothing.
+   */
+  name?: string
   limits: ArchiveLimits
 }
 
@@ -92,7 +97,7 @@ export function startArchiveWorker(scope: WorkerScope): void {
       return
     }
 
-    void readArchive(bytes, {
+    void readContainer(bytes, data.name ?? '', {
       limits: data.limits,
       signal: controller.signal,
       onProgress: (progress) => {

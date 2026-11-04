@@ -100,7 +100,7 @@ describe('archive worker protocol', () => {
 
     const done = fake.posted as Array<{ type: string; result?: { refusal: { code: string } | null; entries: unknown[] } }>
     expect(done.at(-1)?.type).toBe('done')
-    expect(done.at(-1)?.result?.refusal?.code).toBe('not_a_zip')
+    expect(done.at(-1)?.result?.refusal?.code).toBe('unsupported_format')
     expect(done.at(-1)?.result?.entries).toHaveLength(0)
   })
 

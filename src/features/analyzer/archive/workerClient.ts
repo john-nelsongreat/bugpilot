@@ -1,4 +1,4 @@
-import type { ArchiveReadProgress, ArchiveReadResult } from './guard'
+import type { ArchiveReadProgress, ArchiveReadResult } from './bounds'
 import type { ArchiveLimits } from './limits'
 
 export interface WorkerHandle {
@@ -9,6 +9,8 @@ export interface WorkerHandle {
 
 export interface ArchiveClientReadOptions {
   limits: ArchiveLimits
+  /** The name the user gave the file; the reader only uses it to check the bytes against it. */
+  name?: string
   signal?: AbortSignal
   onProgress?: (progress: ArchiveReadProgress) => void
 }
@@ -103,7 +105,7 @@ export function createArchiveClient(getWorker: () => WorkerHandle): ArchiveClien
         options.signal?.addEventListener('abort', onAbort, { once: true })
 
         handle.postMessage(
-          { type: 'read-archive', id, bytes: bytes.buffer, limits: options.limits },
+          { type: 'read-archive', id, bytes: bytes.buffer, name: options.name ?? '', limits: options.limits },
           [bytes.buffer as ArrayBuffer],
         )
       })

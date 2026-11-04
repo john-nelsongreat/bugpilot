@@ -10,6 +10,7 @@ import {
 } from '../features/analyzer/analysis/session'
 import type { SourceLanguage } from '../features/analyzer/archive/classify'
 import { DEFAULT_ARCHIVE_LIMITS } from '../features/analyzer/archive/limits'
+import { isContainerName } from '../features/analyzer/archive/format'
 import type { ArchiveReadStats } from '../features/analyzer/archive/guard'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../features/analyzer/engines/featureProbe'
 import { hasDeepEngine } from '../features/analyzer/languages'
@@ -21,7 +22,7 @@ import {
 } from '../features/analyzer/export/reportFiles'
 import { AnalyzeResults, type PrepareFixPlan } from '../features/analyzer/ui/AnalyzeResults'
 import { EngineGate } from '../features/analyzer/ui/EngineGate'
-import { isZipFile, sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
+import { sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
 
 const PHASE_LABELS: Record<SessionPhase, string> = {
   reading: 'Reading the upload',
@@ -83,9 +84,11 @@ async function prepareFiles(
   if (files.length === 0) throw new Error('No files were selected.')
   // `File` objects stay readable, so a second pass re-reads the same selection.
   const retry = () => prepareFiles(files, readFile)
-  if (files.length === 1 && isZipFile(files[0])) {
+  // The name only decides which pipeline an upload enters; the reader works the format out from
+  // the bytes and reports a disagreement as a note.
+  if (files.length === 1 && isContainerName(files[0].name)) {
     const bytes = await readFile(files[0])
-    return { input: { kind: 'archive', bytes }, archiveBytes: bytes.length, retry }
+    return { input: { kind: 'archive', bytes, name: files[0].name }, archiveBytes: bytes.length, retry }
   }
   return {
     input: { kind: 'files', sources: sourcesFromFiles(files) },
@@ -96,9 +99,9 @@ async function prepareFiles(
 
 function fromSources(sources: readonly IntakeSource[]): () => Promise<PreparedUpload> {
   const prepare = async (): Promise<PreparedUpload> => {
-    if (sources.length === 1 && /\.zip$/i.test(sources[0].path)) {
+    if (sources.length === 1 && isContainerName(sources[0].path)) {
       const bytes = await sources[0].read()
-      return { input: { kind: 'archive', bytes }, archiveBytes: bytes.length, retry: prepare }
+      return { input: { kind: 'archive', bytes, name: sources[0].path }, archiveBytes: bytes.length, retry: prepare }
     }
     return {
       input: { kind: 'files', sources },
@@ -368,9 +371,11 @@ export function AnalyzePage({
             <span className="empty-icon analyze-drop-icon" aria-hidden="true">
               <Upload size={22} />
             </span>
-            <p className="analyze-drop-title">Drop a folder, a .zip, or loose files here</p>
+            <p className="analyze-drop-title">Drop a folder, an archive, or loose files here</p>
             <p className="field-hint analyze-drop-hint">
-              Dragging is optional. Both buttons below open a picker and work from the keyboard.
+              Archives open as .zip, .tar, .gz, .tgz and package files (.whl, .jar, .apk and
+              friends); the format is read from the bytes, not from the name. Dragging is optional.
+              Both buttons below open a picker and work from the keyboard.
             </p>
             <div className="analyze-pick-actions">
               <button
@@ -485,7 +490,8 @@ export function AnalyzePage({
                 are skipped with a reason.
               </li>
               <li>
-                Folder drops and the folder picker are checked against the same limits as a zip.
+                Folder drops and the folder picker are checked against the same limits as an
+                archive.
               </li>
             </ul>
           </div>
