@@ -191,7 +191,7 @@ function classifyDeclared(record: CentralRecord, run: ReadRun, declaredBudget: n
   validateName(record.name)
   if (isNestedArchive(record.name)) refuse('nested_archive', record.name)
   if (isDirectoryEntry(record.externalAttrs)) return 'skip'
-  if (isIgnoredPath(record.name)) return 'skip'
+  if (isIgnoredPath(record.name, run.includeGenerated)) return 'skip'
   if (hasBinaryExtension(record.name)) return 'skip'
   if (record.method !== METHOD_STORE && record.method !== METHOD_DEFLATE) refuse('unsupported_compression', record.name, String(record.method))
   if (record.uncompressedSize === 0) return 'skip'
@@ -205,9 +205,9 @@ function classifyDeclared(record: CentralRecord, run: ReadRun, declaredBudget: n
   return 'accept'
 }
 
-function skipCodeFor(record: CentralRecord): ArchiveSkipCode {
+function skipCodeFor(record: CentralRecord, run: ReadRun): ArchiveSkipCode {
   if (isDirectoryEntry(record.externalAttrs)) return 'directory_entry'
-  if (isIgnoredPath(record.name)) return 'ignored_folder'
+  if (isIgnoredPath(record.name, run.includeGenerated)) return 'ignored_folder'
   if (hasBinaryExtension(record.name)) return 'binary_content'
   if (record.uncompressedSize === 0) return 'empty_entry'
   return 'single_file_too_large'
@@ -315,7 +315,7 @@ export async function readArchive(bytes: Uint8Array, options: ReadOptions = {}):
       if (seen.has(record.name)) refuse('duplicate_name', record.name)
       seen.add(record.name)
       if (classifyDeclared(record, run, declaredBudget) === 'skip') {
-        const code = skipCodeFor(record)
+        const code = skipCodeFor(record, run)
         skipped.push({ name: record.name, code, message: archiveReasonMessage(code, record.name) })
         continue
       }

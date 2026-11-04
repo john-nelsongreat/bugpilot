@@ -515,3 +515,29 @@ describe('readArchive: progress and cancellation', () => {
     expect(result.stats.walkedRecords).toBe(0)
   })
 })
+
+describe('readArchive: the generated-file override', () => {
+  it('reads vendored files on request but never reads .git', async () => {
+    const bytes = buildZip([
+      { name: 'node_modules/left-pad/index.js', content: 'module.exports = 1\n' },
+      { name: '.git/config', content: '[core]\n' },
+      { name: 'src/app.js', content: 'export const a = 1\n' },
+    ])
+    const result = await readArchive(bytes, { includeGenerated: true })
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['node_modules/left-pad/index.js', 'src/app.js'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['.git/config', 'ignored_folder']])
+  })
+
+  it('keeps the old behaviour when the override is off', async () => {
+    const bytes = buildZip([
+      { name: 'node_modules/left-pad/index.js', content: 'module.exports = 1\n' },
+      { name: 'src/app.js', content: 'export const a = 1\n' },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/app.js'])
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['ignored_folder'])
+  })
+})

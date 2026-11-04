@@ -268,7 +268,7 @@ function skipFor(code: ArchiveSkipCode, name: string, extra?: string): ArchiveSk
 function declaredSkip(typeFlag: number, label: string | null, name: string, size: number, run: ReadRun): ArchiveSkipCode | null {
   if (label) return 'special_entry'
   if (typeFlag === FLAG.directory) return 'directory_entry'
-  if (isIgnoredPath(name)) return 'ignored_folder'
+  if (isIgnoredPath(name, run.includeGenerated)) return 'ignored_folder'
   if (hasBinaryExtension(name)) return 'binary_content'
   if (size === 0) return 'empty_entry'
   if (size > run.limits.maxSingleFileUncompressedBytes) return 'single_file_too_large'

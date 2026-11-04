@@ -168,3 +168,25 @@ describe('readLooseFiles: cancel and progress', () => {
     expect(phases).toContain('extract')
   })
 })
+
+describe('readLooseFiles: the generated-file override', () => {
+  it('reads generated folders on request but never reads .git', async () => {
+    const result = await readLooseFiles(
+      [
+        source('project/node_modules/left-pad/index.js', 'module.exports = 1\n'),
+        source('project/dist/app.min.js', 'var a=1\n'),
+        source('project/.git/config', '[core]\n'),
+        source('project/src/keep.js', 'export const a = 1\n'),
+      ],
+      { includeGenerated: true },
+    )
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual([
+      'project/node_modules/left-pad/index.js',
+      'project/dist/app.min.js',
+      'project/src/keep.js',
+    ])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['project/.git/config', 'ignored_folder']])
+  })
+})

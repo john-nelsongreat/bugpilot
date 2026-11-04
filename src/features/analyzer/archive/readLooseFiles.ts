@@ -20,6 +20,8 @@ export interface ReadLooseFilesOptions {
   limits?: ArchiveLimits
   signal?: AbortSignal
   onProgress?: (progress: ArchiveReadProgress) => void
+  /** Read generated and vendored folders too. `.git` is skipped at every setting. */
+  includeGenerated?: boolean
 }
 
 export type LooseFilesResult = ArchiveReadResult
@@ -81,7 +83,7 @@ export async function readLooseFiles(
     // an archive inside an archive is.
     if (isNestedArchive(item.path)) return fail('nested_archive', item.path)
 
-    const skipCode = skipCodeFor(item, limits)
+    const skipCode = skipCodeFor(item, limits, options.includeGenerated === true)
     if (skipCode) {
       skipped.push({ name: item.path, code: skipCode, message: archiveReasonMessage(skipCode, item.path) })
       continue
@@ -130,8 +132,8 @@ export async function readLooseFiles(
   return finish(null)
 }
 
-function skipCodeFor(item: IntakeSource, limits: ArchiveLimits) {
-  if (isIgnoredPath(item.path)) return 'ignored_folder' as const
+function skipCodeFor(item: IntakeSource, limits: ArchiveLimits, includeGenerated: boolean) {
+  if (isIgnoredPath(item.path, includeGenerated)) return 'ignored_folder' as const
   if (hasBinaryExtension(item.path)) return 'binary_content' as const
   if (item.size === 0) return 'empty_entry' as const
   if (item.size > limits.maxSingleFileUncompressedBytes) return 'single_file_too_large' as const

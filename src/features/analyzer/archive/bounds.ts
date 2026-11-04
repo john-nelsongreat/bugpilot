@@ -72,6 +72,8 @@ export interface ReadOptions {
   limits?: ArchiveLimits
   signal?: AbortSignal
   onProgress?: (progress: ArchiveReadProgress) => void
+  /** Read generated and vendored folders too. `.git` is skipped at every setting. */
+  includeGenerated?: boolean
 }
 
 export class RefuseArchive extends Error {
@@ -139,6 +141,7 @@ export interface ReadRun {
   started: number
   sliceStarted: number
   onProgress?: (progress: ArchiveReadProgress) => void
+  includeGenerated: boolean
 }
 
 export function createRun(options: ReadOptions): ReadRun {
@@ -150,6 +153,7 @@ export function createRun(options: ReadOptions): ReadRun {
     started: now,
     sliceStarted: now,
     onProgress: options.onProgress,
+    includeGenerated: options.includeGenerated === true,
   }
 }
 

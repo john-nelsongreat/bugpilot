@@ -13,6 +13,8 @@ export interface ArchiveClientReadOptions {
   name?: string
   signal?: AbortSignal
   onProgress?: (progress: ArchiveReadProgress) => void
+  /** Read generated and vendored folders too. `.git` is skipped at every setting. */
+  includeGenerated?: boolean
 }
 
 export interface ArchiveClient {
@@ -105,7 +107,14 @@ export function createArchiveClient(getWorker: () => WorkerHandle): ArchiveClien
         options.signal?.addEventListener('abort', onAbort, { once: true })
 
         handle.postMessage(
-          { type: 'read-archive', id, bytes: bytes.buffer, name: options.name ?? '', limits: options.limits },
+          {
+            type: 'read-archive',
+            id,
+            bytes: bytes.buffer,
+            name: options.name ?? '',
+            limits: options.limits,
+            includeGenerated: options.includeGenerated === true,
+          },
           [bytes.buffer as ArrayBuffer],
         )
       })

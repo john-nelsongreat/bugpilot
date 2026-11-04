@@ -79,6 +79,10 @@ export const IGNORED_FOLDER_SEGMENTS: readonly string[] = [
   'target',
   'bin',
   'obj',
+  '.idea',
+  '.vscode',
+  '.gradle',
+  '.terraform',
 ]
 
 /** Archives that must never be re-opened from inside an archive. */

@@ -365,3 +365,18 @@ describe('readTar: the same skips the zip reader makes', () => {
     expect(seen).toEqual([1, 2])
   })
 })
+
+describe('readTar: the generated-file override', () => {
+  it('reads vendored files on request but never reads .git', async () => {
+    const archive = buildTar([
+      { name: 'node_modules/left-pad/index.js', content: 'module.exports = 1\n' },
+      { name: '.git/config', content: '[core]\n' },
+      { name: 'src/app.js', content: 'export const a = 1\n' },
+    ])
+    const result = await readTar(archive, { includeGenerated: true })
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['node_modules/left-pad/index.js', 'src/app.js'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['.git/config', 'ignored_folder']])
+  })
+})

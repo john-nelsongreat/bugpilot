@@ -61,6 +61,27 @@ describe('archive worker protocol', () => {
     expect(done[0].result.entries[0].language).toBe('javascript')
   })
 
+  it('honours the generated-file override inside the worker', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+    const bytes = buildZip([
+      filler('node_modules/left-pad/index.js', 200),
+      filler('.git/config', 200),
+      filler('src/a.js', 200),
+    ])
+
+    fake.dispatched({ type: 'read-archive', id: 11, bytes: bytes.buffer, limits: limitsFor(), includeGenerated: true })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      id: number
+      result: { entries: Array<{ name: string }>; skipped: Array<{ name: string }> }
+    }>
+    expect(done).toHaveLength(1)
+    expect(done[0].result.entries.map((entry) => entry.name)).toEqual(['node_modules/left-pad/index.js', 'src/a.js'])
+    expect(done[0].result.skipped.map((entry) => entry.name)).toEqual(['.git/config'])
+  })
+
   it('streams progress before the final answer', async () => {
     const fake = makeScope()
     startArchiveWorker(fake.scope)

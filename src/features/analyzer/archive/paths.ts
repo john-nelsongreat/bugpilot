@@ -14,8 +14,12 @@ export function relativePathRefusal(name: string): ArchiveRefusalCode | null {
   return null
 }
 
-export function isIgnoredPath(name: string): boolean {
-  return name.split('/').some((segment) => IGNORED_FOLDER_SEGMENTS.includes(segment))
+/**
+ * `.git` is never read, even when the user asks for generated files: its objects are compressed
+ * history rather than files. Every other ignored folder yields to that checkbox.
+ */
+export function isIgnoredPath(name: string, includeGenerated = false): boolean {
+  return name.split('/').some((segment) => segment === '.git' || (!includeGenerated && IGNORED_FOLDER_SEGMENTS.includes(segment)))
 }
 
 export function isNestedArchive(name: string): boolean {

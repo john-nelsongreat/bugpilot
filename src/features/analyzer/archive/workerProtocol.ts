@@ -21,6 +21,8 @@ export interface ReadArchiveRequest {
    */
   name?: string
   limits: ArchiveLimits
+  /** Read generated and vendored folders too. `.git` is skipped at every setting. */
+  includeGenerated?: boolean
 }
 
 export interface CancelRequest {
@@ -99,6 +101,7 @@ export function startArchiveWorker(scope: WorkerScope): void {
 
     void readContainer(bytes, data.name ?? '', {
       limits: data.limits,
+      includeGenerated: data.includeGenerated === true,
       signal: controller.signal,
       onProgress: (progress) => {
         scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)

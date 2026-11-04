@@ -47,6 +47,7 @@ export const ARCHIVE_SKIP_CODES = [
   'special_entry',
   'source_set_aside',
   'notebook_unreadable',
+  'generated_file',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -130,7 +131,9 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
   binary_content: (name) =>
     `"${name}" is a binary file, not text, so there is nothing for BugPilot to read.`,
   ignored_folder: (name) =>
-    `"${name}" is inside a generated or vendored folder (for example node_modules or dist), which BugPilot skips by default.`,
+    name.split('/').includes('.git')
+      ? `"${name}" is inside .git, which BugPilot never reads, at any setting.`
+      : `"${name}" is inside a generated or vendored folder (for example node_modules or dist), which BugPilot skips by default. Tick "Include generated and vendored files" to check it too.`,
   empty_entry: (name) => `"${name}" has no content to read.`,
   directory_entry: () => 'Folder entries are not read as files.',
   special_entry: (name, extra) =>
@@ -139,6 +142,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `"${name}" was left out of this run${extra ? `: ${extra}` : ''}. BugPilot checked the uploads you added one by one, so an upload it cannot trust does not stop the others; nothing from "${name}" was read or kept.`,
   notebook_unreadable: (name, extra) =>
     `"${name}" is a notebook BugPilot could not read${extra ? `: ${extra}` : ''}. The notebook was skipped and the other files were still checked; nothing from it was kept.`,
+  generated_file: (name, extra) =>
+    `"${name}" looks generated or vendored${extra ? ` (${extra})` : ''}, so BugPilot skipped it. Tick "Include generated and vendored files" to check it too; the same size limits apply.`,
 }
 
 /**

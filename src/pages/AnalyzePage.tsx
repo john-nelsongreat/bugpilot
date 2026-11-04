@@ -185,6 +185,7 @@ export function AnalyzePage({
   const [result, setResult] = useState<AnalysisSessionResult | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [deepPass, setDeepPass] = useState(false)
+  const [includeGenerated, setIncludeGenerated] = useState(false)
   const [gateDismissed, setGateDismissed] = useState(false)
   /** The uploads the current run is built from, in the order the user added them. */
   const [uploads, setUploads] = useState<readonly (readonly IntakeSource[])[]>([])
@@ -336,6 +337,7 @@ export function AnalyzePage({
         signal: controller.signal,
         generatedAt: now(),
         limits,
+        includeGenerated,
         onProgress: (next) => {
           if (runTokenRef.current === token) setProgress(next)
         },
@@ -411,6 +413,7 @@ export function AnalyzePage({
     setPasteText('')
     setPasteName('')
     setDeepPass(false)
+    setIncludeGenerated(false)
     setGateDismissed(false)
     uploadHeadingRef.current?.focus()
   }
@@ -565,6 +568,26 @@ export function AnalyzePage({
               Paste code
             </button>
           </div>
+
+          <label className="analyze-option" htmlFor="analyze-include-generated">
+            <input
+              id="analyze-include-generated"
+              type="checkbox"
+              checked={includeGenerated}
+              disabled={running}
+              onChange={(event) => setIncludeGenerated(event.target.checked)}
+            />
+            <span>
+              <strong>Include generated and vendored files</strong>
+              <span className="analyze-option-hint">
+                Off by default: minified files, source maps, lockfiles, generated-code markers, very
+                long lines and folders such as node_modules, dist or .git are skipped with a reason
+                in the coverage panel. Ticking this checks the generated and vendored files too; the
+                same size limits apply and .git is never read. Sensitive file names are always
+                reported, even when a file is skipped.
+              </span>
+            </span>
+          </label>
 
           {intakeMode === 'upload' ? (
           <div

@@ -2727,6 +2727,33 @@ textarea[aria-invalid='true'] {
   outline-offset: 1px;
 }
 
+.analyze-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.analyze-option input {
+  margin-top: 0.18rem;
+  accent-color: var(--accent-line);
+}
+
+.analyze-option-hint {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
 .analyze-paste {
   display: flex;
   flex-direction: column;

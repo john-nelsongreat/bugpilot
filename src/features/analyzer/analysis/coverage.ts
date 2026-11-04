@@ -27,13 +27,13 @@ const SKIPPED_TIERS: CoverageTier[] = [
     tier: 'syntax',
     available: false,
     ran: false,
-    reason: 'The file was skipped by the archive reader, so no syntax engine saw it.',
+    reason: 'The file was skipped before analysis, so no syntax engine saw it.',
   },
   {
     tier: 'pattern',
     available: false,
     ran: false,
-    reason: 'The file was skipped by the archive reader, so no pattern rule saw it.',
+    reason: 'The file was skipped before analysis, so no pattern rule saw its contents.',
   },
 ]
 
@@ -116,6 +116,7 @@ export function buildCoverage(
 
   for (const item of skipped) {
     const detection = detectLanguage(item.name, '')
+    const findings = byFile.get(item.name)?.findings.length ?? 0
     coverage.push({
       file: item.name,
       status: 'skipped',
@@ -124,8 +125,12 @@ export function buildCoverage(
       languageLabel: languageLabel(detection.language),
       encoding: null,
       bytes: 0,
-      findings: 0,
-      tiers: SKIPPED_TIERS.map((tier) => ({ ...tier })),
+      findings,
+      tiers: SKIPPED_TIERS.map((tier) =>
+        findings > 0
+          ? { ...tier, reason: 'The file was skipped before analysis; a rule that reads only the file name still reported it.' }
+          : { ...tier },
+      ),
       skipReason: item.message,
       notes: [],
     })

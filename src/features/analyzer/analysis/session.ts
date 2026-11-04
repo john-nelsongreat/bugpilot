@@ -24,6 +24,8 @@ import { createAnalyzerClient } from './analyzerClient'
 import { buildCoverage, ENGINES_NOT_RUN_REASON, type EngineStatus, type TypeScriptStatus } from './coverage'
 import type { FileAnalysis } from './engine'
 import { makeFinding } from './finding'
+import { splitGeneratedEntries } from './generated'
+import { sensitiveFindings } from '../rules/sensitiveFiles'
 import { buildReport } from './reportModel'
 import { createDefaultTsClient, TS_FILE_TIMEOUT_MS, type TsSyntaxClient } from './typescript/tsClient'
 
@@ -118,6 +120,8 @@ export interface AnalyzeUploadOptions {
   limits?: ArchiveLimits
   /** How much analysed text may stay in memory for the fix review. */
   maxRetainedBytes?: number
+  /** Read generated and vendored files too. `.git` is skipped at every setting. */
+  includeGenerated?: boolean
 }
 
 export interface SessionDeps {
@@ -227,6 +231,7 @@ export async function analyzeUpload(
   const readOptions = {
     limits: options.limits ?? DEFAULT_ARCHIVE_LIMITS,
     signal,
+    includeGenerated: options.includeGenerated === true,
     onProgress: (progress: ArchiveReadProgress) => emit(readingProgress(progress)),
   }
 
@@ -265,6 +270,26 @@ export async function analyzeUpload(
     note = read.note ?? null
   }
 
+  // Sensitive names are judged before generated files are set aside: a credential file BugPilot
+  // will not analyse is still worth reporting, and most of those rules need no content at all.
+  // Holding the match here also means the finding is counted for a file that never reaches a rule.
+  const sensitiveByFile = new Map<string, AnalyzerFinding[]>()
+  const collectSensitive = (name: string, text: string | null): void => {
+    const findings = sensitiveFindings({ name, text })
+    if (findings.length === 0) return
+    const existing = sensitiveByFile.get(name)
+    if (existing) existing.push(...findings)
+    else sensitiveByFile.set(name, findings)
+  }
+  for (const entry of entries) collectSensitive(entry.name, entry.text)
+  for (const item of skipped) collectSensitive(item.name, null)
+
+  // Generated and vendored files are set aside before anything is analysed. The override reads
+  // them too, but `.git` is never read at any setting.
+  const generated = splitGeneratedEntries(entries, options.includeGenerated === true)
+  entries = generated.kept
+  skipped = [...skipped, ...generated.skipped]
+
   // A notebook is one JSON document holding many small programs plus whatever a kernel printed.
   // It is split before anything is analysed, so each cell reaches the rules, the TypeScript check
   // and the deep engines as a file of its own; that is also what makes a deep pass reach Python cells.
@@ -292,8 +317,13 @@ export async function analyzeUpload(
     })
     if (rules.cancelled || signal?.aborted) return cancelled()
     if (rules.error) return failed('error', rules.error, stats)
-    analyses = rules.files.map(redactNotebookAnalysis)
+    analyses = [...rules.files]
   }
+
+  // Findings that came from a name rather than from analysis join the report even when their file
+  // was skipped, and they are merged before the notebook redaction so the same policy applies.
+  for (const [file, findings] of sensitiveByFile) mergeFindings(analyses, file, findings)
+  analyses = analyses.map(redactNotebookAnalysis)
 
   const tsEntries = entries.filter((entry) => isTsFamily(entry.language))
   const tsStatus = new Map<string, TypeScriptStatus>()
