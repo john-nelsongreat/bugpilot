@@ -8,6 +8,7 @@ import { redactCredentialInMessage, redactCredentialToken, redactIfCredential } 
 const KEY = ['gh', 'p_', 'K7mN2pQ9rS4tV6wX8yZ1', 'aB3cD5eF7gH9jK2mN4pQ6'].join('')
 const AWS = ['AK', 'IA', '3TEXAMPLE7XK2Q94'].join('')
 const SLACK = ['xox', 'b-', '4815162342abcdef'].join('')
+const WEAK_PASSWORD = ['hunt', 'er22'].join('')
 
 describe('engine evidence redaction', () => {
   it('leaves ordinary code exactly as the file has it', () => {
@@ -28,7 +29,7 @@ describe('engine evidence redaction', () => {
     for (const value of [KEY, AWS, SLACK]) {
       expect(redactIfCredential(`x = ${value}`)).not.toContain(value)
     }
-    expect(redactIfCredential('password = hunter22')).toContain('redacted')
+    expect(redactIfCredential(`password = ${WEAK_PASSWORD}`)).toContain('redacted')
   })
 
   it('keeps the rest of the line when only the quoted value is a secret', () => {

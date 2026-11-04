@@ -6,7 +6,9 @@ fetched at run time from any registry. This page records what each binary actual
 licence it carries, and how that was checked, so a reviewer can re-do the check without
 trusting this table.
 
-Verified 2026-11-03. All 19 shipped binaries are MIT. No GPL, LGPL, MPL or CC-licensed
+Verified 2026-11-04. All 18 shipped `.wasm` binaries are MIT (16 grammars plus the tree-sitter
+runtime and the Ruff linter; the two JavaScript files in the same directory are BugPilot's own
+code). No GPL, LGPL, MPL or CC-licensed
 component is shipped, and no grammar was excluded for licence reasons because none needed
 exclusion.
 
@@ -78,7 +80,7 @@ string appears in any of the 16 `LICENSE` files.
 ## Attribution obligations
 
 The MIT licence requires the copyright notice and the licence text to be retained in
-"all copies or substantial portions of the Software". BugPilot distributes the 19 `.wasm`
+"all copies or substantial portions of the Software". BugPilot distributes the 18 `.wasm`
 binaries as part of a static build, so:
 
 - `web-tree-sitter` (© Max Brunsfeld) and `ruff_wasm_bg.wasm` (© Charles Marsh, with the 13
