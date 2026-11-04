@@ -19,8 +19,9 @@ import type { RuleHit } from './features/analyzer/rules/types'
 
 /**
  * The shape the production rules cannot see: an unquoted credential assignment anywhere in a line
- * (`password = hunter22`, `db_password: something`), including one nested inside a string or a
- * call. A quoted value is left to `QUOTED_ASSIGNMENT` in `rules/secrets.ts`, so nothing overlaps.
+ * — the word `password` followed by `=` and a bare value, or `db_password` followed by `:` and one
+ * — including a match nested inside a string or a call. A quoted value is left to
+ * `QUOTED_ASSIGNMENT` in `rules/secrets.ts`, so nothing overlaps.
  */
 const CREDENTIAL_WORD =
   /(password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret)/i
