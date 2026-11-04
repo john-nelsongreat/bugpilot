@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { AlertTriangle, FileSearch, FolderOpen, ShieldCheck, Upload, X } from 'lucide-react'
+import { AlertTriangle, Clipboard, FileSearch, FolderOpen, Plus, ShieldCheck, Upload, X } from 'lucide-react'
 import {
   analyzeUpload,
   isStaleHandleError,
@@ -27,6 +27,13 @@ import {
 import { AnalyzeResults, type PrepareFixPlan } from '../features/analyzer/ui/AnalyzeResults'
 import { EngineGate } from '../features/analyzer/ui/EngineGate'
 import { sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
+import { combineUploads } from '../features/analyzer/upload/multiSource'
+import {
+  DEFAULT_PASTE_EXTENSION,
+  MAX_PASTED_BYTES,
+  PASTE_LANGUAGES,
+  pastedSource,
+} from '../features/analyzer/upload/paste'
 
 const PHASE_LABELS: Record<SessionPhase, string> = {
   reading: 'Reading the upload',
@@ -43,6 +50,8 @@ type PassMode = 'basic' | 'deep'
 interface PreparedUpload {
   input: UploadInput
   archiveBytes: number
+  /** The uploads this pass is built from, in the order the user added them. */
+  uploads: readonly (readonly IntakeSource[])[]
   /**
    * The same upload again. A zip's bytes are transferred to the reader worker, so the local
    * copy is detached after the first pass and the file has to be re-read from the picker.
@@ -99,11 +108,17 @@ async function prepareFiles(
   // the bytes and reports a disagreement as a note.
   if (files.length === 1 && isContainerName(files[0].name)) {
     const bytes = await readFile(files[0])
-    return { input: { kind: 'archive', bytes, name: files[0].name }, archiveBytes: bytes.length, retry }
+    return {
+      input: { kind: 'archive', bytes, name: files[0].name },
+      archiveBytes: bytes.length,
+      uploads: [],
+      retry,
+    }
   }
   return {
     input: { kind: 'files', sources: sourcesFromFiles(files) },
     archiveBytes: files.reduce((total, file) => total + file.size, 0),
+    uploads: [sourcesFromFiles(files)],
     retry,
   }
 }
@@ -112,15 +127,38 @@ function fromSources(sources: readonly IntakeSource[]): () => Promise<PreparedUp
   const prepare = async (): Promise<PreparedUpload> => {
     if (sources.length === 1 && isContainerName(sources[0].path)) {
       const bytes = await sources[0].read()
-      return { input: { kind: 'archive', bytes, name: sources[0].path }, archiveBytes: bytes.length, retry: prepare }
+      return {
+        input: { kind: 'archive', bytes, name: sources[0].path },
+        archiveBytes: bytes.length,
+        uploads: [],
+        retry: prepare,
+      }
     }
     return {
       input: { kind: 'files', sources },
       archiveBytes: sources.reduce((total, source) => total + source.size, 0),
+      uploads: [sources],
       retry: prepare,
     }
   }
   return prepare
+}
+
+/**
+ * One pass over several uploads. Each upload keeps its own handle list, so a re-run reads the same
+ * files again; naming and screening happen every time, which is what makes a repeated pick of the
+ * same folder behave the same as the first one.
+ */
+function prepareUploads(uploads: readonly (readonly IntakeSource[])[]): PreparedUpload {
+  const combined = combineUploads(uploads)
+  const prepare = async (): Promise<PreparedUpload> => prepared
+  const prepared: PreparedUpload = {
+    input: { kind: 'files', sources: combined.sources, notes: combined.notes },
+    archiveBytes: combined.sources.reduce((total, source) => total + source.size, 0),
+    uploads,
+    retry: prepare,
+  }
+  return prepared
 }
 
 async function prepareDrop(
@@ -147,11 +185,18 @@ export function AnalyzePage({
   const [dragActive, setDragActive] = useState(false)
   const [deepPass, setDeepPass] = useState(false)
   const [gateDismissed, setGateDismissed] = useState(false)
+  /** The uploads the current run is built from, in the order the user added them. */
+  const [uploads, setUploads] = useState<readonly (readonly IntakeSource[])[]>([])
+  const [intakeMode, setIntakeMode] = useState<'upload' | 'paste'>('upload')
+  const [pasteText, setPasteText] = useState('')
+  const [pasteExtension, setPasteExtension] = useState(DEFAULT_PASTE_EXTENSION)
 
   const busyRef = useRef(false)
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const retryRef = useRef<(() => Promise<PreparedUpload>) | null>(null)
+  /** The next picker or drop adds to the run instead of replacing it. */
+  const addingRef = useRef(false)
   /**
    * The text the last completed pass kept in memory, ready to be analysed again. A second pass
    * normally re-reads the original handles; this is what it falls back to when the browser reports
@@ -215,6 +260,9 @@ export function AnalyzePage({
     const prepared: PreparedUpload = {
       input: held.input,
       archiveBytes: held.archiveBytes,
+      // The upload list is unchanged: this pass replays text already in this tab, so the picker
+      // still offers to add to the same run.
+      uploads,
       retry: () => Promise.resolve(prepared),
     }
     return prepared
@@ -279,6 +327,7 @@ export function AnalyzePage({
         return
       }
       retryRef.current = prepared.retry
+      setUploads(prepared.uploads)
 
       const options: AnalyzeUploadOptions = {
         archiveBytes: prepared.archiveBytes,
@@ -351,13 +400,55 @@ export function AnalyzePage({
     abortRef.current = null
     retryRef.current = null
     heldReadRef.current = null
+    addingRef.current = false
     busyRef.current = false
     setRunning(false)
     setProgress(null)
     setResult(null)
+    setUploads([])
+    setPasteText('')
     setDeepPass(false)
     setGateDismissed(false)
     uploadHeadingRef.current?.focus()
+  }
+
+  /**
+   * A paste is one file the browser never saw. It enters the same reader as a picked file, so it
+   * gets the same ceilings, the same coverage table and the same re-read for a deep pass — the only
+   * difference is that the bytes come out of this tab's memory instead of a disk handle.
+   */
+  function handleRunPaste(): void {
+    const pasted = pastedSource(pasteText, pasteExtension)
+    if (pasted.ok === false) {
+      runTokenRef.current += 1
+      abortRef.current?.abort()
+      abortRef.current = null
+      heldReadRef.current = null
+      retryRef.current = null
+      setResult({ status: 'refused', message: pasted.refusal, report: null, stats: null })
+      uploadHeadingRef.current?.focus()
+      return
+    }
+    const prepared: PreparedUpload = {
+      input: { kind: 'files', sources: [pasted.source] },
+      archiveBytes: pasted.source.size,
+      uploads: [[pasted.source]],
+      retry: () => Promise.resolve(prepared),
+    }
+    void startUpload(async () => prepared)
+  }
+
+  /**
+   * Adds a further upload and re-runs the whole selection. The uploads already picked stay in the
+   * run: naming and screening happen again over the combined list, so the earlier files are read
+   * from their own handles in the same order and an upload that cannot be trusted is left out.
+   */
+  async function addUpload(sources: readonly IntakeSource[]): Promise<void> {
+    const next = [...uploads, sources]
+    setDeepPass(false)
+    setGateDismissed(false)
+    heldReadRef.current = null
+    await runPass(async () => prepareUploads(next), 'basic')
   }
 
   function handleCancel(): void {
@@ -368,15 +459,27 @@ export function AnalyzePage({
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
     if (files.length === 0) return
+    if (addingRef.current) {
+      addingRef.current = false
+      void addUpload(sourcesFromFiles(files))
+      return
+    }
     void startUpload(() => prepareFiles(files, readFile))
   }
 
-  function handleDrop(event: DragEvent<HTMLDivElement>): void {
+  async function handleDrop(event: DragEvent<HTMLDivElement>): Promise<void> {
     event.preventDefault()
     setDragActive(false)
     if (busyRef.current) return
     const transfer = event.dataTransfer
-    void startUpload(() => prepareDrop(transfer, readFile))
+    if (!addingRef.current) {
+      await startUpload(() => prepareDrop(transfer, readFile))
+      return
+    }
+    addingRef.current = false
+    const sources =
+      (await sourcesFromDrop(transfer)) ?? sourcesFromFiles(Array.from(transfer.files))
+    await addUpload(sources)
   }
 
   const announcement =
@@ -433,7 +536,39 @@ export function AnalyzePage({
         </div>
 
         <div className="analyze-upload-body">
+          <div className="analyze-tabs" role="tablist" aria-label="How to give BugPilot code">
+            <button
+              type="button"
+              role="tab"
+              id="analyze-tab-upload"
+              aria-controls="analyze-panel-upload"
+              aria-selected={intakeMode === 'upload'}
+              className={intakeMode === 'upload' ? 'analyze-tab is-selected' : 'analyze-tab'}
+              onClick={() => setIntakeMode('upload')}
+            >
+              <Upload size={16} aria-hidden="true" />
+              Upload files
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="analyze-tab-paste"
+              aria-controls="analyze-panel-paste"
+              aria-selected={intakeMode === 'paste'}
+              className={intakeMode === 'paste' ? 'analyze-tab is-selected' : 'analyze-tab'}
+              onClick={() => setIntakeMode('paste')}
+            >
+              <Clipboard size={16} aria-hidden="true" />
+              Paste code
+            </button>
+          </div>
+
+          {intakeMode === 'upload' ? (
           <div
+            role="tabpanel"
+            id="analyze-panel-upload"
+            aria-labelledby="analyze-tab-upload"
+            tabIndex={0}
             className={dragActive ? 'analyze-drop is-dragging' : 'analyze-drop'}
             onDragEnter={(event) => {
               event.preventDefault()
@@ -477,6 +612,30 @@ export function AnalyzePage({
                 Choose a folder
               </button>
             </div>
+            {!running && uploads.length > 0 ? (
+              <>
+                <div className="analyze-pick-actions">
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => {
+                      addingRef.current = true
+                      fileInputRef.current?.click()
+                    }}
+                  >
+                    <Plus size={16} aria-hidden="true" />
+                    Add another upload to this run
+                  </button>
+                </div>
+                <p className="field-hint">
+                  The files already picked stay in the run and are read again from the same handles,
+                  in the same order. Each upload gets its own <code>upload-N/</code> prefix, so two
+                  folders with a <code>src/app.js</code> inside both keep their own copy. BugPilot
+                  screens the uploads one by one: one it cannot trust is left out with a reason, and
+                  the others are still checked. An archive has to be picked on its own.
+                </p>
+              </>
+            ) : null}
             <input
               ref={fileInputRef}
               type="file"
@@ -494,6 +653,61 @@ export function AnalyzePage({
               onChange={handleFileSelection}
             />
           </div>
+          ) : null}
+
+          {intakeMode === 'paste' ? (
+            <div
+              role="tabpanel"
+              id="analyze-panel-paste"
+              aria-labelledby="analyze-tab-paste"
+              tabIndex={0}
+              className="analyze-paste"
+            >
+              <div className="field">
+                <label htmlFor="analyze-paste-language">Language of the pasted code</label>
+                <select
+                  id="analyze-paste-language"
+                  className="analyze-paste-language"
+                  value={pasteExtension}
+                  onChange={(event) => setPasteExtension(event.target.value)}
+                >
+                  {PASTE_LANGUAGES.map((option) => (
+                    <option key={option.extension} value={option.extension}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="analyze-paste-text">Code to check</label>
+                <textarea
+                  id="analyze-paste-text"
+                  className="analyze-paste-text"
+                  rows={12}
+                  spellCheck={false}
+                  value={pasteText}
+                  onChange={(event) => setPasteText(event.target.value)}
+                />
+              </div>
+              <p className="field-hint">
+                The language name decides which rules get to read the text; a paste with no name
+                would be checked as plain text. Up to 1 MiB of UTF-8, measured before a byte is
+                analysed. The text is held in this tab only: it is never uploaded, never written to
+                disk, and Clear results wipes it.
+              </p>
+              <div className="analyze-pick-actions analyze-paste-actions">
+                <button
+                  type="button"
+                  className="button button--primary"
+                  disabled={running}
+                  onClick={handleRunPaste}
+                >
+                  <FileSearch size={16} aria-hidden="true" />
+                  Check the pasted text
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {running ? (
             <div
@@ -572,6 +786,14 @@ export function AnalyzePage({
               <li>
                 Folder drops and the folder picker are checked against the same limits as an
                 archive.
+              </li>
+              <li>
+                Several uploads share one budget: every ceiling above applies to the files from all
+                of them together, not once per upload.
+              </li>
+              <li>
+                Pasted code is capped at {formatBytes(MAX_PASTED_BYTES)} of UTF-8 and is treated as
+                one file named <code>pasted/snippet.txt</code>.
               </li>
               <li>
                 Reading one upload gets {wallClockSeconds(limits)} seconds. Past that BugPilot stops

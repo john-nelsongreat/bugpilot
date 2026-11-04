@@ -81,6 +81,11 @@ export interface UploadArchiveInput {
 export interface UploadFilesInput {
   kind: 'files'
   sources: readonly IntakeSource[]
+  /**
+   * Uploads the intake layer left out before anything was read. They are reported as skipped files
+   * so the coverage table accounts for the whole selection, and they are never handed to a reader.
+   */
+  notes?: readonly ArchiveSkippedEntry[]
 }
 
 /**
@@ -244,7 +249,7 @@ export async function analyzeUpload(
       return failed('refused', describeRefusal(read), read.stats)
     }
     entries = read.entries
-    skipped = read.skipped
+    skipped = input.kind === 'files' ? [...(input.notes ?? []), ...read.skipped] : read.skipped
     stats = read.stats
     note = read.note ?? null
   }

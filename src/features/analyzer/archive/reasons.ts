@@ -45,6 +45,7 @@ export const ARCHIVE_SKIP_CODES = [
   'empty_entry',
   'directory_entry',
   'special_entry',
+  'source_set_aside',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -133,6 +134,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
   directory_entry: () => 'Folder entries are not read as files.',
   special_entry: (name, extra) =>
     `"${name}" is a ${extra ?? 'special entry'}, not an ordinary file. BugPilot never follows links, creates devices or reads archive volume records, so it skipped this entry and kept going.`,
+  source_set_aside: (name, extra) =>
+    `"${name}" was left out of this run${extra ? `: ${extra}` : ''}. BugPilot checked the uploads you added one by one, so an upload it cannot trust does not stop the others; nothing from "${name}" was read or kept.`,
 }
 
 /**
