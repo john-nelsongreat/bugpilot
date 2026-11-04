@@ -26,6 +26,7 @@ import {
 } from '../features/analyzer/export/reportFiles'
 import { AnalyzeResults, type PrepareFixPlan } from '../features/analyzer/ui/AnalyzeResults'
 import { EngineGate } from '../features/analyzer/ui/EngineGate'
+import { sanitizeForDisplay } from '../features/analyzer/sanitize/display'
 import { sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
 import { combineUploads } from '../features/analyzer/upload/multiSource'
 import {
@@ -789,7 +790,7 @@ export function AnalyzePage({
               <AlertTriangle size={20} aria-hidden="true" />
               <div>
                 <strong>{result?.status === 'refused' ? 'Upload refused' : 'Analysis failed'}</strong>
-                <p>{result?.message}</p>
+                <p>{sanitizeForDisplay(result?.message ?? '')}</p>
                 <p className="field-hint">Nothing was analysed and nothing was kept.</p>
               </div>
             </div>

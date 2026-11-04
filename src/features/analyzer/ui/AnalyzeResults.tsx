@@ -6,6 +6,7 @@ import type { DownloadReportFile } from '../export/reportFiles'
 import { prepareFixPlan as prepareFixPlanDefault, type FixPlan } from '../fixes/plan'
 import type { FixCandidate } from '../fixes/types'
 import { NOT_CHECKED_BY_LANGUAGE, languageLabel } from '../languages'
+import { sanitizeCodeForDisplay, sanitizeForDisplay, truncateForDisplay } from '../sanitize/display'
 import type { AnalyzerFinding, AnalyzerReport, CoverageTier } from '../types'
 
 const FixReview = lazy(() => import('./FixReview'))
@@ -42,9 +43,16 @@ function formatBytes(bytes: number): string {
 }
 
 function tierText(tier: CoverageTier): string {
-  if (!tier.available) return `not available: ${tier.reason}`
+  if (!tier.available) return `not available: ${sanitizeForDisplay(tier.reason)}`
   if (tier.ran) return 'ran'
-  return `not run: ${tier.reason}`
+  return `not run: ${sanitizeForDisplay(tier.reason)}`
+}
+
+const NAME_DISPLAY_LIMIT = 72
+
+function FileName({ name }: { name: string }) {
+  const full = sanitizeForDisplay(name)
+  return <code title={full}>{truncateForDisplay(full, NAME_DISPLAY_LIMIT)}</code>
 }
 
 function findingGroups(findings: readonly AnalyzerFinding[]): [string, AnalyzerFinding[]][] {
@@ -76,15 +84,15 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
           <span className="badge badge--muted">{finding.tier}</span>
         </div>
         <p className="analyze-finding-meta">
-          <code>{finding.ruleId}</code>
+          <code>{sanitizeForDisplay(finding.ruleId)}</code>
           <span aria-hidden="true"> · </span>
           <span>Line {finding.range.startLine}</span>
         </p>
-        <h4 id={titleId}>{finding.message}</h4>
-        <p className="field-hint">{finding.confidence.reason}</p>
+        <h4 id={titleId}>{sanitizeForDisplay(finding.message)}</h4>
+        <p className="field-hint">{sanitizeForDisplay(finding.confidence.reason)}</p>
       </header>
 
-      <p className="prose">{finding.explanation}</p>
+      <p className="prose">{sanitizeForDisplay(finding.explanation)}</p>
 
       {finding.evidence.length > 0 ? (
         <div className="analyze-finding-section">
@@ -93,13 +101,13 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
             {finding.evidence.map((evidence, index) => (
               <li key={`${evidence.label}-${index}`}>
                 <p className="field-hint">
-                  {evidence.label}
+                  {sanitizeForDisplay(evidence.label)}
                   {evidence.lineNumber === undefined ? '' : ` · line ${evidence.lineNumber}`}
                   {' · '}
-                  {evidence.source}
+                  {sanitizeForDisplay(evidence.source)}
                 </p>
                 <pre className="code-block analyze-evidence">
-                  <code>{evidence.quote}</code>
+                  <code>{sanitizeCodeForDisplay(evidence.quote)}</code>
                 </pre>
               </li>
             ))}
@@ -113,7 +121,7 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
             <p className="eyebrow">
               Proposed change ({candidate.riskClass}, not applied)
             </p>
-            <p className="prose">{candidate.description}</p>
+            <p className="prose">{sanitizeForDisplay(candidate.description)}</p>
             {candidate.behaviourChange ? (
               <p className="analyze-behaviour">
                 This change can alter behaviour. Read the diff in the review before exporting.
@@ -122,7 +130,7 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
             {candidate.warnings.length > 0 ? (
               <ul className="analyze-list analyze-fix-warnings">
                 {candidate.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
+                  <li key={warning}>{sanitizeForDisplay(warning)}</li>
                 ))}
               </ul>
             ) : null}
@@ -135,7 +143,8 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
               <span>
                 Include this change{' '}
                 <span className="sr-only">
-                  for {finding.ruleId} at line {finding.range.startLine} in {finding.file}
+                  for {sanitizeForDisplay(finding.ruleId)} at line {finding.range.startLine} in{' '}
+                  {sanitizeForDisplay(finding.file)}
                 </span>
               </span>
             </label>
@@ -150,14 +159,14 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
             </p>
             {unavailableReason ? (
               <p className="analyze-unavailable">
-                No automatic change offered: {unavailableReason}
+                No automatic change offered: {sanitizeForDisplay(unavailableReason)}
               </p>
             ) : null}
             {finding.fix ? (
               <>
-                <p className="prose">{finding.fix.explanation}</p>
-                <p className="field-hint">{finding.fix.whereItMayApply}</p>
-                <p className="field-hint">{finding.fix.riskReason}</p>
+                <p className="prose">{sanitizeForDisplay(finding.fix.explanation)}</p>
+                <p className="field-hint">{sanitizeForDisplay(finding.fix.whereItMayApply)}</p>
+                <p className="field-hint">{sanitizeForDisplay(finding.fix.riskReason)}</p>
               </>
             ) : (
               <p className="prose">No automatic fix is suggested for this finding.</p>
@@ -171,7 +180,7 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
           <p className="eyebrow">How to verify</p>
           <ol className="analyze-list analyze-list--numbered">
             {finding.verificationSteps.map((step) => (
-              <li key={step}>{step}</li>
+              <li key={step}>{sanitizeForDisplay(step)}</li>
             ))}
           </ol>
         </div>
@@ -182,7 +191,7 @@ function FindingCard({ finding, candidate, unavailableReason, checked, onSelect 
           <p className="eyebrow">Finding limits</p>
           <ul className="analyze-list">
             {finding.limitations.map((limitation) => (
-              <li key={limitation}>{limitation}</li>
+              <li key={limitation}>{sanitizeForDisplay(limitation)}</li>
             ))}
           </ul>
         </div>
@@ -425,8 +434,8 @@ export function AnalyzeResults({
         <div className="analyze-body">
           {planError ? (
             <p className="notice notice--alert" role="alert">
-              Automatic fixes could not be prepared: {planError}. The report export above still works
-              and nothing was kept.
+              Automatic fixes could not be prepared: {sanitizeForDisplay(planError)}. The report
+              export above still works and nothing was kept.
             </p>
           ) : plan === null ? (
             <p className="field-hint analyze-fix-planning">
@@ -535,11 +544,14 @@ export function AnalyzeResults({
                     onChange={(event) => setFile(event.target.value)}
                   >
                     <option value="all">All files with findings</option>
-                    {findingFiles.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
+                    {findingFiles.map((name) => {
+                      const full = sanitizeForDisplay(name)
+                      return (
+                        <option key={name} value={name} title={full}>
+                          {truncateForDisplay(full, NAME_DISPLAY_LIMIT)}
+                        </option>
+                      )
+                    })}
                   </select>
                 </div>
                 <button
@@ -567,7 +579,7 @@ export function AnalyzeResults({
                     aria-labelledby={`analyze-file-${encodeURIComponent(name)}`}
                   >
                     <h3 id={`analyze-file-${encodeURIComponent(name)}`}>
-                      <code>{name}</code>
+                      <FileName name={name} />
                       <span className="analyze-file-count">
                         {findings.length} finding{findings.length === 1 ? '' : 's'}
                       </span>
@@ -622,8 +634,8 @@ export function AnalyzeResults({
               {report.coverage.map((entry) => (
                 <li key={entry.file} className="analyze-coverage-item">
                   <div className="analyze-coverage-head">
-                    <code>{entry.file}</code>
-                    <span className="badge badge--muted">{entry.languageLabel}</span>
+                    <FileName name={entry.file} />
+                    <span className="badge badge--muted">{sanitizeForDisplay(entry.languageLabel)}</span>
                     {entry.status === 'analysed' ? (
                       <span className="field-hint">
                         {formatBytes(entry.bytes)} · {entry.findings} finding
@@ -634,7 +646,9 @@ export function AnalyzeResults({
                     )}
                   </div>
                   {entry.status === 'skipped' ? (
-                    <p className="analyze-coverage-reason">Skipped: {entry.skipReason}</p>
+                    <p className="analyze-coverage-reason">
+                      Skipped: {sanitizeForDisplay(entry.skipReason ?? '')}
+                    </p>
                   ) : (
                     <ul className="analyze-tier-list">
                       {entry.tiers.map((tier) => (
@@ -648,7 +662,7 @@ export function AnalyzeResults({
                   )}
                   {entry.notes.map((note) => (
                     <p key={note} className="field-hint">
-                      {note}
+                      {sanitizeForDisplay(note)}
                     </p>
                   ))}
                 </li>

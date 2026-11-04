@@ -346,3 +346,84 @@ describe('buildCleanExport', () => {
     }
   })
 })
+
+function hostileSetup(file: string, text: string): {
+  report: AnalyzerReport
+  sources: ArchiveEntry[]
+  candidate: FixCandidate
+} {
+  const hostileFinding = finding({
+    id: 'f-hostile',
+    file,
+    ruleId: 'bugpilot/test/hostile-path',
+    severity: 'Medium',
+    message: 'Fixture finding.',
+  })
+  const hostileReport: AnalyzerReport = {
+    ...report(),
+    session: { archiveBytes: text.length, fileCount: 1, analysedCount: 1, skippedCount: 0, skipped: [] },
+    summary: {
+      findings: 1,
+      bySeverity: { Low: 0, Medium: 1, High: 0, Critical: 0 },
+      byTier: { syntax: 0, pattern: 1, 'type-or-dataflow': 0 },
+    },
+    findings: [hostileFinding],
+    coverage: [coverage(file, 'javascript')],
+  }
+  const candidate: FixCandidate = {
+    findingId: hostileFinding.id,
+    ruleId: hostileFinding.ruleId,
+    file,
+    targetStartLine: 1,
+    targetEndLine: 1,
+    edits: [{ file, startOffset: 10, endOffset: 11, newText: '2' }],
+    description: 'Replace the value.',
+    riskClass: 'safe',
+    behaviourChange: false,
+    warnings: [],
+    maskedSpans: [],
+  }
+  return { report: hostileReport, sources: [source(file, text, 'javascript')], candidate }
+}
+
+describe('clean export paths', () => {
+  it.each([
+    ['a line break', 'src/line\nbreak.js'],
+    ['a carriage return', 'src/line\rbreak.js'],
+    ['a dash-leading folder', 'src/-p/evil.js'],
+  ])('blocks the export when a changed path contains %s', async (_label, file) => {
+    const setup = hostileSetup(file, 'const a = 1\n')
+    const result = await buildCleanExport(
+      { report: setup.report, sources: setup.sources, candidates: [setup.candidate] },
+      ALL,
+      deps,
+    )
+    expect(result.status).toBe('blocked')
+    if (result.status !== 'blocked') return
+    expect(result.message).toContain('Git cannot apply a patch with that path safely')
+    expect(result.message).not.toContain('\n')
+    expect(result.message).not.toContain('\r')
+  })
+
+  it('keeps the original path in the patch but escapes it in the changelog and manifest', async () => {
+    const file = 'src/[click](x)*.js'
+    const setup = hostileSetup(file, 'const a = 1\n')
+    const result = await buildCleanExport(
+      { report: setup.report, sources: setup.sources, candidates: [setup.candidate] },
+      ALL,
+      deps,
+    )
+    if (result.status !== 'ready') throw new Error(`build failed: ${result.message}`)
+
+    const text = (name: string) =>
+      strFromU8(result.files.find((entry) => entry.name === name)?.bytes ?? new Uint8Array())
+    expect(text('changes.patch')).toContain('--- a/src/[click](x)*.js')
+    expect(text('changes.patch')).toContain('+++ b/src/[click](x)*.js')
+    expect(text('CHANGELOG.md')).toContain('## src/\\[click\\]\\(x\\)\\*.js')
+    expect(text('report.md')).toContain('| src/\\[click\\]\\(x\\)\\*.js |')
+
+    const zipEntries = unzipSync(result.files.find((entry) => entry.name === 'clean.zip')?.bytes ?? new Uint8Array())
+    expect(Object.keys(zipEntries).sort()).toEqual(['MANIFEST.md', file].sort())
+    expect(strFromU8(zipEntries['MANIFEST.md'])).toContain('- src/\\[click\\]\\(x\\)\\*.js (fixed)')
+  })
+})

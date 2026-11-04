@@ -6,6 +6,7 @@ import { verifyFixCandidates, type VerifyFixesDeps } from '../analysis/verifyFix
 import { reportForExport, renderReportMarkdown } from '../export/reportFiles'
 import { applyEdits } from '../fixes/text'
 import type { FixCandidate } from '../fixes/types'
+import { escapeMarkdown, isPatchSafePath, sanitizeForDisplay } from '../sanitize/display'
 import type { AnalyzerReport } from '../types'
 
 export interface CleanExportSelections {
@@ -68,6 +69,10 @@ function blocked(message: string): CleanExportBlocked {
   return { status: 'blocked', message }
 }
 
+function codeSpan(value: string): string {
+  return `\`${sanitizeForDisplay(value).replace(/`/g, '\\`')}\``
+}
+
 function appliedChanges(candidates: readonly FixCandidate[]): AppliedChange[] {
   return candidates.map((candidate) => ({
     findingId: candidate.findingId,
@@ -87,7 +92,7 @@ function buildChangelog(report: AnalyzerReport, applied: readonly AppliedChange[
   const lines = [
     '# BugPilot clean export changelog',
     '',
-    `Generated: ${report.generatedAt}`,
+    `Generated: ${escapeMarkdown(report.generatedAt)}`,
     '',
     `Applied changes: ${applied.length} in ${files.length} file${files.length === 1 ? '' : 's'}.`,
     '',
@@ -95,19 +100,19 @@ function buildChangelog(report: AnalyzerReport, applied: readonly AppliedChange[
     '',
   ]
   for (const file of files) {
-    lines.push(`## ${file}`, '')
+    lines.push(`## ${escapeMarkdown(file)}`, '')
     for (const change of applied.filter((entry) => entry.file === file)) {
       lines.push(
-        `### Line ${change.startLine}${change.endLine === change.startLine ? '' : `–${change.endLine}`}: ${change.ruleId}`,
+        `### Line ${change.startLine}${change.endLine === change.startLine ? '' : `–${change.endLine}`}: ${escapeMarkdown(change.ruleId)}`,
         '',
-        `- Finding id: \`${change.findingId}\``,
-        `- Risk class: ${change.riskClass}`,
-        `- Description: ${change.description}`,
+        `- Finding id: ${codeSpan(change.findingId)}`,
+        `- Risk class: ${escapeMarkdown(change.riskClass)}`,
+        `- Description: ${escapeMarkdown(change.description)}`,
         `- Behaviour change: ${change.behaviourChange ? 'yes' : 'no'}`,
       )
       if (change.warnings.length > 0) {
         lines.push('- Warnings:')
-        for (const warning of change.warnings) lines.push(`  - ${warning}`)
+        for (const warning of change.warnings) lines.push(`  - ${escapeMarkdown(warning)}`)
       }
       lines.push('')
     }
@@ -134,7 +139,7 @@ function buildManifest(
     '## Files in this zip',
     '',
   ]
-  for (const name of names) lines.push(`- ${name} (${fixedFiles.has(name) ? 'fixed' : 'unchanged'})`)
+  for (const name of names) lines.push(`- ${escapeMarkdown(name)} (${fixedFiles.has(name) ? 'fixed' : 'unchanged'})`)
   lines.push('')
   return lines.join('\n')
 }
@@ -151,7 +156,7 @@ function includedFixesSection(applied: readonly AppliedChange[]): string {
   ]
   for (const change of applied) {
     lines.push(
-      `| ${change.file.replace(/\|/g, '\\|')} | ${change.startLine} | \`${change.ruleId}\` | ${change.riskClass} | ${change.description.replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`,
+      `| ${escapeMarkdown(change.file)} | ${change.startLine} | ${codeSpan(change.ruleId)} | ${escapeMarkdown(change.riskClass)} | ${escapeMarkdown(change.description)} |`,
     )
   }
   lines.push('', CREDENTIAL_NOTE, '')
@@ -211,6 +216,13 @@ export async function buildCleanExport(
   if (candidates.length === 0) {
     return blocked(
       'The only selected change is inside a notebook. BugPilot never edits or exports notebooks, so make that change in Jupyter by hand.',
+    )
+  }
+
+  const unsafePath = candidates.find((candidate) => !isPatchSafePath(candidate.file))
+  if (unsafePath) {
+    return blocked(
+      `The path "${sanitizeForDisplay(unsafePath.file)}" contains a line break, a control or invisible character, or a folder name that starts with a dash. Git cannot apply a patch with that path safely, so the clean export was blocked and no files were offered.`,
     )
   }
 

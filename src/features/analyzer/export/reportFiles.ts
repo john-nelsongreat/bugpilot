@@ -1,4 +1,10 @@
 import type { AnalyzerFinding, AnalyzerReport } from '../types'
+import {
+  codeFenceFor,
+  escapeMarkdown,
+  sanitizeCodeForDisplay,
+  sanitizeForDisplay,
+} from '../sanitize/display'
 
 const SNIPPET_EXCLUDED_NOTE = 'Evidence quotes were excluded from this export because code snippets were not included.'
 
@@ -18,13 +24,13 @@ export function reportForExport(report: AnalyzerReport, includeSnippets: boolean
   }
 }
 
-function escapeCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\n/g, ' ')
-}
-
 function tierCell(available: boolean, ran: boolean, reason: string, label: string): string {
   if (!available) return 'not available'
-  return ran ? 'ran' : `not run (${escapeCell(label)}: ${escapeCell(reason)})`
+  return ran ? 'ran' : `not run (${escapeMarkdown(label)}: ${escapeMarkdown(reason)})`
+}
+
+function codeSpan(value: string): string {
+  return `\`${sanitizeForDisplay(value).replace(/`/g, '\\`')}\``
 }
 
 export function renderReportMarkdown(report: AnalyzerReport): string {
@@ -64,39 +70,40 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
   for (const finding of report.findings) {
     if (finding.file !== currentFile) {
       currentFile = finding.file
-      push(`### ${currentFile}`)
+      push(`### ${escapeMarkdown(currentFile)}`)
       push()
     }
-    push(`#### ${finding.severity}: ${finding.message}`)
+    push(`#### ${escapeMarkdown(finding.severity)}: ${escapeMarkdown(finding.message)}`)
     push()
-    push(`- Rule: \`${finding.ruleId}\``)
-    push(`- Tier: ${finding.tier}`)
-    push(`- Analyzer: ${finding.analyzer}`)
-    push(`- Confidence: ${finding.confidence.level} — ${finding.confidence.reason}`)
+    push(`- Rule: ${codeSpan(finding.ruleId)}`)
+    push(`- Tier: ${escapeMarkdown(finding.tier)}`)
+    push(`- Analyzer: ${escapeMarkdown(finding.analyzer)}`)
+    push(`- Confidence: ${escapeMarkdown(finding.confidence.level)} — ${escapeMarkdown(finding.confidence.reason)}`)
     push(`- Location: line ${finding.range.startLine}${finding.range.startColumn ? `, column ${finding.range.startColumn}` : ''}`)
-    push(`- Finding id: \`${finding.id}\``)
+    push(`- Finding id: ${codeSpan(finding.id)}`)
     push()
-    push(finding.explanation)
+    push(escapeMarkdown(finding.explanation))
     push()
     if (finding.evidence.length > 0) {
       push('Evidence:')
       push()
       for (const evidence of finding.evidence) {
         const location = evidence.lineNumber === undefined ? '' : ` (line ${evidence.lineNumber})`
-        push(`${evidence.label}${location}:`)
+        push(`${escapeMarkdown(evidence.label)}${location}:`)
         push()
-        push('```')
-        push(evidence.quote)
-        push('```')
+        const fence = codeFenceFor(evidence.quote)
+        push(fence)
+        push(sanitizeCodeForDisplay(evidence.quote))
+        push(fence)
         push()
       }
     }
     if (finding.fix) {
-      push(`Suggested direction (${finding.fix.riskClass}, not applied): ${finding.fix.explanation}`)
+      push(`Suggested direction (${escapeMarkdown(finding.fix.riskClass)}, not applied): ${escapeMarkdown(finding.fix.explanation)}`)
       push()
-      push(`Where it may apply: ${finding.fix.whereItMayApply}`)
+      push(`Where it may apply: ${escapeMarkdown(finding.fix.whereItMayApply)}`)
       push()
-      push(`Risk: ${finding.fix.riskReason}`)
+      push(`Risk: ${escapeMarkdown(finding.fix.riskReason)}`)
       push()
     } else {
       push('No automatic fix is suggested for this finding.')
@@ -105,13 +112,13 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
     if (finding.verificationSteps.length > 0) {
       push('Verification steps:')
       push()
-      for (const step of finding.verificationSteps) push(`1. ${step}`)
+      for (const step of finding.verificationSteps) push(`1. ${escapeMarkdown(step)}`)
       push()
     }
     if (finding.limitations.length > 0) {
       push('Finding limitations:')
       push()
-      for (const limitation of finding.limitations) push(`- ${limitation}`)
+      for (const limitation of finding.limitations) push(`- ${escapeMarkdown(limitation)}`)
       push()
     }
   }
@@ -123,9 +130,9 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
   for (const file of report.coverage) {
     const syntax = file.tiers.find((tier) => tier.tier === 'syntax')
     const pattern = file.tiers.find((tier) => tier.tier === 'pattern')
-    const status = file.status === 'skipped' ? `skipped: ${escapeCell(file.skipReason ?? 'no reason recorded')}` : 'analysed'
+    const status = file.status === 'skipped' ? `skipped: ${escapeMarkdown(file.skipReason ?? 'no reason recorded')}` : 'analysed'
     push(
-      `| ${escapeCell(file.file)} | ${escapeCell(status)} | ${escapeCell(file.languageLabel)} | ${file.findings} | ${
+      `| ${escapeMarkdown(file.file)} | ${status} | ${escapeMarkdown(file.languageLabel)} | ${file.findings} | ${
         syntax ? tierCell(syntax.available, syntax.ran, syntax.reason, 'Syntax') : 'not available'
       } | ${pattern ? tierCell(pattern.available, pattern.ran, pattern.reason, 'Pattern') : 'not available'} |`,
     )
@@ -135,13 +142,13 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
   if (report.session.skipped.length > 0) {
     push('### Skipped entries')
     push()
-    for (const item of report.session.skipped) push(`- ${item.file}: ${item.reason}`)
+    for (const item of report.session.skipped) push(`- ${escapeMarkdown(item.file)}: ${escapeMarkdown(item.reason)}`)
     push()
   }
 
   push('## Limitations')
   push()
-  for (const limitation of report.limitations) push(`- ${limitation}`)
+  for (const limitation of report.limitations) push(`- ${escapeMarkdown(limitation)}`)
   push()
 
   return lines.join('\n')

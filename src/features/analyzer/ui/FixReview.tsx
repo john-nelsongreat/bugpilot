@@ -7,6 +7,7 @@ import type { FixCandidate } from '../fixes/types'
 import type { DiffRow, FileDiff } from '../review/diffModel'
 import type { ReviewDiffBuilder, ReviewDiffInput, ReviewDiffResult } from '../review/reviewDiff'
 import { createDefaultReviewDiffBuilder } from '../review/reviewDiffClient'
+import { sanitizeForDisplay, truncateForDisplay } from '../sanitize/display'
 
 export const REVIEW_PAGE_SIZE = 250
 
@@ -334,7 +335,7 @@ export function FixReview({
 
           <p className="sr-only" role="status" aria-label="Changes shown">
             {shownChanges} changed row{shownChanges === 1 ? '' : 's'} shown
-            {currentFile ? ` in ${currentFile.file}` : ''}.
+            {currentFile ? ` in ${sanitizeForDisplay(currentFile.file)}` : ''}.
           </p>
 
           <div className="fix-review-files">
@@ -358,7 +359,9 @@ export function FixReview({
                       aria-controls={panelId}
                       onClick={() => setOpenFile(isOpen ? -1 : fileIndex)}
                     >
-                      <code>{file.file}</code>
+                      <code title={sanitizeForDisplay(file.file)}>
+                        {truncateForDisplay(sanitizeForDisplay(file.file), 72)}
+                      </code>
                       <span className="field-hint">
                         {file.loading
                           ? 'Building diff…'
@@ -370,7 +373,7 @@ export function FixReview({
                   {isOpen ? (
                     <div id={panelId} className="fix-file-panel">
                       {file.error ? (
-                        <p className="notice notice--alert">{file.error}</p>
+                        <p className="notice notice--alert">{sanitizeForDisplay(file.error)}</p>
                       ) : file.loading ? (
                         <p className="field-hint">Building the diff…</p>
                       ) : (
@@ -378,9 +381,9 @@ export function FixReview({
                           <ul className="fix-review-causes">
                             {file.causes.map((finding) => (
                               <li key={finding.id}>
-                                <code>{finding.ruleId}</code>
+                                <code>{sanitizeForDisplay(finding.ruleId)}</code>
                                 <span>Line {finding.range.startLine}</span>
-                                <span>{finding.message}</span>
+                                <span>{sanitizeForDisplay(finding.message)}</span>
                               </li>
                             ))}
                           </ul>
@@ -419,7 +422,9 @@ export function FixReview({
                           <div className="fix-diff-scroll">
                             {useSplit ? (
                               <table className="fix-diff-table fix-diff-table--split">
-                                <caption className="sr-only">Side-by-side diff for {file.file}</caption>
+                                <caption className="sr-only">
+                                  Side-by-side diff for {sanitizeForDisplay(file.file)}
+                                </caption>
                                 <thead>
                                   <tr>
                                     <th scope="col">Old line</th>
@@ -472,7 +477,9 @@ export function FixReview({
                               </table>
                             ) : (
                               <table className="fix-diff-table fix-diff-table--unified">
-                                <caption className="sr-only">Unified diff for {file.file}</caption>
+                                <caption className="sr-only">
+                                  Unified diff for {sanitizeForDisplay(file.file)}
+                                </caption>
                                 <thead>
                                   <tr>
                                     <th scope="col">Old line</th>

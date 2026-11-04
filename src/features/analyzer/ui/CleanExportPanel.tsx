@@ -9,6 +9,7 @@ import {
 } from '../cleanExport/build'
 import { authorizeCleanExport } from '../cleanExport/gate'
 import type { FixCandidate } from '../fixes/types'
+import { sanitizeForDisplay } from '../sanitize/display'
 import type { AnalyzerReport } from '../types'
 import { downloadCleanFile } from './downloadClean'
 
@@ -144,7 +145,7 @@ export function CleanExportPanel({ report, sources, candidates, onReportOnly }: 
           <div className="notice notice--alert clean-export-blocked" role="alert">
             <div>
               <strong>Clean export blocked</strong>
-              <p>{result.message}</p>
+              <p>{sanitizeForDisplay(result.message)}</p>
               <button type="button" className="button button--secondary" onClick={onReportOnly}>
                 <Download size={16} aria-hidden="true" />
                 Download report only
