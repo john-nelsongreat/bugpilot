@@ -1,6 +1,7 @@
 import { applyPatch, createTwoFilesPatch, parsePatch, reversePatch } from 'diff'
 import { strToU8, zipSync } from 'fflate'
 import type { ArchiveEntry } from '../archive/guard'
+import { isNotebookDerivedName } from '../archive/notebook'
 import { verifyFixCandidates, type VerifyFixesDeps } from '../analysis/verifyFixes'
 import { reportForExport, renderReportMarkdown } from '../export/reportFiles'
 import { applyEdits } from '../fixes/text'
@@ -203,9 +204,19 @@ export async function buildCleanExport(
     return blocked('Tick at least one output to build.')
   }
 
+  // Notebooks are never exported and never edited. Dropping their fake file names here, as well as
+  // in the fix proposal, means a caller cannot smuggle cell text into a patch or a zip.
+  const sources = input.sources.filter((source) => !isNotebookDerivedName(source.name))
+  const candidates = input.candidates.filter((candidate) => !isNotebookDerivedName(candidate.file))
+  if (candidates.length === 0) {
+    return blocked(
+      'The only selected change is inside a notebook. BugPilot never edits or exports notebooks, so make that change in Jupyter by hand.',
+    )
+  }
+
   const verification = await verifyFixCandidates(
-    input.candidates,
-    input.sources,
+    candidates,
+    sources,
     input.report.findings,
     deps,
     signal,
@@ -218,9 +229,9 @@ export async function buildCleanExport(
     )
   }
 
-  const sourceByName = new Map(input.sources.map((source) => [source.name, source]))
+  const sourceByName = new Map(sources.map((source) => [source.name, source]))
   const candidatesByFile = new Map<string, FixCandidate[]>()
-  for (const candidate of input.candidates) {
+  for (const candidate of candidates) {
     const list = candidatesByFile.get(candidate.file)
     if (list) list.push(candidate)
     else candidatesByFile.set(candidate.file, [candidate])
@@ -284,7 +295,7 @@ export async function buildCleanExport(
     }
   }
 
-  const applied = appliedChanges(input.candidates)
+  const applied = appliedChanges(candidates)
   const files: CleanExportFile[] = []
 
   if (selections.patch) {
@@ -297,10 +308,10 @@ export async function buildCleanExport(
 
   if (selections.zip) {
     const entries: Record<string, Uint8Array> = {}
-    for (const source of input.sources) {
+    for (const source of sources) {
       entries[source.name] = strToU8(fixedTexts.get(source.name) ?? source.text)
     }
-    entries['MANIFEST.md'] = strToU8(buildManifest(input.sources, new Set(fixedTexts.keys())))
+    entries['MANIFEST.md'] = strToU8(buildManifest(sources, new Set(fixedTexts.keys())))
     files.push({
       name: 'clean.zip',
       bytes: zipSync(entries, { level: 6 }),

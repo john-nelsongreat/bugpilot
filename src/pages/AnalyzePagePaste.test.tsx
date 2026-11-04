@@ -130,6 +130,35 @@ describe('Analyze page paste-code tab', () => {
     expect(asFiles(analyze.mock.calls[0][0]).sources[0]?.path).toBe('pasted/snippet.py')
   })
 
+  it('defaults to Auto and sniffs the language from the pasted text', async () => {
+    const analyze = vi.fn<AnalyzeFunction>(async () => completed('{"a": 1}\n'))
+    render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)
+
+    openPasteTab()
+    expect(screen.getByLabelText('Language of the pasted code')).toHaveValue('auto')
+    paste('{"a": 1}\n')
+    fireEvent.click(screen.getByRole('button', { name: /Check the pasted text/ }))
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))
+
+    expect(asFiles(analyze.mock.calls[0][0]).sources[0]?.path).toBe('pasted/snippet.json')
+  })
+
+  it('uses the optional virtual file name and strips any path from it', async () => {
+    const analyze = vi.fn<AnalyzeFunction>(async () => completed('print(1)\n'))
+    render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)
+
+    openPasteTab()
+    fireEvent.change(screen.getByLabelText('Virtual file name (optional)'), {
+      target: { value: '../../etc/checks.py' },
+    })
+    paste('print(1)\n')
+    fireEvent.click(screen.getByRole('button', { name: /Check the pasted text/ }))
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))
+
+    const path = asFiles(analyze.mock.calls[0][0]).sources[0]?.path
+    expect(path).toBe('pasted/checks.py')
+  })
+
   it('refuses a paste over the ceiling without reading a byte of it', async () => {
     const analyze = vi.fn<AnalyzeFunction>(async () => completed(''))
     render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)

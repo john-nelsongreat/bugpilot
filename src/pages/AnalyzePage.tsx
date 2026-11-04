@@ -31,6 +31,7 @@ import { combineUploads } from '../features/analyzer/upload/multiSource'
 import {
   DEFAULT_PASTE_EXTENSION,
   MAX_PASTED_BYTES,
+  MAX_PASTED_NAME_LENGTH,
   PASTE_LANGUAGES,
   pastedSource,
 } from '../features/analyzer/upload/paste'
@@ -189,6 +190,7 @@ export function AnalyzePage({
   const [uploads, setUploads] = useState<readonly (readonly IntakeSource[])[]>([])
   const [intakeMode, setIntakeMode] = useState<'upload' | 'paste'>('upload')
   const [pasteText, setPasteText] = useState('')
+  const [pasteName, setPasteName] = useState('')
   const [pasteExtension, setPasteExtension] = useState(DEFAULT_PASTE_EXTENSION)
 
   const busyRef = useRef(false)
@@ -407,6 +409,7 @@ export function AnalyzePage({
     setResult(null)
     setUploads([])
     setPasteText('')
+    setPasteName('')
     setDeepPass(false)
     setGateDismissed(false)
     uploadHeadingRef.current?.focus()
@@ -418,7 +421,7 @@ export function AnalyzePage({
    * difference is that the bytes come out of this tab's memory instead of a disk handle.
    */
   function handleRunPaste(): void {
-    const pasted = pastedSource(pasteText, pasteExtension)
+    const pasted = pastedSource(pasteText, pasteExtension, pasteName)
     if (pasted.ok === false) {
       runTokenRef.current += 1
       abortRef.current?.abort()
@@ -679,6 +682,20 @@ export function AnalyzePage({
                 </select>
               </div>
               <div className="field">
+                <label htmlFor="analyze-paste-name">Virtual file name (optional)</label>
+                <input
+                  id="analyze-paste-name"
+                  className="analyze-paste-name"
+                  type="text"
+                  value={pasteName}
+                  maxLength={MAX_PASTED_NAME_LENGTH}
+                  placeholder="snippet.txt"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setPasteName(event.target.value)}
+                />
+              </div>
+              <div className="field">
                 <label htmlFor="analyze-paste-text">Code to check</label>
                 <textarea
                   id="analyze-paste-text"
@@ -690,10 +707,11 @@ export function AnalyzePage({
                 />
               </div>
               <p className="field-hint">
-                The language name decides which rules get to read the text; a paste with no name
-                would be checked as plain text. Up to 1 MiB of UTF-8, measured before a byte is
-                analysed. The text is held in this tab only: it is never uploaded, never written to
-                disk, and Clear results wipes it.
+                Auto detects the language with the same detector a picked file goes through; pick a
+                language to decide the rules yourself. The virtual name only labels the text in the
+                report, and only its last segment is kept. Up to 1 MiB of UTF-8, measured before a
+                byte is analysed. The text is held in this tab only: it is never uploaded, never
+                written to disk, and Clear results wipes it.
               </p>
               <div className="analyze-pick-actions analyze-paste-actions">
                 <button

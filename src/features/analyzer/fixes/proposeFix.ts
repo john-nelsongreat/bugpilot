@@ -1,4 +1,5 @@
 import type { ArchiveEntry } from '../archive/guard'
+import { isNotebookDerivedName } from '../archive/notebook'
 import type { AnalyzerFinding } from '../types'
 import { proposeHttpsUrlFix } from './httpsUrl'
 import { proposeMixedIndentationFix } from './indentation'
@@ -19,6 +20,9 @@ const SECRET_RULES = new Set([
 
 export function proposeFix(finding: AnalyzerFinding, source: ArchiveEntry): FixCandidate | null {
   if (finding.file !== source.name) return null
+  // A notebook cell is not a file on disk, and the brief keeps notebook fixes manual: no edit that
+  // BugPilot can render would apply to code the user keeps in Jupyter.
+  if (isNotebookDerivedName(finding.file)) return null
   if (SECRET_RULES.has(finding.ruleId)) {
     return proposeSecretFix(finding, source.text, source.language, source.name)
   }

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { detectLanguage } from '../features/analyzer/archive/classify'
 import type { ArchiveEntry, ArchiveReadStats, ArchiveSkippedEntry } from '../features/analyzer/archive/guard'
+import { resetEngineManifestCache } from '../features/analyzer/engines/downloadPlan'
 import { LANGUAGE_LABELS } from '../features/analyzer/languages'
 import type {
   AnalysisSessionResult,
@@ -111,6 +112,20 @@ function file(path: string): File {
   return new File(['a = 1\n'], path, { type: 'text/plain' })
 }
 
+const ENGINE_MANIFEST = {
+  schemaVersion: 1,
+  files: [
+    { path: '/assets/engines/core.wasm', kind: 'tree-sitter-core', language: null, rawBytes: 200_000, gzipBytes: 60_000 },
+    { path: '/assets/engines/python.wasm', kind: 'grammar', language: 'python', rawBytes: 456_587, gzipBytes: 150_000 },
+    { path: '/assets/engines/go.wasm', kind: 'grammar', language: 'go', rawBytes: 300_000, gzipBytes: 90_000 },
+  ],
+}
+
+afterEach(() => {
+  resetEngineManifestCache()
+  vi.unstubAllGlobals()
+})
+
 function pickFiles(files: File[]): void {
   const input = screen.getByLabelText('Choose files to analyse') as HTMLInputElement
   input.value = ''
@@ -163,6 +178,28 @@ describe('Analyze page with more than one upload', () => {
     expect(second.sources.map((source) => source.path)).toEqual(['upload-1/src/a.py'])
     expect(second.notes?.map((note) => note.name)).toEqual(['upload-2'])
     expect(screen.getByText('upload-2')).toBeVisible()
+  })
+
+  it('plans one engine download that covers every source in the run', async () => {
+    const fetchSpy = vi.fn(async (_url: string) => ({ ok: true, json: async () => ENGINE_MANIFEST }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const analyze = vi.fn<AnalyzeFunction>(analyzeOverUploads)
+    render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)
+
+    pickFiles([file('src/a.py')])
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: /Add another upload/ }))
+    pickFiles([file('src/b.go')])
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(2))
+
+    const gate = await screen.findByRole('region', { name: 'Deep analysis engines' })
+    expect(within(gate).getByText(/Python, Go|Go, Python/)).toBeVisible()
+    expect(await within(gate).findByText('Python grammar')).toBeVisible()
+    expect(within(gate).getByText('Go grammar')).toBeVisible()
+    // One plan for the whole run, so the total is quoted once and the manifest read once.
+    expect(within(gate).getAllByText(/in total/)).toHaveLength(1)
+    const manifestCalls = fetchSpy.mock.calls.filter((call) => String(call[0]) === '/assets/engines/manifest.json')
+    expect(manifestCalls).toHaveLength(1)
   })
 
   it('forgets the first upload when the run is cleared', async () => {

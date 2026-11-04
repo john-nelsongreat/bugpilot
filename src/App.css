@@ -2737,6 +2737,10 @@ textarea[aria-invalid='true'] {
   max-width: 16rem;
 }
 
+.analyze-paste-name {
+  max-width: 20rem;
+}
+
 .analyze-paste-text {
   min-height: 12rem;
   font-family: var(--font-mono);

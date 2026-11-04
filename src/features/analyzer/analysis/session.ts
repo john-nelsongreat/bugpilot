@@ -11,6 +11,7 @@ import {
   type ArchiveLimits,
 } from '../archive/limits'
 import { readLooseFiles, type IntakeSource, type ReadLooseFilesOptions } from '../archive/readLooseFiles'
+import { expandNotebooks, isNotebookCellName, isNotebookName, isNotebookOutputName } from '../archive/notebook'
 import { createArchiveClient, type ArchiveClientReadOptions } from '../archive/workerClient'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../engines/featureProbe'
 import type { EngineClient, EngineRunOutcome } from '../engines/engineClient'
@@ -192,6 +193,16 @@ export const STALE_HANDLE_MESSAGE =
   'Nothing new was read and nothing was kept. Choose the same folder or archive again.'
 
 /**
+ * A deep pass that runs from text this tab still holds has no notebook output to look at: output is
+ * dropped the moment it has been scanned, precisely because it is the part of a notebook that holds
+ * whatever the kernel printed. Saying so is better than silently reporting fewer files.
+ */
+export const NOTEBOOK_OUTPUT_REPLAY_NOTE =
+  'This pass reused notebook cells this tab still held; stored notebook output (which is never kept) was not scanned again.'
+
+const NOTEBOOK_OUTPUT_MESSAGE = 'A credential-shaped value appears in this cell’s stored output.'
+
+/**
  * A refusal, in the order the user needs it: first that the file was not what its name said, then
  * what BugPilot decided to do about it.
  */
@@ -254,6 +265,17 @@ export async function analyzeUpload(
     note = read.note ?? null
   }
 
+  // A notebook is one JSON document holding many small programs plus whatever a kernel printed.
+  // It is split before anything is analysed, so each cell reaches the rules, the TypeScript check
+  // and the deep engines as a file of its own; that is also what makes a deep pass reach Python cells.
+  let notebookNote: string | null = null
+  if (input.kind === 'pre-read' && entries.some((entry) => isNotebookCellName(entry.name))) {
+    notebookNote = NOTEBOOK_OUTPUT_REPLAY_NOTE
+  }
+  const expanded = expandNotebooks(entries, options.limits ?? DEFAULT_ARCHIVE_LIMITS)
+  entries = expanded.entries
+  skipped = [...skipped, ...expanded.skipped]
+
   let analyses: FileAnalysis[] = []
   if (entries.length > 0) {
     const analyzer = deps.analyzer ?? defaultAnalyzer()
@@ -270,7 +292,7 @@ export async function analyzeUpload(
     })
     if (rules.cancelled || signal?.aborted) return cancelled()
     if (rules.error) return failed('error', rules.error, stats)
-    analyses = rules.files
+    analyses = rules.files.map(redactNotebookAnalysis)
   }
 
   const tsEntries = entries.filter((entry) => isTsFamily(entry.language))
@@ -337,7 +359,10 @@ export async function analyzeUpload(
   const engineStatus = new Map<string, EngineStatus>()
   // The reader's note travels into the report so the result page states, in its own words, that
   // the file was not the format its name claimed.
-  const extraLimitations: string[] = note ? [note] : []
+  const extraLimitations: string[] = [
+    ...(note ? [note] : []),
+    ...(notebookNote ? [notebookNote] : []),
+  ]
 
   if (engineFiles.length > 0 && options.engines === 'approved') {
     const createClient = deps.createEngineClient ?? loadDefaultEngineClient
@@ -418,6 +443,79 @@ export async function analyzeUpload(
 }
 
 /**
+ * Stored notebook output is read for credentials and nothing else. Every other finding it produced
+ * is dropped, and what survives loses its evidence: the text of an output is exactly the material
+ * the user asked BugPilot never to show, export, re-read or keep, so a finding may name the cell
+ * and the rule but must not quote a character of it.
+ */
+function redactNotebookOutput(analysis: FileAnalysis): FileAnalysis {
+  const findings = analysis.findings
+    .filter((finding) => finding.ruleId.startsWith('bugpilot/secret/'))
+    .map((finding) => ({
+      ...finding,
+      evidence: [],
+      fix: null,
+      message: NOTEBOOK_OUTPUT_MESSAGE,
+      explanation:
+        'BugPilot scans stored notebook output for credentials only. The output text itself is never shown, exported, re-read or kept, so this finding names the cell and the rule and nothing more.',
+      verificationSteps: [
+        'Open the notebook and look at the stored output of this cell.',
+        'If the value is real, rotate it, then clear the stored output and re-save the notebook.',
+      ],
+      limitations: ['The output text is not quoted because notebook output is never kept or displayed.'],
+    }))
+  return { ...analysis, findings }
+}
+
+/**
+ * A notebook cell is a virtual file that does not exist on disk, so no edit BugPilot can render
+ * would apply to it. Every proposal keeps its explanation but is downgraded to manual work.
+ */
+function manualOnlyNotebookCell(analysis: FileAnalysis): FileAnalysis {
+  return {
+    ...analysis,
+    findings: analysis.findings.map((finding) =>
+      finding.fix && finding.fix.riskClass !== 'manual-only'
+        ? {
+            ...finding,
+            fix: {
+              ...finding.fix,
+              riskClass: 'manual-only',
+              riskReason:
+                'This code lives in a notebook cell, which BugPilot never edits; make the change in Jupyter and re-save the notebook.',
+            },
+          }
+        : finding,
+    ),
+  }
+}
+
+const NOTEBOOK_SYNTAX_NOTE =
+  'BugPilot read this notebook as JSON to report its syntax error. Notebooks are never edited or exported, so fix it in Jupyter and upload it again.'
+
+/**
+ * A notebook whose JSON does not parse is handed to the JSON syntax rule instead of being dropped.
+ * Only that finding survives: the raw document mixes code and stored output, and nothing in it may
+ * be quoted or turned into an edit.
+ */
+function reportNotebookJsonSyntax(analysis: FileAnalysis): FileAnalysis {
+  return {
+    ...analysis,
+    findings: analysis.findings
+      .filter((finding) => finding.ruleId === 'bugpilot/syntax/json')
+      .map((finding) => ({ ...finding, evidence: [], fix: null })),
+    notes: [...analysis.notes, NOTEBOOK_SYNTAX_NOTE],
+  }
+}
+
+function redactNotebookAnalysis(analysis: FileAnalysis): FileAnalysis {
+  if (isNotebookOutputName(analysis.file)) return redactNotebookOutput(analysis)
+  if (isNotebookCellName(analysis.file)) return manualOnlyNotebookCell(analysis)
+  if (isNotebookName(analysis.file)) return reportNotebookJsonSyntax(analysis)
+  return analysis
+}
+
+/**
  * How much of the analysed text stays in memory for the fix review. Below the budget every file is
  * kept, so a deep pass can reuse what the first pass read; above it only the files a finding points
  * at are kept, because a 100 MiB folder held in full would cost more than the tab can spare.
@@ -427,15 +525,20 @@ function retainedSources(
   analyses: readonly FileAnalysis[],
   maxRetainedBytes: number,
 ): { sources: readonly ArchiveEntry[]; retention: Retention } {
+  // Notebook output is never retained, whether or not it produced a finding: the credential that
+  // was found there must not outlive the report in this tab's memory.
+  const keepable = entries.some((entry) => isNotebookOutputName(entry.name))
+    ? entries.filter((entry) => !isNotebookOutputName(entry.name))
+    : entries
   let held = 0
-  for (const entry of entries) held += entry.bytes
-  if (held <= maxRetainedBytes) return { sources: entries, retention: 'all' }
+  for (const entry of keepable) held += entry.bytes
+  if (held <= maxRetainedBytes) return { sources: keepable, retention: 'all' }
 
   const implicated = new Set<string>()
   for (const analysis of analyses) {
     for (const finding of analysis.findings) implicated.add(finding.file)
   }
-  return { sources: entries.filter((entry) => implicated.has(entry.name)), retention: 'findings' }
+  return { sources: keepable.filter((entry) => implicated.has(entry.name)), retention: 'findings' }
 }
 
 function countFindings(analyses: readonly FileAnalysis[]): number {
