@@ -59,6 +59,7 @@ const DETECTED_EXTENSIONS: Partial<Record<SourceLanguage, string>> = {
 function virtualName(virtualName: string, extension: string, text: string): string {
   const lastSegment = virtualName.split(/[\\/]/).pop() ?? ''
   let name = lastSegment
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
     .trim()
   if (name === '' || name === '.' || name === '..') name = 'snippet'
