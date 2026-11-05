@@ -1752,7 +1752,7 @@ const tarOf = (name, text) => {
 write('hostile-traversal.zip', zipSync({ '../escape.txt': strToU8('x') }))
 write('hostile-nested.zip', zipSync({ 'inner.zip': strToU8('not really a zip') }))
 const many = {}
-for (let i = 0; i < 6000; i += 1) many[`f${i}.txt`] = strToU8('x')
+for (let i = 0; i < 20_001; i += 1) many[`f${i}.txt`] = strToU8('x')
 write('hostile-many.zip', zipSync(many))
 write('hostile-bomb.zip', zipSync({ 'bomb.txt': new Uint8Array(8 * 1024 * 1024) }))
 write('hostile-7z.zip', concat(new Uint8Array([0x37, 0x7b, 0xa3, 0xab, 0x27, 0x1c]), new Uint8Array(64)))
@@ -1776,7 +1776,29 @@ for (let at = 0; at < raw.length; at += line.length) raw.set(line.subarray(0, Ma
 const big = {}
 for (let i = 0; i < 4; i += 1) big[`big-${i}.txt`] = raw.subarray(i * 1572864, (i + 1) * 1572864)
 write('large-ok.zip', zipSync(big))
-write('hostile-huge.zip', zipSync({ 'padding.bin': randomFillSync(new Uint8Array(26 * 1024 * 1024)) }))
+// Two entries whose compressed byte ranges overlap. `a.txt`'s data is 100 bytes at 35..134, and
+// `b.txt`'s own local header is planted at offset 40 — inside that range — with its data at 75..104.
+// Reading both would inflate the same bytes twice, which is the overlapping-entries zip bomb.
+const u16 = (n) => [n & 0xff, (n >>> 8) & 0xff]
+const u32 = (n) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]
+const enc = (s) => [...new TextEncoder().encode(s)]
+const zipHead = (name, size) => [...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(size), ...u32(size), ...u16(name.length), ...u16(0), ...enc(name)]
+const zipRecord = (name, size, offset) => [...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(size), ...u32(size), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(0), ...u32(offset), ...enc(name)]
+const overlapBody = new Uint8Array(135).fill(0x41)
+overlapBody.set(zipHead('a.txt', 100), 0)
+overlapBody.set(zipHead('b.txt', 30), 40)
+const overlapIndex = [...zipRecord('a.txt', 100, 0), ...zipRecord('b.txt', 30, 40)]
+const overlap = new Uint8Array(overlapBody.length + overlapIndex.length + 22)
+overlap.set(overlapBody, 0)
+overlap.set(overlapIndex, overlapBody.length)
+overlap.set([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(2), ...u16(2), ...u32(overlapIndex.length), ...u32(overlapBody.length), ...u16(0)], overlapBody.length + overlapIndex.length)
+write('hostile-overlap.zip', overlap)
+// One byte over the tar ceiling (100 MiB), which is checked before any header is read.
+const overTar = new Uint8Array(101 * 1024 * 1024)
+overTar.set(tarHeader('junk.bin', 100), 0)
+overTar.set(randomFillSync(new Uint8Array(100)), 512)
+write('hostile-huge.tar', overTar)
+write('hostile-zip-over-cap.zip', zipSync({ 'padding.bin': randomFillSync(new Uint8Array(251 * 1024 * 1024)) }))
 console.log(out)
 ```
 
@@ -1786,12 +1808,15 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
 - [ ] `gzip-bomb.txt.gz`: expected **Upload refused**, saying an entry expanded far more than its own header admitted while it was being unpacked. The refusal happens before the 8 MiB is held.
 - [ ] `hostile-traversal.zip` and `hostile-traversal.tar`: expected **Upload refused**, with a message saying a name points out of the archive with `..`.
 - [ ] `hostile-nested.zip`: expected **Upload refused**, with **The entry "inner.zip" is itself an archive. BugPilot does not open archives inside archives, so the upload is refused.**
-- [ ] `hostile-many.zip`: expected **Upload refused**, saying the archive holds more than 5000 entries and that reading stopped at that count. Confirm the page stayed responsive while counting.
+- [ ] `hostile-many.zip`: expected **Upload refused**, saying the archive holds more than 20,000 entries and that reading stopped at that count. Confirm the page stayed responsive while counting.
 - [ ] `hostile-truncated.tar`: expected **Upload refused**, saying the archive is cut off inside `cut.txt` and that nothing was read from it.
 - [ ] `hostile-truncated.tar.gz`: expected **Upload refused**, saying the compressed data is damaged or incomplete and that nothing was unpacked.
 - [ ] `hostile-members.tar.gz`: expected **Upload refused**, saying it is two or more gzip streams joined into one file and that BugPilot reads a single gzip stream.
 - [ ] `hostile-7z.zip` and `hostile-rar.zip`: expected **Upload refused**. Each file is named `.zip` but carries a `.7z` or `.rar` signature, so the refusal names the family, says BugPilot does not decode `.7z`/`.rar` in the browser, and advises re-archiving as `.zip` or `.tar.gz`. A naming note before the refusal says the format comes from the contents, not the name.
-- [ ] Upload `hostile-huge.zip` (26 MiB, over the 25 MiB archive ceiling). Expected: **Upload refused** with the archive byte-ceiling message, before analysis starts.
+- [ ] Upload `hostile-huge.tar` (101 MiB, one byte over the 100 MiB tar ceiling). Expected: **Upload refused** with **This archive is 106011904 bytes, over the byte ceiling BugPilot reads in the browser.** and **Nothing was analysed and nothing was kept.** The refusal happens before a header is read, so it is immediate and memory does not climb.
+- [ ] Upload `hostile-zip-over-cap.zip` (251 MiB, over the 250 MiB zip ceiling). Expected: the same byte-ceiling refusal, immediately, before the index is read. Skip this one if the machine cannot spare the space.
+- [ ] Upload `hostile-overlap.zip`. Expected: **Upload refused**, with **The entries "b.txt" and another entry point at overlapping bytes. Reading both would let one compressed range count twice, so the archive is refused.** Nothing was unpacked: the reader refuses at the index check, before any entry is inflated, so the classic overlapping-entries bomb costs one bounded index read.
+- [ ] Take a small valid `.zip`, open it in a hex editor, and change one size byte in an entry's **local** header without touching the index. Expected: **Upload refused**, naming that entry and saying the local header disagrees with the archive index about its name, sizes, checksum or compression.
 - [ ] While each refusal is processed, the page stays responsive: the theme toggle still responds, the progress/limit text does not freeze, and no browser tab warning about an unresponsive page appears. Memory in DevTools does not keep climbing after the refusal.
 - [ ] Upload `hostile-bidi.zip` and open the results.
   - Expected: every hostile name is shown literally, never interpreted: `src/invoice\u202Egnp.js`, `src/hidden\u200Bpart.js`, the `<img …>` name as text rather than an element, `src/[click](x)*.js`, and the long `deep/…` name shortened to at most 72 characters, ending in `…`. Hovering a shortened name shows the full name in the browser tooltip.
@@ -1807,7 +1832,37 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
 - [ ] Extract `large-ok.zip` into a scratch folder, add an extra `.txt` file over 2 MiB, and upload that folder.
   - Expected: the extra file is skipped with the per-file ceiling reason; the four 1.5 MiB files are analysed; the run does not stop.
 
+### Large uploads, partial results, and Large project mode
+
+These checks need the sample projects from the measurement run, or anything of similar shape. To make a project that trips the analysis budget, run this once outside the repository; the number is a file count, and 40 files of about 1 MiB each is more text than the 12 MiB analysis budget holds:
+
+```bat
+node "C:\Users\great\Music\BUGPILOT 1\analyzer-spike\c2-baseline\gen-partial.mjs" "%TEMP%\bugpilot-c2-partial" 40
+```
+
+- [ ] Open `/analyze` and read the **Limits, applied before anything is analysed** list before choosing a file.
+  - Expected: a zip ceiling of **250 MiB** and a separate, lower **tar and tar.gz** ceiling of **100 MiB**, each named per format; the list says the zip is read by seeking so dependency folders and binary files are skipped without being unpacked, while a tar has to be walked start to end. It also prints the inflated-work budget (600 MiB), the analysable-text budget (12 MiB), the entry count (20,000), the per-file ceiling (2 MiB) and the wall clock (300 s). On a machine reporting 2 GiB or less every memory figure is halved, and **Large project mode** is not offered at all.
+- [ ] Tick **Large project mode** on a machine that reports 8 GiB or more.
+  - Expected: the checkbox only exists when the browser reports at least 8 GiB (Firefox and Safari do not report it, so they never show it). Ticking it raises the ceilings to 500 MiB zip, 200 MiB tar, 1 GiB inflated, 40 MiB analysable, 40,000 entries and 600 s, and shows a plain warning that the run will take longer and use more memory. Unticking returns the normal figures. Nothing is uploaded by ticking the box.
+- [ ] Upload a real project zip that is large mainly because of `node_modules`, `.git` objects, images and lockfiles (the generated `project-100MiB.zip` is one).
+  - Expected: **accepted**, not refused — and, because that archive holds more text than the 12 MiB analysis budget, it ends as a **partial** report rather than a complete one. The measurement run on this class of machine took 57.8 s, analysed 256 files, produced 24,832 findings and named 553 files as not reached, with a peak browser process tree of 486 MiB. The coverage panel lists the analysed files and names a reason for every skipped entry (`inside .git`, `generated or vendored`, `binary`, `too large`); none of the skipped entries is ever inflated, so the run's cost tracks the text, not the archive size. The page stays responsive: no dialog about an unresponsive page, and the progress text keeps updating.
+- [ ] Upload a `.tar.gz` at its ceiling (the generated `project-100MiB.tar.gz`).
+  - Expected: accepted at or under 100 MiB, refused with the byte-ceiling message one byte above it. Because a tar is walked in order, a tar.gz of the same unpacked size costs more than the zip and has a lower ceiling — the limits list says so. Measured: 37.4 s, 128 files analysed, 12,029 findings, longest main-thread task 341 ms, peak tree 481 MiB.
+- [ ] Start a large upload and press **Cancel** while the progress text still says the archive is being read.
+  - Expected: every worker stops within a couple of seconds — the measurement run recorded 8 ms to 226 ms from the click to the last `Worker.terminate()` across zip, tar.gz and folder shapes with one or two workers alive, and no worker left open when the run settled — and the files the reader had already inflated are kept and shown as a **partial** report.
+- [ ] Press **Cancel** later, once the progress text shows the pattern rules or the TypeScript check.
+  - Expected: the run stops promptly and the page reads **Analysis cancelled. Nothing was kept.** This is the one cancel path that discards work, and it is stated as a known limit under [Partial reports](../README.md#partial-reports).
+- [ ] Upload the 40 MiB generated folder (`%TEMP%\bugpilot-c2-partial`) with **Large project mode** off.
+  - Expected: a **Partial results for** heading, a `role="alert"` banner naming the budget that stopped the read, findings from the files that were read, and a coverage list in which the files that were never reached are labelled **not reached** with the reason. Nothing is presented as a complete run.
+- [ ] With that partial report on screen, press **Download report.md** and **Download report.json**, then select a fix and build a clean export.
+  - Expected: the downloads work from a partial report; `report.md` opens with a **PARTIAL REPORT** blockquote and the analysed/not-reached counts; `CHANGELOG.md` and `MANIFEST.md` in the clean export open with a **PARTIAL EXPORT** line saying the zip is not a complete copy of the analysed set. `report.json` stays valid JSON and carries the partial marker.
+- [ ] Run the deep pass on a project whose analysed text is above the 32 MiB retention ceiling. The default tier's 12 MiB analysis budget keeps every run below that, so this case needs **Large project mode** (40 MiB analysed) and an archive that actually fills it — the generated `project-250MiB.zip` is one.
+  - Expected: the gate lists the files and their sizes before anything loads; after **Run deep analysis** the pass re-reads the upload from the original handles through the same random-access reader instead of holding a second copy, and it still covers **every file the first pass analysed**, including the ones whose text the 32 MiB retention rule dropped. If the browser refuses a stale handle, the page says so plainly and offers the run from the text it still holds.
+  - For reference, the previous build's smaller case — the generated `project-25MiB.zip`, then analysed in full at a 20 MiB budget — completed its deep pass in 150.8 s with a longest main-thread task of 189 ms, a peak page JS heap of 137 MiB and 25,082 findings after the deep pass (up from 20,031).
+
 ### Privacy and data retention
+
+
 
 - [ ] Before uploading, with `/analyze` fully loaded, run this in the Console:
   ```js
