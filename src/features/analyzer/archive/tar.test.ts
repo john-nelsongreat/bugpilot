@@ -266,12 +266,93 @@ describe('readTar: hostile headers', () => {
     const entries = Array.from({ length: 6 }, (_, index) => ({ name: `f${index}.txt`, content: 'x'.repeat(1_200) }))
     const result = await readTar(buildTar(entries), { limits: { ...smallLimits, maxTotalUncompressedBytes: 4 * 1024 } })
     expect(result.refusal?.code).toBe('total_uncompressed_exceeded')
+    expect(result.entries).toEqual([])
+  })
+
+  it('keeps the members read before the total cap when the caller accepts a partial result', async () => {
+    const entries = Array.from({ length: 6 }, (_, index) => ({ name: `f${index}.txt`, content: 'x'.repeat(1_200) }))
+    const result = await readTar(buildTar(entries), {
+      limits: { ...smallLimits, maxTotalUncompressedBytes: 4 * 1024 },
+      keepPartial: true,
+    })
+
+    expect(result.refusal).toBeNull()
+    expect(result.partial?.code).toBe('total_uncompressed_exceeded')
+    expect(result.entries.map((entry) => entry.name)).toEqual(['f0.txt', 'f1.txt', 'f2.txt'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['f3.txt', 'not_reached'],
+      ['(rest of the archive)', 'not_reached'],
+    ])
+    expect(result.partial).toMatchObject({ analysedFiles: 3, plannedFiles: 5, unreachedFiles: 2 })
+    expect(result.skipped[0].message).toContain('unpacking work budget')
+  })
+
+  it('keeps what it read when the wall clock is already spent', async () => {
+    const result = await readTar(buildTar([{ name: 'first.txt', content: 'x\n' }]), {
+      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxWallClockMs: 0 },
+      keepPartial: true,
+    })
+
+    expect(result.refusal).toBeNull()
+    expect(result.partial?.code).toBe('wall_clock_exceeded')
+    // The clock is spent on the first yield, inside the first member, so that member is named
+    // as cut off and everything behind it is accounted for by one marker.
+    expect(result.entries).toEqual([])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['first.txt', 'not_reached'],
+      ['(rest of the archive)', 'not_reached'],
+    ])
+    expect(result.partial).toMatchObject({ analysedFiles: 0, plannedFiles: 2, unreachedFiles: 2 })
   })
 
   it('refuses an archive bigger than the byte ceiling before reading a header', async () => {
     const archive = buildTar([{ name: 'a.txt', content: 'x'.repeat(600) }])
     const result = await readTar(archive, { limits: { ...DEFAULT_ARCHIVE_LIMITS, maxArchiveBytes: 512 } })
     expect(result.refusal?.code).toBe('archive_too_large')
+  })
+
+  // A 100 MiB tar.gz measured against the 20 MiB analysis budget finished as a complete run, because
+  // tar only ever checked its unpacking ceiling. The text budget is a separate number and applies here too.
+  it('stops at the analysis budget even though the unpacking ceiling has room left', async () => {
+    const archive = buildTar([
+      { name: 'a.txt', content: 'a'.repeat(120) },
+      { name: 'b.txt', content: 'b'.repeat(120) },
+      { name: 'c.txt', content: 'c'.repeat(120) },
+    ])
+    const limits = { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 }
+
+    const kept = await readTar(archive, { limits, keepPartial: true })
+    expect(kept.refusal).toBeNull()
+    expect(kept.entries.map((entry) => entry.name)).toEqual(['a.txt', 'b.txt'])
+    expect(kept.partial?.code).toBe('analysable_budget_exceeded')
+    // A tar is walked in one direction, so the member that tripped the budget is named and the tail
+    // behind it is one marker rather than a list of names the reader never reached.
+    expect(kept.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['c.txt', 'not_reached'],
+      ['(rest of the archive)', 'not_reached'],
+    ])
+    expect(kept.skipped[0].message).toMatch(/analysis budget was reached/)
+
+    const refused = await readTar(archive, { limits })
+    expect(refused.refusal?.code).toBe('analysable_budget_exceeded')
+    expect(refused.entries).toHaveLength(0)
+  })
+
+  it('does not let a binary member spend the analysis budget', async () => {
+    const archive = buildTar([
+      { name: 'blob.dat', content: new Uint8Array(120).fill(0x00) },
+      { name: 'a.txt', content: 'a'.repeat(120) },
+      { name: 'b.txt', content: 'b'.repeat(120) },
+    ])
+    const result = await readTar(archive, {
+      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 },
+      keepPartial: true,
+    })
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['a.txt', 'b.txt'])
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['binary_content'])
+    expect(result.partial).toBeNull()
   })
 })
 

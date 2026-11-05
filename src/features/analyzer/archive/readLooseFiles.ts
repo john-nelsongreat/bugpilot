@@ -1,5 +1,5 @@
 import { detectLanguage, type LanguageSource, type SourceLanguage } from './classify'
-import { isWallClockSpent, wallClockSeconds } from './bounds'
+import { isAbortError, isWallClockSpent, notReachedEntry, partialReadResult, wallClockSeconds, type PartialStopCode } from './bounds'
 import { decodeBytes, looksBinary, type TextEncoding } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
 import type { ArchiveEntry, ArchiveReadProgress, ArchiveReadResult, ArchiveReadStats, ArchiveRefusal, ArchiveSkippedEntry } from './guard'
@@ -13,6 +13,8 @@ import { archiveReasonMessage, type ArchiveRefusalCode } from './reasons'
 export interface IntakeSource {
   path: string
   size: number
+  /** The picked file, when one exists, so a container can be read without copying it first. */
+  file?: Blob
   read: () => Promise<Uint8Array>
 }
 
@@ -22,6 +24,8 @@ export interface ReadLooseFilesOptions {
   onProgress?: (progress: ArchiveReadProgress) => void
   /** Read generated and vendored folders too. `.git` is skipped at every setting. */
   includeGenerated?: boolean
+  /** Keep the files read before a clock, budget or cancel stop and mark the rest unreached. */
+  keepPartial?: boolean
 }
 
 export type LooseFilesResult = ArchiveReadResult
@@ -42,6 +46,7 @@ export async function readLooseFiles(
 ): Promise<LooseFilesResult> {
   const limits = options.limits ?? DEFAULT_ARCHIVE_LIMITS
   const signal = options.signal
+  const keepPartial = options.keepPartial === true
   const started = Date.now()
   const entries: ArchiveEntry[] = []
   const skipped: ArchiveSkippedEntry[] = []
@@ -64,14 +69,37 @@ export async function readLooseFiles(
     })
   }
 
-  if (signal?.aborted) return fail('cancelled')
+  /**
+   * The picked files are all known up front, so unlike a tar the names behind the stop are real
+   * names rather than a placeholder: every file not read is listed, so the coverage table can
+   * account for the whole selection.
+   */
+  const partial = (code: PartialStopCode, subject: string | number, rest: readonly IntakeSource[]): LooseFilesResult => {
+    const unreached = rest.map((item) => notReachedEntry(item.path, code))
+    skipped.push(...unreached)
+    stats.plannedEntries = entries.length + unreached.length
+    stats.plannedBytes = stats.producedBytes
+    stats.durationMs = Date.now() - started
+    return partialReadResult(stats, code, subject, entries, skipped)
+  }
+
+  if (signal?.aborted) {
+    return keepPartial ? partial('cancelled', '', sources) : fail('cancelled')
+  }
 
   const accepted: IntakeSource[] = []
   const seen = new Set<string>()
   let declaredTotal = 0
-  for (const item of sources) {
-    if (signal?.aborted) return fail('cancelled')
-    if (isWallClockSpent(limits, started)) return fail('wall_clock_exceeded', wallClockSeconds(limits))
+  for (let index = 0; index < sources.length; index += 1) {
+    const item = sources[index]
+    if (signal?.aborted) {
+      return keepPartial ? partial('cancelled', '', sources.slice(index)) : fail('cancelled')
+    }
+    if (isWallClockSpent(limits, started)) {
+      return keepPartial
+        ? partial('wall_clock_exceeded', wallClockSeconds(limits), sources.slice(index))
+        : fail('wall_clock_exceeded', wallClockSeconds(limits))
+    }
     stats.walkedRecords += 1
     if (stats.walkedRecords > limits.maxEntryCount) return fail('entry_count_exceeded', limits.maxEntryCount)
     const pathProblem = relativePathRefusal(item.path)
@@ -90,21 +118,40 @@ export async function readLooseFiles(
     }
     declaredTotal += item.size
     if (declaredTotal > limits.maxTotalUncompressedBytes) {
-      return fail('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes)
+      return keepPartial
+        ? partial('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes, sources.slice(index))
+        : fail('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes)
     }
     accepted.push(item)
   }
   report('walk')
 
-  for (const item of accepted) {
-    if (signal?.aborted) return fail('cancelled')
+  for (let index = 0; index < accepted.length; index += 1) {
+    const item = accepted[index]
+    if (signal?.aborted) {
+      return keepPartial ? partial('cancelled', '', accepted.slice(index)) : fail('cancelled')
+    }
     // A folder read spends its time inside the browser's own file reads, which no slice yield
     // can interrupt, so the clock is checked here rather than only between chunks.
-    if (isWallClockSpent(limits, started)) return fail('wall_clock_exceeded', wallClockSeconds(limits))
-    const bytes = await item.read()
+    if (isWallClockSpent(limits, started)) {
+      return keepPartial
+        ? partial('wall_clock_exceeded', wallClockSeconds(limits), accepted.slice(index))
+        : fail('wall_clock_exceeded', wallClockSeconds(limits))
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = await item.read()
+    } catch (error) {
+      if (keepPartial && isAbortError(error)) {
+        return partial('cancelled', '', accepted.slice(index))
+      }
+      throw error
+    }
     if (bytes.length > item.size) return fail('declared_size_understated')
     if (stats.producedBytes + bytes.length > limits.maxTotalUncompressedBytes) {
-      return fail('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes)
+      return keepPartial
+        ? partial('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes, accepted.slice(index))
+        : fail('total_uncompressed_exceeded', limits.maxTotalUncompressedBytes)
     }
     if (looksBinary(bytes)) {
       skipped.push({
@@ -113,6 +160,13 @@ export async function readLooseFiles(
         message: archiveReasonMessage('binary_content', item.path),
       })
       continue
+    }
+    // Loose files are read whole, so the text budget is judged on the bytes that are really text:
+    // a skipped binary or oversized file never charges against it.
+    if (stats.producedBytes + bytes.length > limits.maxAnalysableTextBytes) {
+      return keepPartial
+        ? partial('analysable_budget_exceeded', limits.maxAnalysableTextBytes, accepted.slice(index))
+        : fail('analysable_budget_exceeded', limits.maxAnalysableTextBytes)
     }
     const decoded = decodeBytes(bytes)
     const detection = detectLanguage(item.path, decoded.text)

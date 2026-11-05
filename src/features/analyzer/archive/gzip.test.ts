@@ -244,6 +244,24 @@ describe('readGzipPayload: damaged and hostile streams', () => {
     expect(result.stats.producedBytes).toBe(0)
   })
 
+  it('keeps the stop as a labelled partial result when the caller accepts one', async () => {
+    const packed = compress('abcdefghijklmnopqrstuvwxyz'.repeat(800))
+    const limits = { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 8 * 1024 }
+    const result = await readGzipPayload(packed, { limits, keepPartial: true, sourceName: 'big.tar.gz' })
+
+    expect(result.refusal).toBeNull()
+    expect(result.partial?.code).toBe('total_uncompressed_exceeded')
+    // A cut-off deflate stream is never handed on: its trailer and CRC were never checked. The
+    // whole output arrives as one chunk here, and that chunk is refused before it is accumulated,
+    // so the partial result honestly reports nothing kept.
+    expect(result.payload).toEqual(new Uint8Array(0))
+    expect(result.stats.producedBytes).toBe(0)
+    expect(result.skipped?.map((entry) => [entry.name, entry.code])).toEqual([
+      ['big.tar.gz', 'not_reached'],
+    ])
+    expect(result.partial).toMatchObject({ analysedFiles: 0, plannedFiles: 1, unreachedFiles: 1 })
+  })
+
   it('bounds the archive before inflating a byte', async () => {
     const packed = compress(body)
     const result = await readGzipPayload(packed, { limits: { ...DEFAULT_ARCHIVE_LIMITS, maxArchiveBytes: 8 } })

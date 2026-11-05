@@ -131,6 +131,40 @@ describe('readLooseFiles: caps and hostile paths', () => {
 
     expect(result.refusal?.code).toBe('name_too_long')
   })
+
+  it('truncates the drop at the analysis budget, not at the unpacking ceiling', async () => {
+    const files = [source('src/a.js', 'a'.repeat(120)), source('src/b.js', 'b'.repeat(120)), source('src/c.js', 'c'.repeat(120))]
+    const limits = { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 }
+
+    const kept = await readLooseFiles(files, { limits, keepPartial: true })
+    expect(kept.refusal).toBeNull()
+    expect(kept.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
+    expect(kept.partial?.code).toBe('analysable_budget_exceeded')
+    expect(kept.skipped.map((entry) => [entry.name, entry.code])).toEqual([['src/c.js', 'not_reached']])
+
+    const refused = await readLooseFiles(files, { limits })
+    expect(refused.refusal?.code).toBe('analysable_budget_exceeded')
+    expect(refused.entries).toHaveLength(0)
+  })
+
+  it('does not let a skipped file spend the analysis budget', async () => {
+    const files = [
+      { path: 'src/sneaky.js', size: 120, read: async () => new Uint8Array(120).fill(0x00) },
+      source('src/a.js', 'a'.repeat(120)),
+      source('src/b.js', 'b'.repeat(120)),
+    ]
+    const result = await readLooseFiles(files, {
+      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 },
+      keepPartial: true,
+    })
+
+    expect(result.refusal).toBeNull()
+    // The budget is 240 and the two text files add up to exactly that; the file whose bytes turned
+    // out to be binary was read, found to hold no text and set aside without charging anything.
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['binary_content'])
+    expect(result.partial).toBeUndefined()
+  })
 })
 
 describe('readLooseFiles: cancel and progress', () => {
@@ -155,6 +189,56 @@ describe('readLooseFiles: cancel and progress', () => {
 
     expect(result.refusal?.code).toBe('cancelled')
     expect(result.entries).toHaveLength(0)
+  })
+
+  it('keeps the files read before a cancel when the caller accepts a partial result', async () => {
+    const controller = new AbortController()
+    const files = Array.from({ length: 6 }, (_, i) => source(`src/f${i}.js`, 'export const a = 1\n'))
+    const result = await readLooseFiles(files, {
+      signal: controller.signal,
+      keepPartial: true,
+      onProgress: (progress) => {
+        if (progress.phase === 'extract') controller.abort()
+      },
+    })
+
+    expect(result.refusal).toBeNull()
+    expect(result.partial?.code).toBe('cancelled')
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/f0.js'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['src/f1.js', 'not_reached'],
+      ['src/f2.js', 'not_reached'],
+      ['src/f3.js', 'not_reached'],
+      ['src/f4.js', 'not_reached'],
+      ['src/f5.js', 'not_reached'],
+    ])
+    expect(result.partial).toMatchObject({ analysedFiles: 1, plannedFiles: 6, unreachedFiles: 5 })
+    expect(result.skipped[0].message).toContain('you cancelled')
+  })
+
+  it('turns a read aborted by the browser into a partial result that names the rest', async () => {
+    const controller = new AbortController()
+    const files = [
+      source('src/a.js', 'export const a = 1\n'),
+      {
+        path: 'src/b.js',
+        size: 5,
+        read: async () => {
+          controller.abort()
+          throw new DOMException('Aborted', 'AbortError')
+        },
+      },
+      source('src/c.js', 'export const c = 1\n'),
+    ]
+    const result = await readLooseFiles(files, { signal: controller.signal, keepPartial: true })
+
+    expect(result.refusal).toBeNull()
+    expect(result.partial?.code).toBe('cancelled')
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['src/b.js', 'not_reached'],
+      ['src/c.js', 'not_reached'],
+    ])
   })
 
   it('reports walk then extract progress', async () => {

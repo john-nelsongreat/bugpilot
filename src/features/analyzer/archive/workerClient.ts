@@ -15,10 +15,15 @@ export interface ArchiveClientReadOptions {
   onProgress?: (progress: ArchiveReadProgress) => void
   /** Read generated and vendored folders too. `.git` is skipped at every setting. */
   includeGenerated?: boolean
+  /** Keep entries read before a budget or cancel stop and mark the result partial. */
+  keepPartial?: boolean
 }
 
+/** A copied buffer for tests and callers that hold bytes, or the picked file for random access. */
+export type ArchiveReadInput = Uint8Array | Blob
+
 export interface ArchiveClient {
-  read(bytes: Uint8Array, options: ArchiveClientReadOptions): Promise<ArchiveReadResult>
+  read(input: ArchiveReadInput, options: ArchiveClientReadOptions): Promise<ArchiveReadResult>
 }
 
 const EMPTY_STATS = {
@@ -55,7 +60,7 @@ export function createArchiveClient(getWorker: () => WorkerHandle): ArchiveClien
   }
 
   return {
-    read(bytes, options) {
+    read(input, options) {
       if (busy) {
         return Promise.resolve(failedResult('Another read is already running. Wait for it to finish.'))
       }
@@ -106,16 +111,21 @@ export function createArchiveClient(getWorker: () => WorkerHandle): ArchiveClien
         }
         options.signal?.addEventListener('abort', onAbort, { once: true })
 
+        const body =
+          input instanceof Blob
+            ? { blob: input }
+            : { bytes: input.buffer as ArrayBuffer }
         handle.postMessage(
           {
             type: 'read-archive',
             id,
-            bytes: bytes.buffer,
+            ...body,
             name: options.name ?? '',
             limits: options.limits,
             includeGenerated: options.includeGenerated === true,
+            keepPartial: options.keepPartial === true,
           },
-          [bytes.buffer as ArrayBuffer],
+          input instanceof Blob ? [] : [input.buffer as ArrayBuffer],
         )
       })
     },

@@ -12,6 +12,7 @@ export function sourceForFile(file: File, path: string): IntakeSource {
   return {
     path,
     size: file.size,
+    file,
     read: async () => {
       const buffer = await file.arrayBuffer()
       return new Uint8Array(buffer)

@@ -1,9 +1,12 @@
 import {
+  PartialStop,
   SkipSingle,
   breathe,
   createRun,
   enforceChunkBounds,
   finishRun,
+  notReachedEntry,
+  partialReadResult,
   refuse,
   reportProgress,
   skipEntry,
@@ -13,6 +16,7 @@ import {
   type ArchiveReadResult,
   type ArchiveRefusal,
   type ArchiveSkippedEntry,
+  type PartialStopCode,
   type ReadOptions,
   type ReadRun,
 } from './bounds'
@@ -252,7 +256,7 @@ async function readBody(run: ReadRun, bytes: Uint8Array, start: number, size: nu
   // lies about its own length is caught on the slice that crosses the line rather than at the end.
   for (let cursor = start; cursor < start + size; cursor += run.limits.inflateChunkBytes) {
     const slice = bytes.subarray(cursor, Math.min(cursor + run.limits.inflateChunkBytes, start + size))
-    enforceChunkBounds(run, { produced, chunkLength: slice.length, declaredSize: size, compressedSize: null }, run.stats.producedBytes)
+    enforceChunkBounds(run, { produced, chunkLength: slice.length, declaredSize: size, compressedSize: null })
     produced += slice.length
     chunks.push(slice)
     await breathe(run)
@@ -287,12 +291,30 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
   let declaredBudget = 0
   let sawEndOfArchive = false
   let at = 0
+  /** The record being read, so a stop inside it can name the file that was cut off. */
+  let currentName: string | null = null
+  let currentSize = 0
+
+  /**
+   * A tar is sequential, so the names after the stop are unknown. The record that was cut off is
+   * named, and one marker accounts for everything behind it; the planned count is what the report
+   * shows, so it is kept to files the reader can actually name.
+   */
+  const partialAt = (code: PartialStopCode, subject: string | number): ArchiveReadResult => {
+    if (currentName !== null) skipped.push(notReachedEntry(currentName, code))
+    skipped.push(notReachedEntry('(rest of the archive)', code))
+    run.stats.plannedEntries = entries.length + (currentName !== null ? 2 : 1)
+    run.stats.plannedBytes = run.stats.producedBytes + currentSize
+    run.stats.durationMs = Date.now() - run.started
+    return partialReadResult(run.stats, code, subject, entries, skipped)
+  }
 
   try {
     // The byte ceiling runs before a single header is parsed, so an oversized upload costs one
     // comparison rather than a walk.
     if (run.signal?.aborted) refuse('cancelled')
-    if (bytes.length > run.limits.maxArchiveBytes) refuse('archive_too_large', bytes.length)
+    const ceiling = Math.min(run.limits.maxArchiveBytes, run.limits.maxTarArchiveBytes)
+    if (bytes.length > ceiling) refuse('archive_too_large', bytes.length)
 
     while (at + BLOCK_BYTES <= bytes.length) {
       const block = bytes.subarray(at, at + BLOCK_BYTES)
@@ -359,13 +381,23 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
       // Every length the reader is about to use has to exist in the file before it is used.
       if (at + BLOCK_BYTES + bodyBytes > bytes.length) refuse('archive_truncated', printable(name))
 
+      currentName = name
+      currentSize = size
       const skipCode = declaredSkip(typeFlag, label, name, size, run)
       if (skipCode) {
         skipped.push(skipFor(skipCode, name, label ?? undefined))
         run.stats.skipped = skipped.length
       } else {
         if (declaredBudget + size > run.limits.maxTotalUncompressedBytes) {
-          refuse('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+          if (!run.keepPartial) refuse('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+          return partialAt('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+        }
+        // A tar has no index, so the text budget can only be checked as the walk reaches each
+        // entry. tar stores sizes exactly, so the declared length is the real one here — the
+        // body is re-measured below and the reader refuses a header that lies about it.
+        if (run.stats.producedBytes + size > run.limits.maxAnalysableTextBytes) {
+          if (!run.keepPartial) refuse('analysable_budget_exceeded', run.limits.maxAnalysableTextBytes)
+          return partialAt('analysable_budget_exceeded', run.limits.maxAnalysableTextBytes)
         }
         const bodyStart = at + BLOCK_BYTES
         try {
@@ -387,6 +419,7 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
           run.stats.skipped = skipped.length
           reportProgress(run, 'extract')
         } catch (error) {
+          if (error instanceof PartialStop) return partialAt(error.code as PartialStopCode, error.subject)
           if (!(error instanceof SkipSingle)) throw error
           skipped.push(skipFor(error.code, name))
           run.stats.skipped = skipped.length
@@ -394,6 +427,9 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
       }
 
       at += BLOCK_BYTES + bodyBytes
+      // The record is complete, so a stop in the yield below is about the records behind it.
+      currentName = null
+      currentSize = 0
       await breathe(run)
     }
 
@@ -401,6 +437,7 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
     // cut off, so what it did contain is not trustworthy.
     if (!sawEndOfArchive) refuse('archive_truncated')
   } catch (error) {
+    if (error instanceof PartialStop) return partialAt(error.code as PartialStopCode, error.subject)
     return finish(toRefusal(error))
   }
 

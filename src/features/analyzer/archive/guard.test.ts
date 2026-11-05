@@ -211,9 +211,9 @@ describe('readArchive: size and count caps hold with nothing produced', () => {
     ])
   })
 
-  it('refuses 10 000 tiny files at the cap without unpacking a single one', async () => {
+  it('refuses more tiny files than the cap without unpacking a single one', async () => {
     const started = Date.now()
-    const bytes = buildZip(manyEntries(10_000))
+    const bytes = buildZip(manyEntries(DEFAULT_ARCHIVE_LIMITS.maxEntryCount + 1))
     const buildMs = Date.now() - started
     const result = await readArchive(bytes)
 

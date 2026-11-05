@@ -50,6 +50,8 @@ export interface ZipEntrySpec {
   dataDescriptor?: boolean
   /** Write a different (longer) name in the local header than in the central directory. */
   localNameOverride?: string
+  /** Forge only the central-directory local-header offset, leaving the real records in place. */
+  localHeaderOffsetOverride?: number
 }
 
 export interface ZipBuildOptions {
@@ -69,6 +71,11 @@ export interface ZipBuildOptions {
   zip64?: boolean
   /** Entry name encoding: bytes are used verbatim when given as a Uint8Array spec. */
   rawNames?: Record<string, Uint8Array>
+  /** Append an end-of-directory comment and declare its real length. */
+  comment?: string
+  /** Forge the disk numbers: the archive is split across volumes when either is nonzero. */
+  diskNumber?: number
+  centralDirectoryDisk?: number
 }
 
 const SIG_LFH = 0x04034b50
@@ -178,7 +185,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
     putU16(0)
     putU16(0)
     putU32(externalAttrs)
-    putU32(offset >>> 0)
+    putU32((spec.localHeaderOffsetOverride ?? offset) >>> 0)
     cd.set(name, p)
     records.push(cd)
   }
@@ -212,14 +219,16 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
   }
 
   if (!options.omitEocd) {
+    const comment = options.comment === undefined ? new Uint8Array(0) : utf8Encode(options.comment)
     pushU32(SIG_EOCD)
-    pushU16(0)
-    pushU16(0)
+    pushU16(options.diskNumber ?? 0)
+    pushU16(options.centralDirectoryDisk ?? 0)
     pushU16((options.declaredEntryCount ?? entries.length) & 0xffff)
     pushU16((options.declaredEntryCount ?? entries.length) & 0xffff)
     pushU32((options.declaredCdSize ?? cdSize) >>> 0)
     pushU32((options.declaredCdOffset ?? cdOffset) >>> 0)
-    pushU16(0)
+    pushU16(comment.length)
+    pushBytes(comment)
   }
 
   const bytes = sink()

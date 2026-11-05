@@ -1,14 +1,23 @@
 export interface ArchiveLimits {
-  /** Refuse the archive outright before any header is read. */
+  /** Zip archive bytes. The zip is read by seeking, so these bytes are never all held. */
   maxArchiveBytes: number
-  /** Sum of uncompressed bytes across every entry. */
+  /** tar and tar.gz archive bytes. Sequential formats are held while they are walked. */
+  maxTarArchiveBytes: number
+  /**
+   * Work budget: uncompressed bytes really produced while unpacking, including entries that
+   * turn out to be binary. This is the decompression ceiling, not the analysis ceiling.
+   */
   maxTotalUncompressedBytes: number
+  /** Text kept for analysis after classification. Counted from declared sizes before inflating. */
+  maxAnalysableTextBytes: number
   /** A single entry bigger than this is skipped with a reason, not fatal. */
   maxSingleFileUncompressedBytes: number
   /** Counted on records actually walked, not on the number the archive declares. */
   maxEntryCount: number
   /** One entry name longer than this is treated as a crafted archive, not a file. */
   maxEntryNameBytes: number
+  /** The index is read in one bounded slice; a bigger one is refused before it is parsed. */
+  maxCentralDirectoryBytes: number
   /** declaredUncompressed / declaredCompressed, checked before inflating. */
   maxDeclaredRatio: number
   /** bytes actually produced / compressed bytes, checked while inflating. */
@@ -19,17 +28,53 @@ export interface ArchiveLimits {
   inflateChunkBytes: number
 }
 
+/**
+ * The ceilings for a normal machine. The zip ceiling is far above the tar ceiling because a zip
+ * can skip node_modules and images without inflating them, while a tar has to walk every byte.
+ * The analysable budget is the one that decides how the page behaves: every analysed file crosses
+ * from the reader and analysis workers into the page in one message, so its size is the longest
+ * thing the main thread does at once. Measured with this build on an idle machine: 20 MiB of clean
+ * text with no findings at all gave a 281 ms task, 1 MiB of text carrying 16,180 findings gave
+ * 206 ms, and the two together — the ordinary shape of a real project at a 20 MiB budget, about
+ * 200 files and 20,000 findings — gave 427 ms to 799 ms. The budget below is the amount of text
+ * that leaves both of those costs under the 200 ms target rather than one of them.
+ */
 export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
-  maxArchiveBytes: 25 * 1024 * 1024,
-  maxTotalUncompressedBytes: 150 * 1024 * 1024,
+  maxArchiveBytes: 250 * 1024 * 1024,
+  maxTarArchiveBytes: 100 * 1024 * 1024,
+  maxTotalUncompressedBytes: 600 * 1024 * 1024,
+  maxAnalysableTextBytes: 12 * 1024 * 1024,
   maxSingleFileUncompressedBytes: 2 * 1024 * 1024,
-  maxEntryCount: 5_000,
+  maxEntryCount: 20_000,
   maxEntryNameBytes: 1_024,
+  maxCentralDirectoryBytes: 16 * 1024 * 1024,
   maxDeclaredRatio: 60,
   maxActualRatio: 300,
-  maxWallClockMs: 180_000,
+  maxWallClockMs: 300_000,
   inflateChunkBytes: 4_096,
 }
+
+/**
+ * The opt-in tier for a machine that reports at least 8 GiB and a user who ticked "Large project
+ * mode". It raises every budget that costs memory, with the plain warning shown before upload.
+ * It is never selected automatically: `navigator.deviceMemory` is a coarse hint, not a promise.
+ * The analysable budget is 40 MiB: above it the single handover of the analysed text is the pause
+ * the warning describes, and 150 MiB was measured at 2,537 ms for one task and 1,049 MiB of
+ * resident memory for the whole browser process tree. The extra reach of this tier is in archive
+ * bytes, inflated work, entry count and clock, not in freezing the tab.
+ */
+export const HIGH_CAPACITY_ARCHIVE_LIMITS: ArchiveLimits = {
+  ...DEFAULT_ARCHIVE_LIMITS,
+  maxArchiveBytes: 500 * 1024 * 1024,
+  maxTarArchiveBytes: 200 * 1024 * 1024,
+  maxTotalUncompressedBytes: 1024 * 1024 * 1024,
+  maxAnalysableTextBytes: 40 * 1024 * 1024,
+  maxEntryCount: 40_000,
+  maxWallClockMs: 600_000,
+}
+
+/** `navigator.deviceMemory` at or above this many GiB may opt into the high-capacity tier. */
+export const HIGH_CAPACITY_DEVICE_MEMORY_GIB = 8
 
 /**
  * How much analysed text the session may keep in memory so the fix review can build edits.
@@ -48,20 +93,30 @@ const SMALL_DEVICE_MEMORY_GIB = 2
  * memory are halved: the ratio ceilings are security limits, and a slow machine needs the same
  * wall clock as a fast one — halving the time budget would refuse an upload the device could read.
  */
-export function limitsForDevice(deviceMemoryGiB: number | undefined): ArchiveLimits {
-  const small =
-    typeof deviceMemoryGiB === 'number' &&
-    Number.isFinite(deviceMemoryGiB) &&
-    deviceMemoryGiB > 0 &&
-    deviceMemoryGiB <= SMALL_DEVICE_MEMORY_GIB
-  if (!small) return DEFAULT_ARCHIVE_LIMITS
-  return {
-    ...DEFAULT_ARCHIVE_LIMITS,
-    maxArchiveBytes: DEFAULT_ARCHIVE_LIMITS.maxArchiveBytes / 2,
-    maxTotalUncompressedBytes: DEFAULT_ARCHIVE_LIMITS.maxTotalUncompressedBytes / 2,
-    maxSingleFileUncompressedBytes: DEFAULT_ARCHIVE_LIMITS.maxSingleFileUncompressedBytes / 2,
-    maxEntryCount: Math.floor(DEFAULT_ARCHIVE_LIMITS.maxEntryCount / 2),
+export function limitsForDevice(deviceMemoryGiB: number | undefined, largeProjectMode = false): ArchiveLimits {
+  const known =
+    typeof deviceMemoryGiB === 'number' && Number.isFinite(deviceMemoryGiB) && deviceMemoryGiB > 0
+  const small = known && deviceMemoryGiB <= SMALL_DEVICE_MEMORY_GIB
+  if (small) {
+    return {
+      ...DEFAULT_ARCHIVE_LIMITS,
+      maxArchiveBytes: DEFAULT_ARCHIVE_LIMITS.maxArchiveBytes / 2,
+      maxTarArchiveBytes: DEFAULT_ARCHIVE_LIMITS.maxTarArchiveBytes / 2,
+      maxTotalUncompressedBytes: DEFAULT_ARCHIVE_LIMITS.maxTotalUncompressedBytes / 2,
+      maxAnalysableTextBytes: DEFAULT_ARCHIVE_LIMITS.maxAnalysableTextBytes / 2,
+      maxSingleFileUncompressedBytes: DEFAULT_ARCHIVE_LIMITS.maxSingleFileUncompressedBytes / 2,
+      maxEntryCount: Math.floor(DEFAULT_ARCHIVE_LIMITS.maxEntryCount / 2),
+    }
   }
+  const high = largeProjectMode && known && deviceMemoryGiB >= HIGH_CAPACITY_DEVICE_MEMORY_GIB
+  return high ? HIGH_CAPACITY_ARCHIVE_LIMITS : DEFAULT_ARCHIVE_LIMITS
+}
+
+/** The archive bytes a format is checked against before a header is read. */
+export function archiveCeilingFor(format: 'zip' | 'tar' | 'gzip' | 'folder', limits: ArchiveLimits): number {
+  if (format === 'zip') return limits.maxArchiveBytes
+  if (format === 'folder') return limits.maxTotalUncompressedBytes
+  return Math.min(limits.maxArchiveBytes, limits.maxTarArchiveBytes)
 }
 
 /** Path segments that are never analysed: generated or vendored trees. */

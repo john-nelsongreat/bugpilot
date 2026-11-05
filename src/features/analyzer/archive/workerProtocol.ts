@@ -1,5 +1,6 @@
 import type { ArchiveLimits } from './limits'
-import { readContainer } from './container'
+import { readContainerSource } from './container'
+import { createBlobSource, createMemorySource, type ByteSource } from './source'
 import type { ArchiveReadProgress, ArchiveReadResult } from './bounds'
 
 /**
@@ -14,7 +15,13 @@ export interface WorkerScope {
 export interface ReadArchiveRequest {
   type: 'read-archive'
   id: number
-  bytes: ArrayBuffer
+  /** A copied buffer, kept for callers and tests that already hold the bytes. */
+  bytes?: ArrayBuffer
+  /**
+   * The picked file itself. A Blob is structured-cloned without copying its bytes in the page,
+   * and the zip reader seeks inside it, so a large archive never becomes one page-sized buffer.
+   */
+  blob?: Blob
   /**
    * The name the user gave the file. It is a claim the reader checks against the bytes, never the
    * decision, and a request without one is simply a file whose name says nothing.
@@ -23,6 +30,8 @@ export interface ReadArchiveRequest {
   limits: ArchiveLimits
   /** Read generated and vendored folders too. `.git` is skipped at every setting. */
   includeGenerated?: boolean
+  /** Keep what was read when a budget or the user stops the pass, and mark the result partial. */
+  keepPartial?: boolean
 }
 
 export interface CancelRequest {
@@ -86,12 +95,24 @@ export function startArchiveWorker(scope: WorkerScope): void {
 
     const controller = new AbortController()
     running.set(id, controller)
-    let bytes: Uint8Array
-    try {
-      bytes = new Uint8Array(data.bytes)
-    } catch {
+    let source: ByteSource
+    if (data.blob) {
+      source = createBlobSource(data.blob)
+    } else if (data.bytes) {
+      try {
+        source = createMemorySource(new Uint8Array(data.bytes))
+      } catch {
+        finish(id, {
+          refusal: { code: 'worker_error', message: 'The file reader received an unreadable buffer. Nothing was stored.' },
+          entries: [],
+          skipped: [],
+          stats: { walkedRecords: 0, producedBytes: 0, entries: 0, skipped: 0, durationMs: 0, peakEntryBytes: 0 },
+        })
+        return
+      }
+    } else {
       finish(id, {
-        refusal: { code: 'worker_error', message: 'The file reader received an unreadable buffer. Nothing was stored.' },
+        refusal: { code: 'worker_error', message: 'The file reader received no file to read. Nothing was stored.' },
         entries: [],
         skipped: [],
         stats: { walkedRecords: 0, producedBytes: 0, entries: 0, skipped: 0, durationMs: 0, peakEntryBytes: 0 },
@@ -99,9 +120,10 @@ export function startArchiveWorker(scope: WorkerScope): void {
       return
     }
 
-    void readContainer(bytes, data.name ?? '', {
+    void readContainerSource(source, data.name ?? '', {
       limits: data.limits,
       includeGenerated: data.includeGenerated === true,
+      keepPartial: data.keepPartial === true,
       signal: controller.signal,
       onProgress: (progress) => {
         scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)

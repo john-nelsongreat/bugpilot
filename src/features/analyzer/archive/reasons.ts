@@ -23,6 +23,11 @@ export const ARCHIVE_REFUSAL_CODES = [
   'not_a_tar',
   'unsupported_format',
   'zip64_not_supported',
+  'multi_disk_not_supported',
+  'central_directory_too_large',
+  'overlapping_entries',
+  'local_central_disagreement',
+  'analysable_budget_exceeded',
   'corrupt_central_directory',
   'corrupt_local_header',
   'corrupt_deflate_stream',
@@ -48,6 +53,7 @@ export const ARCHIVE_SKIP_CODES = [
   'source_set_aside',
   'notebook_unreadable',
   'generated_file',
+  'not_reached',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -100,6 +106,18 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
       : `This is a .${kind} archive. BugPilot does not decode .${kind} files in the browser. Re-archive the project as a .zip or a .tar.gz and upload that instead.`,
   zip64_not_supported: () =>
     'This archive uses the ZIP64 format, which this reader does not support. Nothing was unpacked.',
+  multi_disk_not_supported: () =>
+    'This archive is split across several disks or volumes. BugPilot reads one file, so the archive is refused.',
+  central_directory_too_large: (n) =>
+    `The archive index claims to be ${n} bytes, over the ceiling BugPilot reads in one piece. The archive is refused before the index is parsed.`,
+  overlapping_entries: (name, extra) =>
+    extra === undefined
+      ? `The entries "${name}" and another entry point at overlapping bytes. Reading both would let one compressed range count twice, so the archive is refused.`
+      : `The entry "${name}" ${extra}, so the archive is refused.`,
+  local_central_disagreement: (name) =>
+    `The local header for "${name}" disagrees with the archive index about its name, sizes, checksum or compression. BugPilot cannot tell which record is real, so the archive is refused.`,
+  analysable_budget_exceeded: (n) =>
+    `The files to analyse add up to more than ${n} bytes, which is the analysis budget for this upload. Nothing was read, because this run keeps nothing partial.`,
   corrupt_central_directory: () =>
     'The archive index is damaged or points outside the file, so BugPilot stopped reading.',
   corrupt_local_header: (name) =>
@@ -144,6 +162,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `"${name}" is a notebook BugPilot could not read${extra ? `: ${extra}` : ''}. The notebook was skipped and the other files were still checked; nothing from it was kept.`,
   generated_file: (name, extra) =>
     `"${name}" looks generated or vendored${extra ? ` (${extra})` : ''}, so BugPilot skipped it. Tick "Include generated and vendored files" to check it too; the same size limits apply.`,
+  not_reached: (name, extra) =>
+    `"${name}" was not reached${extra ? `: ${extra}` : ''}. The report covers only the files BugPilot actually read.`,
 }
 
 /**
@@ -152,4 +172,24 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
  */
 export function archiveReasonMessage(code: ArchiveReasonCode, subject: string | number = '', extra?: string): string {
   return PLAIN_MESSAGES[code](String(subject), extra)
+}
+
+/**
+ * The reason a read stopped while keeping what it had. A refusal message must not be reused here:
+ * it says nothing was kept, and a partial report says the opposite.
+ */
+const PARTIAL_MESSAGES: Partial<Record<ArchiveReasonCode, PlainMessage>> = {
+  wall_clock_exceeded: (n) =>
+    `BugPilot reached its ${n} second reading limit. The files and findings read before that point are kept and clearly marked as a partial result.`,
+  total_uncompressed_exceeded: (n) =>
+    `BugPilot reached its ${n} byte unpacking budget. The files and findings read before that point are kept and clearly marked as a partial result.`,
+  analysable_budget_exceeded: (n) =>
+    `The files to analyse add up to more than ${n} bytes, the analysis budget for this upload. BugPilot kept the files that still fitted inside it and marks the rest as not reached, so this report is a partial result.`,
+  cancelled: () =>
+    'You cancelled the upload. The files and findings read before you cancelled are kept and clearly marked as a partial result.',
+}
+
+export function partialReasonMessage(code: ArchiveReasonCode, subject: string | number = '', extra?: string): string {
+  const template = PARTIAL_MESSAGES[code]
+  return template ? template(String(subject), extra) : archiveReasonMessage(code, subject, extra)
 }

@@ -1,15 +1,21 @@
 import { Gunzip } from 'fflate'
 import {
+  PartialStop,
   RefuseArchive,
   SkipSingle,
   breathe,
   createRun,
   enforceChunkBounds,
+  notReachedEntry,
+  partialReadResult,
   refuse,
   reportProgress,
   toRefusal,
+  type ArchivePartialStop,
   type ArchiveRefusal,
   type ArchiveReadStats,
+  type ArchiveSkippedEntry,
+  type PartialStopCode,
   type ReadOptions,
   type ReadRun,
 } from './bounds'
@@ -44,9 +50,12 @@ export interface GzipReadOptions extends ReadOptions {
 
 export interface GzipPayloadResult {
   refusal: ArchiveRefusal | null
-  /** The decompressed bytes, or nothing at all when the stream was refused. */
+  /** The decompressed bytes, or nothing at all when the stream was refused or stopped early. */
   payload: Uint8Array
   stats: ArchiveReadStats
+  /** Set when a budget or the clock stopped the decompression and the caller asked to keep it. */
+  partial?: ArchivePartialStop | null
+  skipped?: ArchiveSkippedEntry[]
 }
 
 const NO_PAYLOAD = new Uint8Array(0)
@@ -133,7 +142,8 @@ export async function readGzipPayload(bytes: Uint8Array, options: GzipReadOption
 
   try {
     if (run.signal?.aborted) refuse('cancelled')
-    if (bytes.length > run.limits.maxArchiveBytes) refuse('archive_too_large', bytes.length)
+    const ceiling = Math.min(run.limits.maxArchiveBytes, run.limits.maxTarArchiveBytes)
+    if (bytes.length > ceiling) refuse('archive_too_large', bytes.length)
     checkGzipHeader(bytes)
 
     const chunks: Uint8Array[] = []
@@ -144,7 +154,7 @@ export async function readGzipPayload(bytes: Uint8Array, options: GzipReadOption
       if (chunk.length === 0) return
       // The whole file is the compressed side of the ratio, because a gzip stream is one member.
       // Nothing precedes it, so the bytes already held are the ones being added to right now.
-      enforceChunkBounds(run, { produced, chunkLength: chunk.length, declaredSize: null, compressedSize: bytes.length }, 0)
+      enforceChunkBounds(run, { produced, chunkLength: chunk.length, declaredSize: null, compressedSize: bytes.length })
       produced += chunk.length
       crc = crc32(chunk, crc)
       chunks.push(chunk)
@@ -163,11 +173,14 @@ export async function readGzipPayload(bytes: Uint8Array, options: GzipReadOption
       try {
         gunzip.push(slice, last)
       } catch (error) {
-        if (error instanceof RefuseArchive) throw error
+        if (error instanceof RefuseArchive || error instanceof PartialStop) throw error
         // The bounds only ever raise a skip for a ceiling a produced chunk crossed, and a gzip
-        // stream is not an entry that can be dropped: the whole read is refused instead, so a skip
+        // stream is not an entry that can be dropped: the whole read stops instead, so a skip
         // can never surface as an unexplained worker error.
-        if (error instanceof SkipSingle) refuse('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+        if (error instanceof SkipSingle) {
+          if (run.keepPartial) throw new PartialStop('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+          refuse('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
+        }
         refuse('corrupt_gzip_stream', '', 'the compressed data could not be read')
       }
       if (members > 0) refuse('multi_member_gzip')
@@ -187,6 +200,17 @@ export async function readGzipPayload(bytes: Uint8Array, options: GzipReadOption
 
     return finish(run, null, concat(chunks, produced))
   } catch (error) {
+    if (error instanceof PartialStop) {
+      // A truncated deflate stream is never handed to the inner reader: its trailer and CRC were
+      // never reached, so no file inside it can be trusted or even named. The stop itself is kept
+      // and reported as one unreached file rather than as a refusal that claims nothing happened.
+      const skipped = [notReachedEntry(sourceName, error.code)]
+      run.stats.plannedEntries = 1
+      run.stats.plannedBytes = run.stats.producedBytes
+      run.stats.durationMs = Date.now() - run.started
+      const result = partialReadResult(run.stats, error.code as PartialStopCode, error.subject, [], skipped)
+      return { refusal: null, payload: NO_PAYLOAD, stats: run.stats, partial: result.partial ?? null, skipped }
+    }
     return finish(run, toRefusal(error), NO_PAYLOAD)
   }
 }
