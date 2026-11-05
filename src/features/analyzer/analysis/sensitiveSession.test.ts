@@ -153,7 +153,7 @@ describe('sensitive file names in the analysis session', () => {
   })
 
   it('passes the override and the ceilings to both readers', async () => {
-    const readArchive = vi.fn(async (_bytes: Uint8Array, _options: ArchiveClientReadOptions) =>
+    const readArchive = vi.fn(async (_input: Uint8Array | Blob, _options: ArchiveClientReadOptions) =>
       readResult([entry('src/app.js', 'const x = 1\n')]),
     )
     const readLoose = vi.fn(async (_sources: readonly IntakeSource[], _options: ReadLooseFilesOptions) =>
@@ -161,7 +161,10 @@ describe('sensitive file names in the analysis session', () => {
     )
     const limits = {
       maxArchiveBytes: 1,
+      maxTarArchiveBytes: 1,
       maxTotalUncompressedBytes: 2,
+      maxAnalysableTextBytes: 2,
+      maxCentralDirectoryBytes: 16,
       maxSingleFileUncompressedBytes: 3,
       maxEntryCount: 4,
       maxEntryNameBytes: 5,

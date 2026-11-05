@@ -123,6 +123,7 @@ function buildChangelog(report: AnalyzerReport, applied: readonly AppliedChange[
 function buildManifest(
   sources: readonly ArchiveEntry[],
   fixedFiles: ReadonlySet<string>,
+  partial?: AnalyzerReport['session']['partial'],
 ): string {
   const names = sources.map((source) => source.name).sort((a, b) => a.localeCompare(b))
   const lines = [
@@ -130,6 +131,12 @@ function buildManifest(
     '',
     'This zip contains only the text files BugPilot analysed in this browser tab.',
     '',
+    ...(partial
+      ? [
+          `**PARTIAL EXPORT.** ${partial.message} ${partial.analysedFiles} of ${partial.plannedFiles} planned file(s) were analysed, so this zip is not a complete copy of the analysed set.`,
+          '',
+        ]
+      : []),
     '- It is not a full copy of your project. Binary files, skipped files, files over the size limit and files inside ignored folders (such as node_modules, .git and dist) are not included, because the app never keeps their bytes.',
     '- Paths are the original relative paths inside the upload.',
     `- Fixed files: ${fixedFiles.size} of ${sources.length} analysed text file${sources.length === 1 ? '' : 's'}.`,
@@ -323,7 +330,9 @@ export async function buildCleanExport(
     for (const source of sources) {
       entries[source.name] = strToU8(fixedTexts.get(source.name) ?? source.text)
     }
-    entries['MANIFEST.md'] = strToU8(buildManifest(sources, new Set(fixedTexts.keys())))
+    entries['MANIFEST.md'] = strToU8(
+      buildManifest(sources, new Set(fixedTexts.keys()), input.report.session.partial),
+    )
     files.push({
       name: 'clean.zip',
       bytes: zipSync(entries, { level: 6 }),

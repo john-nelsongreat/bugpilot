@@ -1,10 +1,12 @@
 import type {
   ArchiveEntry,
+  ArchivePartialStop,
   ArchiveReadProgress,
   ArchiveReadResult,
   ArchiveReadStats,
   ArchiveSkippedEntry,
 } from '../archive/guard'
+import { archiveReasonMessage } from '../archive/reasons'
 import {
   DEFAULT_ARCHIVE_LIMITS,
   MAX_RETAINED_TEXT_BYTES,
@@ -39,7 +41,7 @@ export interface SessionProgress {
   detail: string
 }
 
-export type SessionStatus = 'completed' | 'cancelled' | 'refused' | 'error'
+export type SessionStatus = 'completed' | 'partial' | 'cancelled' | 'refused' | 'error'
 
 /** `'all'` keeps every analysed file; `'findings'` keeps only the files a finding points at. */
 export type Retention = 'all' | 'findings'
@@ -69,11 +71,19 @@ export interface AnalysisSessionResult {
    * ending in a dead end the user cannot act on.
    */
   handleStale?: boolean
+  /** Set when the result is a labelled partial read rather than a complete one. */
+  partial?: ArchivePartialStop | null
 }
 
 export interface UploadArchiveInput {
   kind: 'archive'
-  bytes: Uint8Array
+  /**
+   * The picked file. The zip reader seeks inside it, so the page never has to copy the whole
+   * archive into memory before the worker starts.
+   */
+  file?: Blob
+  /** Bytes already in memory, kept for tests and callers that hold them. */
+  bytes?: Uint8Array
   /**
    * The name the file was picked or dropped under. The reader decides the format from the bytes and
    * uses the name only to tell the user when the two disagree.
@@ -125,18 +135,18 @@ export interface AnalyzeUploadOptions {
 }
 
 export interface SessionDeps {
-  readArchive?: (bytes: Uint8Array, options: ArchiveClientReadOptions) => Promise<ArchiveReadResult>
+  readArchive?: (input: Uint8Array | Blob, options: ArchiveClientReadOptions) => Promise<ArchiveReadResult>
   readLoose?: (sources: readonly IntakeSource[], options: ReadLooseFilesOptions) => Promise<ArchiveReadResult>
   analyzer?: AnalyzerClient
   createTsClient?: () => Promise<TsSyntaxClient>
   createEngineClient?: () => Promise<EngineClient>
 }
 
-function defaultReadArchive(bytes: Uint8Array, options: ArchiveClientReadOptions): Promise<ArchiveReadResult> {
+function defaultReadArchive(input: Uint8Array | Blob, options: ArchiveClientReadOptions): Promise<ArchiveReadResult> {
   const client = createArchiveClient(
     () => new Worker(new URL('../archive/worker.ts', import.meta.url), { type: 'module' }),
   )
-  return client.read(bytes, options)
+  return client.read(input, options)
 }
 
 function defaultAnalyzer(): AnalyzerClient {
@@ -165,16 +175,26 @@ function failed(status: 'refused' | 'error', message: string, stats: ArchiveRead
   return { status, message, report: null, stats }
 }
 
+function formatDecodedBytes(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`
+  if (bytes < 1_048_576) return `${Math.round(bytes / 1_024)} KiB`
+  const mebibytes = bytes / 1_048_576
+  return `${Number.isInteger(mebibytes) ? mebibytes : mebibytes.toFixed(1)} MiB`
+}
+
 function readingProgress(progress: ArchiveReadProgress): SessionProgress {
+  const planned = progress.phase === 'extract' ? progress.plannedEntries ?? 0 : 0
   return {
     phase: 'reading',
     filesDone: progress.extractedEntries,
-    filesTotal: 0,
+    filesTotal: planned,
     findings: 0,
     detail:
       progress.phase === 'walk'
         ? `Checking archive entries: ${progress.walkedRecords} record(s) read.`
-        : `Extracting: ${progress.extractedEntries} file(s) read, ${progress.producedBytes} bytes decoded.`,
+        : planned > 0
+          ? `Extracting: ${progress.extractedEntries} of ${planned} file(s), ${formatDecodedBytes(progress.producedBytes)} decoded.`
+          : `Extracting: ${progress.extractedEntries} file(s) read, ${formatDecodedBytes(progress.producedBytes)} decoded.`,
   }
 }
 
@@ -216,6 +236,50 @@ function describeRefusal(read: ArchiveReadResult): string {
   return read.note ? `${read.note} ${refusal.message}` : refusal.message
 }
 
+const CANCELLED_BEFORE_ANALYSIS =
+  'You cancelled before the pattern rules ran, so the files that had already been read are listed below as not analysed.'
+
+/**
+ * A cancel that lands while the reader is still working keeps the files it had read, but running
+ * rules on an aborted signal would produce a half-filled report that looks complete. The honest
+ * result lists those files as read-but-not-analysed and says why.
+ */
+function partialBeforeAnalysis(
+  entries: readonly ArchiveEntry[],
+  skipped: readonly ArchiveSkippedEntry[],
+  stats: ArchiveReadStats,
+  partial: ArchivePartialStop,
+  options: AnalyzeUploadOptions,
+  note: string | null,
+): AnalysisSessionResult {
+  const unanalysed: ArchiveSkippedEntry[] = entries.map((entry) => ({
+    name: entry.name,
+    code: 'not_reached',
+    message: archiveReasonMessage('not_reached', entry.name, 'you cancelled before analysis started'),
+  }))
+  const allSkipped = [...skipped, ...unanalysed]
+  const report = buildReport({
+    generatedAt: options.generatedAt ?? new Date(),
+    archiveBytes: options.archiveBytes,
+    entries: [],
+    skipped: allSkipped,
+    analyses: [],
+    coverage: buildCoverage([], allSkipped, []),
+    extraLimitations: [...(note ? [note] : []), partial.message, CANCELLED_BEFORE_ANALYSIS],
+    partial,
+  })
+  return {
+    status: 'partial',
+    message: partial.message,
+    report,
+    stats,
+    sources: [],
+    retention: 'findings',
+    skipped: allSkipped,
+    partial,
+  }
+}
+
 /**
  * Reads the upload, runs the pattern rules in the analyzer worker, then the optional TypeScript
  * syntax check, and returns a report. The analysed text is returned only as in-memory sources
@@ -232,6 +296,7 @@ export async function analyzeUpload(
     limits: options.limits ?? DEFAULT_ARCHIVE_LIMITS,
     signal,
     includeGenerated: options.includeGenerated === true,
+    keepPartial: true,
     onProgress: (progress: ArchiveReadProgress) => emit(readingProgress(progress)),
   }
 
@@ -241,6 +306,7 @@ export async function analyzeUpload(
   let skipped: readonly ArchiveSkippedEntry[]
   let stats: ArchiveReadStats
   let note: string | null = null
+  let partial: ArchivePartialStop | null = null
 
   if (input.kind === 'pre-read') {
     entries = input.entries
@@ -249,26 +315,32 @@ export async function analyzeUpload(
   } else {
     let read: ArchiveReadResult
     try {
-      read =
-        input.kind === 'archive'
-          ? await (deps.readArchive ?? defaultReadArchive)(input.bytes, { ...readOptions, name: input.name ?? '' })
-          : await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
+      if (input.kind === 'archive') {
+        const payload = input.file ?? input.bytes
+        if (!payload) return failed('error', 'The upload held no file to read.', null)
+        read = await (deps.readArchive ?? defaultReadArchive)(payload, { ...readOptions, name: input.name ?? '' })
+      } else {
+        read = await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
+      }
     } catch (error) {
       if (isStaleHandleError(error)) {
         return { status: 'error', message: STALE_HANDLE_MESSAGE, report: null, stats: null, handleStale: true }
       }
       return failed('error', describeStartError(error), null)
     }
-    if (signal?.aborted) return cancelled()
     if (read.refusal) {
       if (read.refusal.code === 'cancelled') return cancelled()
       return failed('refused', describeRefusal(read), read.stats)
     }
+    if (signal?.aborted && !read.partial) return cancelled()
     entries = read.entries
     skipped = input.kind === 'files' ? [...(input.notes ?? []), ...read.skipped] : read.skipped
     stats = read.stats
     note = read.note ?? null
+    partial = read.partial ?? null
   }
+
+  if (partial && signal?.aborted) return partialBeforeAnalysis(entries, skipped, stats, partial, options, note)
 
   // Sensitive names are judged before generated files are set aside: a credential file BugPilot
   // will not analyse is still worth reporting, and most of those rules need no content at all.
@@ -392,6 +464,7 @@ export async function analyzeUpload(
   const extraLimitations: string[] = [
     ...(note ? [note] : []),
     ...(notebookNote ? [notebookNote] : []),
+    ...(partial ? [partial.message] : []),
   ]
 
   if (engineFiles.length > 0 && options.engines === 'approved') {
@@ -457,18 +530,20 @@ export async function analyzeUpload(
     analyses,
     coverage,
     extraLimitations,
+    partial,
   })
 
   const retained = retainedSources(entries, analyses, options.maxRetainedBytes ?? MAX_RETAINED_TEXT_BYTES)
 
   return {
-    status: 'completed',
-    message: null,
+    status: partial ? 'partial' : 'completed',
+    message: partial ? partial.message : null,
     report,
     stats,
     sources: retained.sources,
     retention: retained.retention,
     skipped,
+    partial,
   }
 }
 

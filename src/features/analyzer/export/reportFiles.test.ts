@@ -120,6 +120,31 @@ describe('report export', () => {
     expect(markdown).toContain('Code snippets in this export: yes')
   })
 
+  it('marks a partial report at the top and keeps the marker in the exported data', () => {
+    const partial: AnalyzerReport = {
+      ...REPORT,
+      session: {
+        ...REPORT.session,
+        partial: {
+          code: 'total_uncompressed_exceeded',
+          message: 'BugPilot reached its 600 MiB unpacking budget.',
+          analysedFiles: 1,
+          plannedFiles: 2,
+          unreachedFiles: 1,
+          producedBytes: 20,
+          plannedBytes: 40,
+        },
+      },
+    }
+    const markdown = renderReportMarkdown(reportForExport(partial, false))
+
+    expect(markdown.indexOf('**PARTIAL REPORT.**')).toBeLessThan(markdown.indexOf('Generated:'))
+    expect(markdown).toContain('1 of 2 planned file(s) were analysed; 1 file(s) were not reached.')
+    expect(JSON.parse(JSON.stringify(reportForExport(partial, false))).session.partial.code).toBe(
+      'total_uncompressed_exceeded',
+    )
+  })
+
   it('gives the downloaded pair a safe timestamped stem', () => {
     expect(reportFileStem('2026-02-03T04:05:06.000Z')).toBe(
       'bugpilot-analysis-2026-02-03T04-05-06-000Z',

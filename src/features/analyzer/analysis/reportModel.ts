@@ -1,6 +1,6 @@
 import type { Severity } from '../../bugs/types'
 import type { ArchiveEntry, ArchiveSkippedEntry } from '../archive/guard'
-import type { AnalyzerFinding, AnalyzerReport, AnalyzerSummary, AnalyzerTier, FileCoverage } from '../types'
+import type { AnalyzerFinding, AnalyzerPartialInfo, AnalyzerReport, AnalyzerSummary, AnalyzerTier, FileCoverage } from '../types'
 import type { FileAnalysis } from './engine'
 
 export const REPORT_LIMITATIONS = [
@@ -45,6 +45,8 @@ export interface ReportBuildInput {
   coverage: readonly FileCoverage[]
   /** Engine-specific honesty lines: what did not run this time, and why. */
   extraLimitations?: readonly string[]
+  /** Set when the reader stopped early and kept what it had. */
+  partial?: AnalyzerPartialInfo | null
 }
 
 export function buildReport(input: ReportBuildInput): AnalyzerReport {
@@ -59,6 +61,7 @@ export function buildReport(input: ReportBuildInput): AnalyzerReport {
       analysedCount: input.entries.length,
       skippedCount: input.skipped.length,
       skipped: input.skipped.map((item) => ({ file: item.name, reason: item.message })),
+      ...(input.partial ? { partial: { ...input.partial } } : {}),
     },
     summary: summarizeFindings(findings),
     findings,

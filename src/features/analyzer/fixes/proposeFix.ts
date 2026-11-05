@@ -43,20 +43,34 @@ export interface ProposedFixes {
   byFinding: Map<string, FixCandidate>
 }
 
+export interface ProposeLimits {
+  /** Stop proposing after this many candidates; the default is every finding. */
+  maxCandidates?: number
+  /** Stop proposing when the files copied for verification pass this many bytes. */
+  maxCandidateSourceBytes?: number
+}
+
 export function proposeFixes(
   findings: readonly AnalyzerFinding[],
   sources: readonly ArchiveEntry[],
+  limits: ProposeLimits = {},
 ): ProposedFixes {
   const byName = new Map(sources.map((source) => [source.name, source]))
   const candidates: FixCandidate[] = []
   const byFinding = new Map<string, FixCandidate>()
+  const maxCandidates = limits.maxCandidates ?? Number.POSITIVE_INFINITY
+  const maxBytes = limits.maxCandidateSourceBytes ?? Number.POSITIVE_INFINITY
+  let copiedBytes = 0
 
   for (const finding of findings) {
+    if (candidates.length >= maxCandidates) break
     const source = byName.get(finding.file)
     if (!source) continue
+    if (candidates.length > 0 && copiedBytes + source.bytes > maxBytes) break
     const candidate = proposeFix(finding, source)
     if (!candidate) continue
     candidates.push(candidate)
+    copiedBytes += source.bytes
     byFinding.set(finding.id, candidate)
   }
 

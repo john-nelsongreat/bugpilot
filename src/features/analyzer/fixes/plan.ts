@@ -1,7 +1,7 @@
 import type { ArchiveEntry } from '../archive/guard'
 import type { AnalyzerFinding } from '../types'
 import { verifyFixCandidates, type VerifyFixesDeps } from '../analysis/verifyFixes'
-import { proposeFixes } from './proposeFix'
+import { proposeFixes, type ProposeLimits } from './proposeFix'
 import { resolveFixOverlaps } from './text'
 import type { FixCandidate, FixDrop } from './types'
 
@@ -20,8 +20,9 @@ export async function prepareFixPlan(
   sources: readonly ArchiveEntry[],
   deps: VerifyFixesDeps = {},
   signal?: AbortSignal,
+  limits: ProposeLimits = {},
 ): Promise<FixPlan> {
-  const proposed = proposeFixes(findings, sources)
+  const proposed = proposeFixes(findings, sources, limits)
   const resolution = resolveFixOverlaps(proposed.candidates)
   const outcome = await verifyFixCandidates(resolution.kept, sources, findings, deps, signal)
 

@@ -12,7 +12,12 @@ import {
   type UploadPreReadInput,
 } from '../features/analyzer/analysis/session'
 import type { SourceLanguage } from '../features/analyzer/archive/classify'
-import { limitsForDevice, MAX_RETAINED_TEXT_BYTES } from '../features/analyzer/archive/limits'
+import {
+  archiveCeilingFor,
+  HIGH_CAPACITY_DEVICE_MEMORY_GIB,
+  limitsForDevice,
+  MAX_RETAINED_TEXT_BYTES,
+} from '../features/analyzer/archive/limits'
 import { wallClockSeconds } from '../features/analyzer/archive/bounds'
 import { isContainerName } from '../features/analyzer/archive/format'
 import type { ArchiveReadStats } from '../features/analyzer/archive/guard'
@@ -55,8 +60,8 @@ interface PreparedUpload {
   /** The uploads this pass is built from, in the order the user added them. */
   uploads: readonly (readonly IntakeSource[])[]
   /**
-   * The same upload again. A zip's bytes are transferred to the reader worker, so the local
-   * copy is detached after the first pass and the file has to be re-read from the picker.
+   * The same upload again. A picked file is handed to the reader worker as a Blob, so the
+   * selection stays readable and a deep pass never depends on bytes this page held.
    */
   retry: () => Promise<PreparedUpload>
 }
@@ -67,10 +72,6 @@ export interface AnalyzePageProps {
   downloadReportFile?: DownloadReportFile
   prepareFixPlan?: PrepareFixPlan
   now?: () => Date
-}
-
-async function readFileBytes(file: File): Promise<Uint8Array> {
-  return new Uint8Array(await file.arrayBuffer())
 }
 
 function defaultDownloadReportFile(
@@ -89,6 +90,16 @@ function formatBytes(bytes: number): string {
   return `${Number.isInteger(mebibytes) ? mebibytes : mebibytes.toFixed(1)} MiB`
 }
 
+/** A rough remaining-time label. It is omitted until enough work has finished to mean anything. */
+function formatEta(progress: SessionProgress | null, elapsedMs: number): string | null {
+  if (!progress || progress.filesTotal <= 0 || progress.filesDone <= 0) return null
+  if (progress.filesDone === progress.filesTotal) return null
+  const remainingMs = (elapsedMs * (progress.filesTotal - progress.filesDone)) / progress.filesDone
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null
+  const seconds = Math.max(1, Math.round(remainingMs / 1_000))
+  return seconds >= 120 ? `about ${Math.ceil(seconds / 60)} min left` : `about ${seconds} s left`
+}
+
 /** Device Memory is a Chromium-only hint; an absent value means "use the normal ceilings". */
 function deviceMemoryGiB(): number | undefined {
   const reported = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
@@ -101,7 +112,7 @@ function cancelledResult(stats: ArchiveReadStats | null): AnalysisSessionResult 
 
 async function prepareFiles(
   files: readonly File[],
-  readFile: (file: File) => Promise<Uint8Array>,
+  readFile?: (file: File) => Promise<Uint8Array>,
 ): Promise<PreparedUpload> {
   if (files.length === 0) throw new Error('No files were selected.')
   // `File` objects stay readable, so a second pass re-reads the same selection.
@@ -109,6 +120,15 @@ async function prepareFiles(
   // The name only decides which pipeline an upload enters; the reader works the format out from
   // the bytes and reports a disagreement as a note.
   if (files.length === 1 && isContainerName(files[0].name)) {
+    if (readFile === undefined) {
+      // Production path: the Blob is cloned into the worker without copying its bytes here.
+      return {
+        input: { kind: 'archive', file: files[0], name: files[0].name },
+        archiveBytes: files[0].size,
+        uploads: [],
+        retry,
+      }
+    }
     const bytes = await readFile(files[0])
     return {
       input: { kind: 'archive', bytes, name: files[0].name },
@@ -128,9 +148,18 @@ async function prepareFiles(
 function fromSources(sources: readonly IntakeSource[]): () => Promise<PreparedUpload> {
   const prepare = async (): Promise<PreparedUpload> => {
     if (sources.length === 1 && isContainerName(sources[0].path)) {
-      const bytes = await sources[0].read()
+      const source = sources[0]
+      if (source.file) {
+        return {
+          input: { kind: 'archive', file: source.file, name: source.path },
+          archiveBytes: source.size,
+          uploads: [],
+          retry: prepare,
+        }
+      }
+      const bytes = await source.read()
       return {
-        input: { kind: 'archive', bytes, name: sources[0].path },
+        input: { kind: 'archive', bytes, name: source.path },
         archiveBytes: bytes.length,
         uploads: [],
         retry: prepare,
@@ -165,7 +194,7 @@ function prepareUploads(uploads: readonly (readonly IntakeSource[])[]): Prepared
 
 async function prepareDrop(
   transfer: DataTransfer,
-  readFile: (file: File) => Promise<Uint8Array>,
+  readFile?: (file: File) => Promise<Uint8Array>,
 ): Promise<PreparedUpload> {
   const files = Array.from(transfer.files)
   const sources = await sourcesFromDrop(transfer)
@@ -176,7 +205,7 @@ async function prepareDrop(
 
 export function AnalyzePage({
   analyze = analyzeUpload,
-  readFile = readFileBytes,
+  readFile,
   downloadReportFile = defaultDownloadReportFile,
   prepareFixPlan,
   now = () => new Date(),
@@ -187,6 +216,7 @@ export function AnalyzePage({
   const [dragActive, setDragActive] = useState(false)
   const [deepPass, setDeepPass] = useState(false)
   const [includeGenerated, setIncludeGenerated] = useState(false)
+  const [largeProjectMode, setLargeProjectMode] = useState(false)
   const [gateDismissed, setGateDismissed] = useState(false)
   /** The uploads the current run is built from, in the order the user added them. */
   const [uploads, setUploads] = useState<readonly (readonly IntakeSource[])[]>([])
@@ -197,6 +227,8 @@ export function AnalyzePage({
 
   const busyRef = useRef(false)
   const runTokenRef = useRef(0)
+  const runStartedRef = useRef(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
   const retryRef = useRef<(() => Promise<PreparedUpload>) | null>(null)
   /** The next picker or drop adds to the run instead of replacing it. */
@@ -237,7 +269,19 @@ export function AnalyzePage({
     }
   }, [running])
 
-  const limits = useMemo(() => limitsForDevice(deviceMemoryGiB()), [])
+  useEffect(() => {
+    if (!running) return
+    const timer = window.setInterval(() => setElapsedMs(Date.now() - runStartedRef.current), 1_000)
+    return () => window.clearInterval(timer)
+  }, [running])
+
+  const deviceMemory = deviceMemoryGiB()
+  const highCapacityDevice =
+    typeof deviceMemory === 'number' && deviceMemory >= HIGH_CAPACITY_DEVICE_MEMORY_GIB
+  const limits = useMemo(
+    () => limitsForDevice(deviceMemory, largeProjectMode),
+    [deviceMemory, largeProjectMode],
+  )
 
   const analysedLanguages = useMemo(() => {
     const found = new Set<SourceLanguage>()
@@ -300,7 +344,9 @@ export function AnalyzePage({
     busyRef.current = true
     const controller = new AbortController()
     abortRef.current = controller
+    runStartedRef.current = Date.now()
 
+    setElapsedMs(0)
     setRunning(true)
     setProgress(null)
     setResult(null)
@@ -352,8 +398,10 @@ export function AnalyzePage({
         else outcome = await analyze(held.input, { ...options, archiveBytes: held.archiveBytes })
       }
       if (runTokenRef.current !== token) return
+      // A cancel that arrives after the reader kept a partial result is not the same as an
+      // empty cancel: the worker answered with the files it had, and that answer is shown.
       const final =
-        controller.signal.aborted && outcome.status !== 'cancelled'
+        controller.signal.aborted && outcome.status !== 'cancelled' && outcome.status !== 'partial'
           ? cancelledResult(outcome.stats)
           : outcome
       setResult(final)
@@ -490,12 +538,12 @@ export function AnalyzePage({
   }
 
   const announcement =
-    result?.status === 'completed' && result.report
-      ? `Analysis complete. ${result.report.summary.findings} finding${
+    (result?.status === 'completed' || result?.status === 'partial') && result.report
+      ? `${result.status === 'partial' ? 'Partial analysis' : 'Analysis complete'}. ${result.report.summary.findings} finding${
           result.report.summary.findings === 1 ? '' : 's'
         } in ${result.report.session.analysedCount} analysed file${
           result.report.session.analysedCount === 1 ? '' : 's'
-        }.`
+        }${result.status === 'partial' ? '. Some files were not reached; the report says which.' : '.'}`
       : result?.status === 'refused'
         ? `Upload refused. ${result.message ?? ''}`
         : result?.status === 'error'
@@ -505,6 +553,7 @@ export function AnalyzePage({
             : ''
 
   const refusedOrFailed = result?.status === 'refused' || result?.status === 'error'
+  const eta = formatEta(progress, elapsedMs)
 
   return (
     <>
@@ -589,6 +638,27 @@ export function AnalyzePage({
               </span>
             </span>
           </label>
+
+          {highCapacityDevice ? (
+            <label className="analyze-option" htmlFor="analyze-large-project">
+              <input
+                id="analyze-large-project"
+                type="checkbox"
+                checked={largeProjectMode}
+                disabled={running}
+                onChange={(event) => setLargeProjectMode(event.target.checked)}
+              />
+              <span>
+                <strong>Large project mode</strong>
+                <span className="analyze-option-hint">
+                  For a machine that reports at least {HIGH_CAPACITY_DEVICE_MEMORY_GIB} GiB of memory:
+                  raises the zip, tar and text ceilings shown below. It also lets one read use more
+                  memory and more time, so the tab may slow down while a large upload is checked.
+                  Leave it off unless you need it.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           {intakeMode === 'upload' ? (
           <div
@@ -767,6 +837,11 @@ export function AnalyzePage({
                 <p className="field-hint">
                   {progress?.detail ?? 'Reading the selection inside this tab.'}
                 </p>
+                {eta ? (
+                  <p className="field-hint analyze-progress-eta" aria-live="off">
+                    {eta}
+                  </p>
+                ) : null}
                 {progress && progress.filesTotal > 0 ? (
                   <progress
                     className="analyze-progress-bar"
@@ -808,18 +883,32 @@ export function AnalyzePage({
 
           <div className="analyze-limits">
             <h3>Limits, applied before anything is analysed</h3>
+            <p className="field-hint">
+              Effective for this machine{largeProjectMode ? ' in large project mode' : ''}.
+            </p>
             <ul className="analyze-limit-list">
               <li>
-                Archive up to {formatBytes(limits.maxArchiveBytes)}; up to{' '}
-                {formatBytes(limits.maxTotalUncompressedBytes)} of decoded text in total.
+                Zip up to {formatBytes(archiveCeilingFor('zip', limits))}; tar and tar.gz up to{' '}
+                {formatBytes(archiveCeilingFor('tar', limits))}. A zip is read by seeking, so
+                dependency folders and binary files are skipped without being unpacked; a tar has
+                to be walked from start to end, so its ceiling is lower.
               </li>
               <li>
-                One file up to {formatBytes(limits.maxSingleFileUncompressedBytes)}; bigger files
-                are skipped with a reason instead of stopping the run.
+                Unpacking is capped at {formatBytes(limits.maxTotalUncompressedBytes)} of really
+                produced bytes, including files later skipped as binary. At most{' '}
+                {formatBytes(limits.maxAnalysableTextBytes)} of analysable text is collected for
+                one run.
+              </li>
+              <li>
+                A folder or a multi-file selection is capped at{' '}
+                {formatBytes(archiveCeilingFor('folder', limits))} of declared files, and one file
+                at {formatBytes(limits.maxSingleFileUncompressedBytes)}; a file bigger than that is
+                skipped with a reason instead of stopping the run.
               </li>
               <li>
                 Up to {limits.maxEntryCount.toLocaleString('en-US')} entries. Encrypted entries,
-                nested archives, symbolic links, unsafe paths and duplicate names are refused.
+                nested archives, symbolic links, unsafe paths, overlapping entries and duplicate
+                names are refused.
               </li>
               <li>
                 Binary files, empty files and dependency folders such as node_modules, .git or dist
@@ -838,8 +927,10 @@ export function AnalyzePage({
                 one file named <code>pasted/snippet.txt</code>.
               </li>
               <li>
-                Reading one upload gets {wallClockSeconds(limits)} seconds. Past that BugPilot stops
-                and keeps nothing, so a huge or deeply nested folder cannot hang the tab.
+                Reading one upload gets {wallClockSeconds(limits)} seconds. If that or the unpacking
+                budget runs out, BugPilot stops and keeps what it had read as a clearly labelled
+                partial report, so a huge folder cannot hang the tab or hide the files that were
+                reached.
               </li>
               <li>
                 The analysed text stays in this tab for the fix review while it fits{' '}
@@ -852,6 +943,7 @@ export function AnalyzePage({
       </section>
 
       {!running && result?.status === 'completed' && !deepPass && !gateDismissed && deepLanguages.length > 0 ? (
+
         <EngineGate
           languages={deepLanguages}
           onRun={handleRunDeep}
@@ -889,7 +981,7 @@ export function AnalyzePage({
         </section>
       ) : null}
 
-      {result?.status === 'completed' && result.report ? (
+      {(result?.status === 'completed' || result?.status === 'partial') && result.report ? (
         <AnalyzeResults
           key={result.report.generatedAt}
           report={result.report}

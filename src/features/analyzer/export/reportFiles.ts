@@ -41,6 +41,16 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
 
   push('# BugPilot code analysis report')
   push()
+  if (report.session.partial) {
+    const partial = report.session.partial
+    push(`> **PARTIAL REPORT.** ${escapeMarkdown(partial.message)}`)
+    push('>')
+    push(
+      `> ${partial.analysedFiles} of ${partial.plannedFiles} planned file(s) were analysed; ` +
+        `${partial.unreachedFiles} file(s) were not reached. The coverage table names every file.`,
+    )
+    push()
+  }
   push(`Generated: ${report.generatedAt}`)
   push()
   push(`- Files analysed: ${report.session.analysedCount} of ${report.session.fileCount}`)

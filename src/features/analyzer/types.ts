@@ -63,12 +63,25 @@ export interface FileCoverage {
   notes: string[]
 }
 
+/** Present only when the upload stopped early and what was read was kept. */
+export interface AnalyzerPartialInfo {
+  code: string
+  message: string
+  analysedFiles: number
+  plannedFiles: number
+  unreachedFiles: number
+  producedBytes: number
+  plannedBytes: number
+}
+
 export interface AnalyzerSession {
   archiveBytes: number
   fileCount: number
   analysedCount: number
   skippedCount: number
   skipped: { file: string; reason: string }[]
+  /** A partial report says so in its own data, not only in its prose. */
+  partial?: AnalyzerPartialInfo
 }
 
 export interface AnalyzerSummary {

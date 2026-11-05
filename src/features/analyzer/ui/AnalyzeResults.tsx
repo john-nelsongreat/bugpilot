@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { Download, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Download, RotateCcw } from 'lucide-react'
 import type { Severity } from '../../bugs/types'
 import type { ArchiveEntry } from '../archive/guard'
 import type { DownloadReportFile } from '../export/reportFiles'
@@ -19,10 +19,24 @@ export type PrepareFixPlan = (
 ) => Promise<FixPlan>
 
 const defaultPrepareFixPlan: PrepareFixPlan = (findings, sources, signal) =>
-  prepareFixPlanDefault(findings, sources, {}, signal)
+  prepareFixPlanDefault(findings, sources, {}, signal, {
+    maxCandidates: MAX_PLAN_FINDINGS,
+    maxCandidateSourceBytes: MAX_PLAN_TEXT_BYTES,
+  })
 
 const EMPTY_SOURCES: readonly ArchiveEntry[] = []
 const EMPTY_PLAN: FixPlan = { available: [], unavailable: new Map(), dropped: [] }
+
+/** Rendering every card of a 20,000-finding report is what froze the page; these caps keep it alive. */
+const FINDINGS_PAGE_SIZE = 40
+const COVERAGE_PAGE_SIZE = 100
+
+/**
+ * Fix planning copies each file once per candidate and re-runs the analyzers on those copies.
+ * A bounded slice keeps that work and its memory in proportion to what a user can act on.
+ */
+const MAX_PLAN_FINDINGS = 200
+const MAX_PLAN_TEXT_BYTES = 8 * 1024 * 1024
 
 const SEVERITY_OPTIONS: readonly Severity[] = ['Critical', 'High', 'Medium', 'Low']
 
@@ -229,6 +243,8 @@ export function AnalyzeResults({
 }: AnalyzeResultsProps) {
   const [severity, setSeverity] = useState<'all' | Severity>('all')
   const [file, setFile] = useState('all')
+  const [findingLimit, setFindingLimit] = useState(FINDINGS_PAGE_SIZE)
+  const [coverageLimit, setCoverageLimit] = useState(COVERAGE_PAGE_SIZE)
   const [includeSnippets, setIncludeSnippets] = useState(false)
   const [exportStatus, setExportStatus] = useState<string | null>(null)
   const [planState, setPlanState] = useState<PlanState | null>(null)
@@ -312,7 +328,11 @@ export function AnalyzeResults({
     (finding) =>
       (severity === 'all' || finding.severity === severity) && (file === 'all' || finding.file === file),
   )
-  const groups = findingGroups(filtered)
+  const visibleFindings = filtered.slice(0, findingLimit)
+  const groups = findingGroups(visibleFindings)
+  const hiddenFindings = filtered.length - visibleFindings.length
+  const visibleCoverage = report.coverage.slice(0, coverageLimit)
+  const hiddenCoverage = report.coverage.length - visibleCoverage.length
 
   const analysedLanguages = useMemo(() => {
     const languages = new Set(
@@ -341,9 +361,12 @@ export function AnalyzeResults({
     <section className="analyze-results" aria-labelledby="analyze-results-heading">
       <header className="analyze-results-head">
         <div>
-          <p className="eyebrow">Static analysis complete</p>
+          <p className="eyebrow">
+            {report.session.partial ? 'Static analysis partial' : 'Static analysis complete'}
+          </p>
           <h2 id="analyze-results-heading" ref={headingRef} tabIndex={-1}>
-            Results for {report.session.analysedCount} file
+            {report.session.partial ? 'Partial results for' : 'Results for'}{' '}
+            {report.session.analysedCount} file
             {report.session.analysedCount === 1 ? '' : 's'}
           </h2>
           <p className="field-hint">
@@ -356,6 +379,24 @@ export function AnalyzeResults({
           Clear results
         </button>
       </header>
+
+      {report.session.partial ? (
+        <div className="notice notice--alert analyze-partial" role="alert">
+          <AlertTriangle size={20} aria-hidden="true" />
+          <div>
+            <strong>Partial report — this is not the whole upload</strong>
+            <p>{sanitizeForDisplay(report.session.partial.message)}</p>
+            <p className="field-hint">
+              {report.session.partial.analysedFiles} of {report.session.partial.plannedFiles} planned
+              file{report.session.partial.plannedFiles === 1 ? '' : 's'} analysed;{' '}
+              {report.session.partial.unreachedFiles} file
+              {report.session.partial.unreachedFiles === 1 ? '' : 's'} not reached. Every unreached
+              file is named in the coverage table with the reason. The exported report and clean
+              export carry the same partial marker.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="analyze-stats" role="group" aria-label="Analysis summary">
         <div className="analyze-stat">
@@ -429,6 +470,13 @@ export function AnalyzeResults({
               Each proposed change was applied to a copy and verified by re-running the analyzers.
               Your files are never modified and your upload is not saved.
             </p>
+            {report.findings.length > MAX_PLAN_FINDINGS ? (
+              <p className="field-hint">
+                Automatic changes are planned for at most the first {MAX_PLAN_FINDINGS} findings in
+                a report this large, so the tab stays responsive. The remaining findings keep their
+                explained manual direction.
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="analyze-body">
@@ -526,7 +574,10 @@ export function AnalyzeResults({
                   <select
                     id="analyze-severity-filter"
                     value={severity}
-                    onChange={(event) => setSeverity(event.target.value as 'all' | Severity)}
+                    onChange={(event) => {
+                      setSeverity(event.target.value as 'all' | Severity)
+                      setFindingLimit(FINDINGS_PAGE_SIZE)
+                    }}
                   >
                     <option value="all">All severities</option>
                     {SEVERITY_OPTIONS.map((option) => (
@@ -541,7 +592,10 @@ export function AnalyzeResults({
                   <select
                     id="analyze-file-filter"
                     value={file}
-                    onChange={(event) => setFile(event.target.value)}
+                    onChange={(event) => {
+                      setFile(event.target.value)
+                      setFindingLimit(FINDINGS_PAGE_SIZE)
+                    }}
                   >
                     <option value="all">All files with findings</option>
                     {findingFiles.map((name) => {
@@ -560,6 +614,7 @@ export function AnalyzeResults({
                   onClick={() => {
                     setSeverity('all')
                     setFile('all')
+                    setFindingLimit(FINDINGS_PAGE_SIZE)
                   }}
                   disabled={!filtersActive}
                 >
@@ -570,6 +625,13 @@ export function AnalyzeResults({
                 Showing {filtered.length} of {report.findings.length} finding
                 {report.findings.length === 1 ? '' : 's'}.
               </p>
+
+              {hiddenFindings > 0 ? (
+                <p className="field-hint">
+                  The first {visibleFindings.length} matching findings are shown below; filters
+                  apply to the whole report.
+                </p>
+              ) : null}
 
               {groups.length > 0 ? (
                 groups.map(([name, findings]) => (
@@ -604,6 +666,17 @@ export function AnalyzeResults({
                   No findings match these filters. Reset them to see the whole report.
                 </p>
               )}
+
+              {hiddenFindings > 0 ? (
+                <button
+                  type="button"
+                  className="button button--secondary analyze-show-more"
+                  onClick={() => setFindingLimit((current) => current + FINDINGS_PAGE_SIZE)}
+                >
+                  Show {Math.min(FINDINGS_PAGE_SIZE, hiddenFindings)} more finding
+                  {Math.min(FINDINGS_PAGE_SIZE, hiddenFindings) === 1 ? '' : 's'}
+                </button>
+              ) : null}
             </>
           ) : (
             <div className="analyze-no-findings">
@@ -631,7 +704,7 @@ export function AnalyzeResults({
               {report.session.skippedCount} skipped
             </summary>
             <ul className="analyze-coverage-list">
-              {report.coverage.map((entry) => (
+              {visibleCoverage.map((entry) => (
                 <li key={entry.file} className="analyze-coverage-item">
                   <div className="analyze-coverage-head">
                     <FileName name={entry.file} />
@@ -668,6 +741,16 @@ export function AnalyzeResults({
                 </li>
               ))}
             </ul>
+            {hiddenCoverage > 0 ? (
+              <button
+                type="button"
+                className="button button--secondary analyze-show-more"
+                onClick={() => setCoverageLimit((current) => current + COVERAGE_PAGE_SIZE)}
+              >
+                Show {Math.min(COVERAGE_PAGE_SIZE, hiddenCoverage)} more file
+                {Math.min(COVERAGE_PAGE_SIZE, hiddenCoverage) === 1 ? '' : 's'}
+              </button>
+            ) : null}
           </details>
         </div>
       </section>

@@ -181,8 +181,8 @@ describe('Analyze page', () => {
 
     expect(screen.getByRole('heading', { name: 'Analyze code', level: 1 })).toBeVisible()
     expect(screen.getByText(/Local analysis only/)).toBeVisible()
-    expect(screen.getByText(/Archive up to 25 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 5,000 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 250 MiB/)).toBeVisible()
+    expect(screen.getByText(/Up to 20,000 entries/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose files' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose a folder' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'No files checked yet' })).toBeVisible()
@@ -203,7 +203,7 @@ describe('Analyze page', () => {
     selectFiles([new File(['const x = 1\n'], 'app.ts', { type: 'text/plain' })])
 
     const resultsHeading = await screen.findByRole('heading', { name: 'Results for 2 files' })
-    expect(resultsHeading).toHaveFocus()
+    await waitFor(() => expect(resultsHeading).toHaveFocus())
 
     const [input, options] = analyze.mock.calls[0]
     expect(input.kind).toBe('files')
@@ -229,6 +229,50 @@ describe('Analyze page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Reset filters' }))
     expect(screen.getByText('Possible AWS access key id.')).toBeVisible()
+
+    expect(await getAxeViolations(container)).toEqual([])
+  })
+
+  it('renders a partial report as partial and names the files that were not reached', async () => {
+    const report = makeReport()
+    report.session.partial = {
+      code: 'wall_clock_exceeded',
+      message: 'BugPilot reached its 300 second reading limit.',
+      analysedFiles: 2,
+      plannedFiles: 3,
+      unreachedFiles: 1,
+      producedBytes: 64,
+      plannedBytes: 80,
+    }
+    const analyze = vi.fn<AnalyzeFunction>(async () => ({
+      status: 'partial',
+      message: 'BugPilot reached its 300 second reading limit.',
+      report,
+      stats: STATS,
+      partial: {
+        code: 'wall_clock_exceeded',
+        message: 'BugPilot reached its 300 second reading limit.',
+        analysedFiles: 2,
+        plannedFiles: 3,
+        unreachedFiles: 1,
+        producedBytes: 64,
+        plannedBytes: 80,
+      },
+    }))
+    const { container } = render(
+      <AnalyzePage analyze={analyze} readFile={async () => new Uint8Array([1])} />,
+    )
+
+    selectFiles([new File(['const x = 1\n'], 'app.ts', { type: 'text/plain' })])
+
+    expect(
+      await screen.findByRole('heading', { name: 'Partial results for 2 files' }),
+    ).toBeVisible()
+    expect(screen.getByText('Partial report — this is not the whole upload')).toBeVisible()
+    expect(screen.getByText(/2 of 3 planned files analysed; 1 file not reached/)).toBeVisible()
+    expect(screen.getByText(/The exported report and clean export carry the same partial marker/)).toBeVisible()
+    // A partial run never offers the deep-engine gate, which would imply a complete first pass.
+    expect(screen.queryByRole('heading', { name: /deep/i })).not.toBeInTheDocument()
 
     expect(await getAxeViolations(container)).toEqual([])
   })
@@ -331,6 +375,34 @@ describe('Analyze page', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('The uploaded file could not be read.')
   })
 
+  it('shows a rough time remaining once the run has been going for a second', async () => {
+    let finish: (result: AnalysisSessionResult) => void = () => {}
+    const analyze: AnalyzeFunction = (_input, options) => {
+      options.onProgress?.({
+        phase: 'rules',
+        filesDone: 1,
+        filesTotal: 4,
+        findings: 0,
+        detail: 'Pattern rules: 1 of 4 file(s) checked.',
+      })
+      return new Promise<AnalysisSessionResult>((resolve) => {
+        finish = resolve
+      })
+    }
+
+    render(<AnalyzePage analyze={analyze} readFile={async () => new Uint8Array([1])} />)
+    selectFiles([new File(['const x = 1\n'], 'app.ts', { type: 'text/plain' })])
+
+    expect(await screen.findByText('Pattern rules: 1 of 4 file(s) checked.')).toBeVisible()
+    expect(screen.getByRole('progressbar', { name: '1 of 4 files' })).toBeVisible()
+    // No estimate before the elapsed timer has ticked: a finished read must never claim a time.
+    expect(screen.queryByText(/left$/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/about \d+ s left/)).toBeVisible()
+
+    finish({ status: 'cancelled', message: null, report: null, stats: null })
+    expect(await screen.findByText('Analysis cancelled')).toBeVisible()
+  })
+
   it('cancels a run in progress and keeps nothing', async () => {
     const user = userEvent.setup()
     const analyze: AnalyzeFunction = (_input, options) =>
@@ -353,9 +425,11 @@ describe('Analyze page', () => {
     selectFiles([new File(['const x = 1\n'], 'app.ts', { type: 'text/plain' })])
 
     expect(await screen.findByText('Running BugPilot rules')).toBeVisible()
+    const cancelStarted = Date.now()
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(await screen.findByText('Analysis cancelled')).toBeVisible()
+    expect(Date.now() - cancelStarted).toBeLessThan(2_000)
     expect(screen.queryByRole('heading', { name: /Results for/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
   })
