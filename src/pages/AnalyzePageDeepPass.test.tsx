@@ -145,8 +145,8 @@ describe('Analyze page deep pass and memory ceilings', () => {
     const analyze = vi.fn<AnalyzeFunction>(async () => ({ status: 'cancelled', message: null, report: null, stats: STATS }))
     render(<AnalyzePage analyze={analyze} />)
 
-    expect(screen.getByText(/Archive up to 12\.5 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 2,500 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 125 MiB/)).toBeVisible()
+    expect(screen.getByText(/Up to 10,000 entries/)).toBeVisible()
 
     selectFiles([new File(['hello\n'], 'notes.txt', { type: 'text/plain' })])
     await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))
@@ -208,6 +208,28 @@ describe('Analyze page deep pass and memory ceilings', () => {
     await waitFor(() => expect(analyze).toHaveBeenCalledTimes(3))
 
     expect(asPreRead(analyze.mock.calls[2][0]).entries).toEqual(entries)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('re-streams the archive for a deep pass when the first pass kept no text', async () => {
+    const analyze = vi.fn<AnalyzeFunction>()
+    const entries = [entry('scripts/a.py', 'a = 1\n')]
+    analyze.mockResolvedValueOnce(droppedText(entries)).mockResolvedValueOnce(kept(entries))
+    render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)
+
+    const archive = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'project.zip', {
+      type: 'application/zip',
+    })
+    selectFiles([archive])
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run deep analysis' }))
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(2))
+
+    const second = analyze.mock.calls[1][0]
+    if (second.kind !== 'archive') throw new Error(`expected the archive pipeline, got "${second.kind}"`)
+    expect(second.file).toBe(archive)
+    expect(second.bytes).toBeUndefined()
+    expect(analyze.mock.calls[1][1].engines).toBe('approved')
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

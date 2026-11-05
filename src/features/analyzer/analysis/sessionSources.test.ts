@@ -81,6 +81,82 @@ describe('session sources', () => {
     expect(result.sources).toBeUndefined()
   })
 
+  it('labels a report partial and keeps the files the reader reached', async () => {
+    const entries = [entry('src/a.js', 'export const a = 1\n')]
+    const result = await analyzeUpload(
+      { kind: 'files', sources: [{ path: 'src/a.js', size: 19, read: async () => new Uint8Array() }] },
+      { archiveBytes: 19 },
+      {
+        readLoose: async () => ({
+          ...readResult(entries),
+          skipped: [{ name: 'src/b.js', code: 'not_reached', message: 'src/b.js was not reached.' }],
+          partial: {
+            code: 'wall_clock_exceeded',
+            message: 'BugPilot reached its 300 second reading limit.',
+            analysedFiles: 1,
+            plannedFiles: 2,
+            unreachedFiles: 1,
+            producedBytes: 19,
+            plannedBytes: 19,
+          },
+        }),
+        analyzer,
+      },
+    )
+
+    expect(result.status).toBe('partial')
+    expect(result.partial?.code).toBe('wall_clock_exceeded')
+    expect(result.report?.session.partial).toMatchObject({ analysedFiles: 1, plannedFiles: 2 })
+    expect(result.report?.limitations).toContain('BugPilot reached its 300 second reading limit.')
+    expect(result.sources).toEqual(entries)
+  })
+
+  it('keeps a partial report when the cancel lands while the reader still had files to read', async () => {
+    const controller = new AbortController()
+    const result = await analyzeUpload(
+      { kind: 'files', sources: [] },
+      { archiveBytes: 2, signal: controller.signal },
+      {
+        readLoose: async () => {
+          controller.abort()
+          return {
+            refusal: null,
+            entries: [entry('src/a.js', 'x\n')],
+            skipped: [{ name: 'src/b.js', code: 'not_reached', message: 'src/b.js was not reached.' }],
+            stats: {
+              walkedRecords: 2,
+              producedBytes: 2,
+              entries: 1,
+              skipped: 1,
+              durationMs: 1,
+              peakEntryBytes: 2,
+            },
+            partial: {
+              code: 'cancelled',
+              message: 'You cancelled the upload.',
+              analysedFiles: 1,
+              plannedFiles: 2,
+              unreachedFiles: 1,
+              producedBytes: 2,
+              plannedBytes: 2,
+            },
+          }
+        },
+      },
+    )
+
+    expect(result.status).toBe('partial')
+    expect(result.report?.session.analysedCount).toBe(0)
+    // Nothing was run under an aborted signal: both files are listed as skipped, with the
+    // cancellation explained instead of a findings section that looks complete.
+    expect(result.report?.coverage.map((item) => [item.file, item.status])).toEqual([
+      ['src/b.js', 'skipped'],
+      ['src/a.js', 'skipped'],
+    ])
+    expect(result.report?.coverage[1].skipReason).toContain('cancelled before analysis')
+    expect(result.sources).toEqual([])
+  })
+
   it('does not return sources when the run is cancelled', async () => {
     const controller = new AbortController()
     controller.abort()
