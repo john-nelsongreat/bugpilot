@@ -25,14 +25,80 @@ export interface AnalyzerClient {
   analyze(entries: readonly ArchiveEntry[], options?: AnalyzerRunOptions): Promise<AnalyzerRunResult>
 }
 
+export interface DisposableAnalyzerClient extends AnalyzerClient {
+  /** Stops a persistent worker; a non-persistent client already terminated its own. */
+  dispose: () => void
+}
+
 type WorkerFactory = () => AnalyzerWorkerHandle
 
+export interface AnalyzerClientOptions {
+  /**
+   * Keep one worker alive across analyze calls instead of spawning and terminating one per
+   * job. The worker pool uses this so a large run does not pay a fresh worker startup for
+   * every chunk; the pool calls `dispose` when the run ends.
+   */
+  persistent?: boolean
+}
+
+interface JobState {
+  id: number
+  onProgress?: (progress: AnalysisProgress) => void
+  pendingFiles: FileAnalysis[]
+  collected: FileAnalysis[]
+  sawBatch: boolean
+  doneMessage: Extract<AnalyzerResponse, { type: 'done' }> | null
+  draining: boolean
+  finish: (result: AnalyzerRunResult) => void
+}
+
 /**
- * One job at a time. The worker is terminated when the job ends so decoded source strings
- * are released instead of sitting in a live worker.
+ * Large results arrive in slices; accumulation yields to the main thread between them, so
+ * receiving a 40,000-file analysis cannot pin the page.
  */
-export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
+function drain(state: JobState): void {
+  if (state.draining) return
+  state.draining = true
+  const step = (): void => {
+    if (state.pendingFiles.length === 0) {
+      state.draining = false
+      if (state.doneMessage !== null) {
+        state.finish({
+          files: state.sawBatch ? state.collected : state.doneMessage.result.files,
+          cancelled: state.doneMessage.result.cancelled,
+          error: state.doneMessage.error,
+        })
+      }
+      return
+    }
+    state.collected.push(...state.pendingFiles.splice(0, state.pendingFiles.length))
+    void yieldToMain().then(step)
+  }
+  step()
+}
+
+/**
+ * One job at a time. A non-persistent client terminates its worker when the job ends so
+ * decoded source strings are released instead of sitting in a live worker.
+ */
+export function createAnalyzerClient(
+  getWorker: WorkerFactory,
+  factoryOptions?: AnalyzerClientOptions,
+): DisposableAnalyzerClient {
+  const persistent = factoryOptions?.persistent === true
   let busy = false
+  let handle: AnalyzerWorkerHandle | null = null
+  let listenersBound = false
+  let jobCounter = 0
+  let job: JobState | null = null
+
+  function terminateWorker(): void {
+    if (handle === null) return
+    handle.terminate()
+    handle = null
+    listenersBound = false
+    job = null
+  }
 
   return {
     analyze(entries, options = {}) {
@@ -45,9 +111,8 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
       }
       busy = true
 
-      let worker: AnalyzerWorkerHandle | null = null
       try {
-        worker = getWorker()
+        handle ??= getWorker()
       } catch (error) {
         busy = false
         return Promise.resolve<AnalyzerRunResult>({
@@ -56,76 +121,71 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
           error: error instanceof Error ? error.message : 'The analyzer could not start.',
         })
       }
+      const worker = handle
 
-      const id = 1
-      const handle = worker
+      if (!listenersBound) {
+        listenersBound = true
+        worker.addEventListener('message', (event) => {
+          const current = job
+          const message = (event as { data?: AnalyzerResponse }).data
+          if (!message || typeof message !== 'object' || current === null || message.id !== current.id) return
+          if (message.type === 'progress') {
+            current.onProgress?.(message.progress)
+            return
+          }
+          if (message.type === 'batch') {
+            current.sawBatch = true
+            current.pendingFiles.push(...message.files)
+            drain(current)
+            return
+          }
+          if (message.type === 'done') {
+            current.doneMessage = message
+            drain(current)
+          }
+        })
+        worker.addEventListener('error', () => {
+          const current = job
+          if (current === null) return
+          current.finish({
+            files: [],
+            cancelled: false,
+            error: 'The analyzer stopped unexpectedly. Nothing was stored.',
+          })
+          terminateWorker()
+        })
+      }
+
+      const id = ++jobCounter
       return new Promise<AnalyzerRunResult>((resolve) => {
         let settled = false
-        const finish = (result: AnalyzerRunResult) => {
+        const finish = (result: AnalyzerRunResult): void => {
           if (settled) return
           settled = true
           options.signal?.removeEventListener('abort', onAbort)
-          handle.terminate()
+          if (job !== null && job.id === id) job = null
           busy = false
+          if (!persistent) terminateWorker()
           resolve(result)
+        }
+        const state: JobState = {
+          id,
+          onProgress: options.onProgress,
+          pendingFiles: [],
+          collected: [],
+          sawBatch: false,
+          doneMessage: null,
+          draining: false,
+          finish,
         }
         const onAbort = () => {
           try {
-            handle.postMessage({ type: 'cancel', id })
+            worker.postMessage({ type: 'cancel', id })
           } catch {
             finish({ files: [], cancelled: true, error: null })
           }
         }
-
-        // Large results arrive in slices; the accumulation yields to the main thread between
-        // them, so receiving a 40,000-file analysis cannot pin the page.
-        const pendingFiles: FileAnalysis[] = []
-        const collected: FileAnalysis[] = []
-        let sawBatch = false
-        let doneMessage: Extract<AnalyzerResponse, { type: 'done' }> | null = null
-        let draining = false
-        function drain(): Promise<void> {
-          if (draining) return Promise.resolve()
-          draining = true
-          const step = (): Promise<void> => {
-            if (pendingFiles.length === 0) {
-              draining = false
-              if (doneMessage !== null) {
-                finish({
-                  files: sawBatch ? collected : doneMessage.result.files,
-                  cancelled: doneMessage.result.cancelled,
-                  error: doneMessage.error,
-                })
-              }
-              return Promise.resolve()
-            }
-            collected.push(...pendingFiles.splice(0, pendingFiles.length))
-            return yieldToMain().then(step)
-          }
-          return step()
-        }
-
-        handle.addEventListener('message', (event) => {
-          const message = (event as { data?: AnalyzerResponse }).data
-          if (!message || typeof message !== 'object') return
-          if (message.type === 'progress') {
-            options.onProgress?.(message.progress)
-            return
-          }
-          if (message.type === 'batch') {
-            sawBatch = true
-            pendingFiles.push(...message.files)
-            void drain()
-            return
-          }
-          if (message.type === 'done') {
-            doneMessage = message
-            void drain()
-          }
-        })
-        handle.addEventListener('error', () => {
-          finish({ files: [], cancelled: false, error: 'The analyzer stopped unexpectedly. Nothing was stored.' })
-        })
+        job = state
 
         if (options.signal?.aborted) {
           finish({ files: [], cancelled: true, error: null })
@@ -134,7 +194,7 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
         options.signal?.addEventListener('abort', onAbort, { once: true })
 
         try {
-          handle.postMessage({
+          worker.postMessage({
             type: 'analyze',
             id,
             entries: [...entries],
@@ -149,5 +209,6 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
         }
       })
     },
+    dispose: terminateWorker,
   }
 }

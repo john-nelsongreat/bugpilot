@@ -262,4 +262,50 @@ describe('analyzer worker client', () => {
     expect(result.error).toBeNull()
     expect(fake.terminated).toBe(true)
   })
+
+  it('keeps one worker alive across jobs and disposes it on demand', async () => {
+    const fake = makeWorker()
+    const client = createAnalyzerClient(() => fake.handle, { persistent: true })
+
+    const first = client.analyze([entry('src/a.js', 'x\n')], { limits })
+    respond(fake, {
+      type: 'done',
+      id: 1,
+      result: { files: [{ file: 'src/a.js', findings: [], notes: [], rulesRan: [], stoppedEarly: false }], cancelled: false },
+      error: null,
+    })
+    await expect(first).resolves.toMatchObject({ error: null })
+    expect(fake.terminated).toBe(false)
+
+    const second = client.analyze([entry('src/b.js', 'y\n')], { limits })
+    const posted = fake.posted.at(-1)?.message as { type: string; id: number }
+    expect(posted.type).toBe('analyze')
+    expect(posted.id).toBe(2)
+    respond(fake, { type: 'done', id: 2, result: { files: [], cancelled: false }, error: null })
+    await expect(second).resolves.toMatchObject({ error: null })
+    expect(fake.terminated).toBe(false)
+
+    client.dispose()
+    expect(fake.terminated).toBe(true)
+  })
+
+  it('ignores a late message addressed to a finished job', async () => {
+    const fake = makeWorker()
+    const client = createAnalyzerClient(() => fake.handle, { persistent: true })
+
+    const first = client.analyze([entry('src/a.js', 'x\n')], { limits })
+    respond(fake, { type: 'done', id: 1, result: { files: [], cancelled: false }, error: null })
+    await first
+
+    const second = client.analyze([entry('src/b.js', 'y\n')], { limits })
+    respond(fake, {
+      type: 'done',
+      id: 1,
+      result: { files: [{ file: 'stale.js', findings: [], notes: [], rulesRan: [], stoppedEarly: false }], cancelled: false },
+      error: null,
+    })
+    respond(fake, { type: 'done', id: 2, result: { files: [], cancelled: false }, error: null })
+    await expect(second).resolves.toMatchObject({ files: [], error: null })
+    client.dispose()
+  })
 })

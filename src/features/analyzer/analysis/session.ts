@@ -24,6 +24,7 @@ import { hasDeepEngine, isTsFamily } from '../languages'
 import type { AnalyzerFinding, AnalyzerReport, FileCoverage } from '../types'
 import type { AnalyzerClient } from './analyzerClient'
 import { createAnalyzerClient } from './analyzerClient'
+import { createAnalyzerPool, poolSizeFor } from './analyzerPool'
 import { buildCoverage, ENGINES_NOT_RUN_REASON, type EngineStatus, type TypeScriptStatus } from './coverage'
 import type { FileAnalysis } from './engine'
 import { makeFinding } from './finding'
@@ -193,8 +194,25 @@ async function defaultReadFiles(
   })
 }
 
+/**
+ * Dev-only measurement knob: `?bugpilotWorkers=N` forces the pool size so the 1/2/4-worker
+ * sweep can run against the same build. The production build never reads the query string.
+ */
+function forcedPoolSize(): number | null {
+  if (!import.meta.env.DEV) return null
+  const requested = new URLSearchParams(window.location.search).get('bugpilotWorkers')
+  const forced = requested === null ? Number.NaN : Number(requested)
+  return Number.isInteger(forced) && forced >= 1 && forced <= 8 ? forced : null
+}
+
 function defaultAnalyzer(): AnalyzerClient {
-  return createAnalyzerClient(() => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }))
+  return createAnalyzerPool(
+    () =>
+      createAnalyzerClient(() => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }), {
+        persistent: true,
+      }),
+    forcedPoolSize() ?? poolSizeFor(navigator.hardwareConcurrency),
+  )
 }
 
 /**
