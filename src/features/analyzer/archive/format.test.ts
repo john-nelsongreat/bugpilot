@@ -138,7 +138,7 @@ describe('detectFormat: gzip signatures', () => {
 
 describe('detectFormat: formats BugPilot refuses', () => {
   const refused: { kind: string; bytes: Uint8Array }[] = [
-    { kind: '7z', bytes: new Uint8Array([0x37, 0x7b, 0xa3, 0xab, 0x27, 0x1c, 0, 0]) },
+    { kind: '7z', bytes: new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 0]) },
     { kind: 'rar', bytes: new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0, 0]) },
     { kind: 'bz2', bytes: encoder.encode('BZh91AY&SY\0\0\0\0') },
     { kind: 'xz', bytes: new Uint8Array([0xfd, 0x37, 0x5a, 0x58, 0x5a, 0x00, 0xff, 0x00]) },
@@ -175,10 +175,43 @@ describe('detectFormat: formats BugPilot refuses', () => {
   })
 
   it('never decodes a refused format just because the name promises a zip', () => {
-    const detection = detectFormat(new Uint8Array([0x37, 0x7b, 0xa3, 0xab, 0x27, 0x1c, 0, 0]), 'archive.zip')
+    const detection = detectFormat(new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 0]), 'archive.zip')
     expect(detection.format).toBeNull()
     expect(detection.refusalSubject).toBe('7z')
     expect(detection.note).toContain('.zip')
+  })
+})
+
+describe('the signature table matches the published magics', () => {
+  // Each row is the real first bytes of a file that tool produces, written from the format
+  // specification rather than copied from this module, so a typo in the table cannot agree with
+  // itself. The 7z magic was wrong here for a whole slice: it is `37 7A BC AF 27 1C`.
+  const magics: { kind: string; bytes: number[] }[] = [
+    { kind: '7z', bytes: [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] },
+    { kind: 'rar', bytes: [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00] },
+    { kind: 'rar', bytes: [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00] },
+    { kind: 'bz2', bytes: [0x42, 0x5a, 0x68] },
+    { kind: 'xz', bytes: [0xfd, 0x37, 0x5a, 0x58, 0x5a, 0x00] },
+    { kind: 'zst', bytes: [0x28, 0xb5, 0x2f, 0xfd] },
+  ]
+
+  for (const magic of magics) {
+    it(`names a .${magic.kind} file by its real signature bytes`, () => {
+      const body = new Uint8Array([...magic.bytes, ...new Array(64).fill(0)])
+      const detection = detectFormat(body)
+
+      expect(detection.format).toBeNull()
+      expect(detection.refusalCode).toBe('unsupported_format')
+      expect(detection.refusalSubject).toBe(magic.kind)
+      expect(archiveReasonMessage('unsupported_format', detection.refusalSubject)).toContain(`.${magic.kind}`)
+    })
+  }
+
+  it('recognises the zip, gzip and tar magics it does decode', () => {
+    expect(detectFormat(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])).format).toBe('zip')
+    expect(detectFormat(new Uint8Array([0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0])).format).toBe('gzip')
+    expect(detectFormat(tarOf('src/app.js', 'export const a = 1\n')).format).toBe('tar')
+    expect(detectFormat(gzip('hello')).format).toBe('gzip')
   })
 })
 

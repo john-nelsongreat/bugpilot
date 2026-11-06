@@ -160,7 +160,7 @@ describe('readContainer: what is never opened', () => {
   })
 
   it('refuses a 7z that claims to be a zip, without decoding it', async () => {
-    const bytes = new Uint8Array([0x37, 0x7b, 0xa3, 0xab, 0x27, 0x1c, 0, 0, 1, 2, 3, 4])
+    const bytes = new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 0, 1, 2, 3, 4])
     const result = await readContainer(bytes, 'app.zip')
 
     expect(result.format).toBeNull()
