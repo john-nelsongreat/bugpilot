@@ -258,6 +258,7 @@ describe('Analyze page privacy', () => {
 
     selectFiles([new File(['const x = 1\n'], 'app.ts', { type: 'text/plain' })])
     await screen.findByRole('heading', { name: 'Results for 1 file' })
+    await user.click(screen.getByText('Notes (1)'))
     expect(screen.getByText('Plain HTTP URL to a non-local host.')).toBeVisible()
 
     const spies = installPrivacySpies()

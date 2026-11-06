@@ -1,6 +1,7 @@
 import type { ArchiveEntry } from '../archive/guard'
 import { DEFAULT_ANALYSIS_LIMITS, type AnalysisLimits, type AnalysisProgress, type FileAnalysis } from './engine'
 import type { AnalyzerResponse } from './analyzerProtocol'
+import { yieldToMain } from '../yieldToMain'
 
 export interface AnalyzerWorkerHandle {
   postMessage(message: unknown): void
@@ -76,6 +77,34 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
           }
         }
 
+        // Large results arrive in slices; the accumulation yields to the main thread between
+        // them, so receiving a 40,000-file analysis cannot pin the page.
+        const pendingFiles: FileAnalysis[] = []
+        const collected: FileAnalysis[] = []
+        let sawBatch = false
+        let doneMessage: Extract<AnalyzerResponse, { type: 'done' }> | null = null
+        let draining = false
+        function drain(): Promise<void> {
+          if (draining) return Promise.resolve()
+          draining = true
+          const step = (): Promise<void> => {
+            if (pendingFiles.length === 0) {
+              draining = false
+              if (doneMessage !== null) {
+                finish({
+                  files: sawBatch ? collected : doneMessage.result.files,
+                  cancelled: doneMessage.result.cancelled,
+                  error: doneMessage.error,
+                })
+              }
+              return Promise.resolve()
+            }
+            collected.push(...pendingFiles.splice(0, pendingFiles.length))
+            return yieldToMain().then(step)
+          }
+          return step()
+        }
+
         handle.addEventListener('message', (event) => {
           const message = (event as { data?: AnalyzerResponse }).data
           if (!message || typeof message !== 'object') return
@@ -83,12 +112,15 @@ export function createAnalyzerClient(getWorker: WorkerFactory): AnalyzerClient {
             options.onProgress?.(message.progress)
             return
           }
+          if (message.type === 'batch') {
+            sawBatch = true
+            pendingFiles.push(...message.files)
+            void drain()
+            return
+          }
           if (message.type === 'done') {
-            finish({
-              files: message.error ? [] : message.result.files,
-              cancelled: message.result.cancelled,
-              error: message.error,
-            })
+            doneMessage = message
+            void drain()
           }
         })
         handle.addEventListener('error', () => {

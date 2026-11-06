@@ -12,9 +12,10 @@ import {
   MAX_RETAINED_TEXT_BYTES,
   type ArchiveLimits,
 } from '../archive/limits'
-import { readLooseFiles, type IntakeSource, type ReadLooseFilesOptions } from '../archive/readLooseFiles'
+import type { IntakeSource, ReadLooseFilesOptions } from '../archive/readLooseFiles'
 import { expandNotebooks, isNotebookCellName, isNotebookName, isNotebookOutputName } from '../archive/notebook'
 import { createArchiveClient, type ArchiveClientReadOptions } from '../archive/workerClient'
+import type { WorkerIntakeSource } from '../archive/workerProtocol'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../engines/featureProbe'
 import type { EngineClient, EngineRunOutcome } from '../engines/engineClient'
 import type { EngineHit, EngineParseStatus } from '../engines/protocol'
@@ -160,6 +161,36 @@ function defaultReadArchive(input: Uint8Array | Blob, options: ArchiveClientRead
     () => new Worker(new URL('../archive/worker.ts', import.meta.url), { type: 'module' }),
   )
   return client.read(input, options)
+}
+
+/**
+ * The loose-file pass runs in the same worker as an archive read: a picked folder is decoded,
+ * screened and language-detected off the main thread, with the page receiving the result in
+ * batches. Pasted text has no handle, so its bytes are read here first — at most 1 MiB.
+ */
+async function defaultReadFiles(
+  sources: readonly IntakeSource[],
+  options: ReadLooseFilesOptions,
+): Promise<ArchiveReadResult> {
+  const client = createArchiveClient(
+    () => new Worker(new URL('../archive/worker.ts', import.meta.url), { type: 'module' }),
+  )
+  const payloads: WorkerIntakeSource[] = []
+  for (const source of sources) {
+    if (source.file) {
+      payloads.push({ path: source.path, size: source.size, file: source.file })
+      continue
+    }
+    payloads.push({ path: source.path, size: source.size, bytes: await source.read() })
+  }
+  return client.readFiles(payloads, {
+    limits: options.limits ?? DEFAULT_ARCHIVE_LIMITS,
+    signal: options.signal,
+    onProgress: options.onProgress,
+    includeGenerated: options.includeGenerated === true,
+    keepPartial: options.keepPartial === true,
+    resumeProcessedNames: options.resumeProcessedNames,
+  })
 }
 
 function defaultAnalyzer(): AnalyzerClient {
@@ -334,7 +365,7 @@ export async function analyzeUpload(
         if (!payload) return failed('error', 'The upload held no file to read.', null)
         read = await (deps.readArchive ?? defaultReadArchive)(payload, { ...readOptions, name: input.name ?? '' })
       } else {
-        read = await (deps.readLoose ?? readLooseFiles)(input.sources, readOptions)
+        read = await (deps.readLoose ?? defaultReadFiles)(input.sources, readOptions)
       }
     } catch (error) {
       if (isStaleHandleError(error)) {

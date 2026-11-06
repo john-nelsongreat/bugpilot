@@ -246,4 +246,20 @@ describe('analyzer worker client', () => {
     respond(fake, { type: 'done', id: 1, result: { files: [], cancelled: false }, error: null })
     await expect(first).resolves.toMatchObject({ error: null })
   })
+
+  it('assembles a batched result in order before settling', async () => {
+    const fake = makeWorker()
+    const fileAnalysis = (name: string) => ({ file: name, findings: [], notes: [], rulesRan: [], stoppedEarly: false })
+    const pending = createAnalyzerClient(() => fake.handle).analyze([entry('src/a.js', 'x\n')], { limits })
+
+    respond(fake, { type: 'batch', id: 1, files: [fileAnalysis('src/a.js'), fileAnalysis('src/b.js')] })
+    respond(fake, { type: 'batch', id: 1, files: [fileAnalysis('src/c.js')] })
+    respond(fake, { type: 'done', id: 1, result: { files: [], cancelled: false }, error: null })
+
+    const result = await pending
+    expect(result.files.map((item) => item.file)).toEqual(['src/a.js', 'src/b.js', 'src/c.js'])
+    expect(result.cancelled).toBe(false)
+    expect(result.error).toBeNull()
+    expect(fake.terminated).toBe(true)
+  })
 })

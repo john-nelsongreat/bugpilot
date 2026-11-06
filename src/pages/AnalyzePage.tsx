@@ -21,7 +21,9 @@ import {
   MAX_FINDINGS_STORED,
   MAX_RETAINED_TEXT_BYTES,
 } from '../features/analyzer/archive/limits'
-import { wallClockSeconds } from '../features/analyzer/archive/bounds'
+import { isAbortError, wallClockSeconds } from '../features/analyzer/archive/bounds'
+import { splitNoteFindings } from '../features/analyzer/rules/notes'
+import { startLongTaskProbe } from '../features/analyzer/longTasks'
 import { isContainerName } from '../features/analyzer/archive/format'
 import type { ArchiveReadStats } from '../features/analyzer/archive/guard'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../features/analyzer/engines/featureProbe'
@@ -35,7 +37,12 @@ import {
 import { AnalyzeResults, type PrepareFixPlan } from '../features/analyzer/ui/AnalyzeResults'
 import { EngineGate } from '../features/analyzer/ui/EngineGate'
 import { sanitizeForDisplay } from '../features/analyzer/sanitize/display'
-import { sourcesFromDrop, sourcesFromFiles } from '../features/analyzer/upload/sources'
+import {
+  sourcesFromDirectoryPicker,
+  sourcesFromDrop,
+  sourcesFromFiles,
+  supportsDirectoryPicker,
+} from '../features/analyzer/upload/sources'
 import { combineUploads } from '../features/analyzer/upload/multiSource'
 import {
   DEFAULT_PASTE_EXTENSION,
@@ -200,9 +207,10 @@ function prepareUploads(uploads: readonly (readonly IntakeSource[])[]): Prepared
 async function prepareDrop(
   transfer: DataTransfer,
   readFile?: (file: File) => Promise<Uint8Array>,
+  includeGenerated = false,
 ): Promise<PreparedUpload> {
   const files = Array.from(transfer.files)
-  const sources = await sourcesFromDrop(transfer)
+  const sources = await sourcesFromDrop(transfer, { includeGenerated })
   if (sources === null) return prepareFiles(files, readFile)
   if (sources.length === 0) throw new Error('No readable files were found in the drop.')
   return fromSources(sources)()
@@ -284,6 +292,18 @@ export function AnalyzePage({
     const timer = window.setInterval(() => setElapsedMs(Date.now() - runStartedRef.current), 1_000)
     return () => window.clearInterval(timer)
   }, [running])
+
+  // Dev-only main-thread budget meter for the manual measurements; the production build skips it.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const probe = startLongTaskProbe()
+    if (!probe) return
+    window.__bugpilotLongTasks = probe
+    return () => {
+      probe.disconnect()
+      delete window.__bugpilotLongTasks
+    }
+  }, [])
 
   const deviceMemory = deviceMemoryGiB()
   const highCapacityDevice =
@@ -567,22 +587,71 @@ export function AnalyzePage({
     if (busyRef.current) return
     const transfer = event.dataTransfer
     if (!addingRef.current) {
-      await startUpload(() => prepareDrop(transfer, readFile))
+      await startUpload(() => prepareDrop(transfer, readFile, includeGenerated))
       return
     }
     addingRef.current = false
     const sources =
-      (await sourcesFromDrop(transfer)) ?? sourcesFromFiles(Array.from(transfer.files))
+      (await sourcesFromDrop(transfer, { includeGenerated })) ??
+      sourcesFromFiles(Array.from(transfer.files))
     await addUpload(sources)
   }
 
-  const announcement =
+  /**
+   * The folder button prefers the File System Access picker where the browser has one: it never
+   * warns about uploading many files and it walks the tree under the same rules as a drop. Where
+   * the picker is missing the hidden input opens instead.
+   */
+  async function handleChooseFolder(): Promise<void> {
+    if (busyRef.current) return
+    if (supportsDirectoryPicker()) {
+      try {
+        const sources = await sourcesFromDirectoryPicker(includeGenerated)
+        if (sources === null) return
+        if (sources.length === 0) {
+          setResult({
+            status: 'error',
+            message: 'No readable files were found in the folder.',
+            report: null,
+            stats: null,
+          })
+          return
+        }
+        await startUpload(() => fromSources(sources)())
+        return
+      } catch (error) {
+        if (isAbortError(error)) return
+        setResult({
+          status: 'error',
+          message: error instanceof Error ? error.message : 'The folder could not be read.',
+          report: null,
+          stats: null,
+        })
+        return
+      }
+    }
+    folderInputRef.current?.click()
+  }
+
+  const completedReport =
     (result?.status === 'completed' || result?.status === 'partial') && result.report
-      ? `${result.status === 'partial' ? 'Partial analysis' : 'Analysis complete'}. ${result.report.summary.findings} finding${
-          result.report.summary.findings === 1 ? '' : 's'
-        } in ${result.report.session.analysedCount} analysed file${
-          result.report.session.analysedCount === 1 ? '' : 's'
-        }${result.status === 'partial' ? '. Some files were not reached; the report says which.' : '.'}`
+      ? result.report
+      : null
+  const headline = useMemo(
+    () => (completedReport ? splitNoteFindings(completedReport.findings) : null),
+    [completedReport],
+  )
+  const announcement =
+    completedReport && headline
+      ? `${result?.status === 'partial' ? 'Partial analysis' : 'Analysis complete'}. ${
+          headline.actionable.length
+        } finding${headline.actionable.length === 1 ? '' : 's'} in ${
+          completedReport.session.analysedCount
+        } analysed file${completedReport.session.analysedCount === 1 ? '' : 's'}${
+          headline.notes.length > 0
+            ? `, plus ${headline.notes.length} note${headline.notes.length === 1 ? '' : 's'} listed separately`
+            : ''
+        }${result?.status === 'partial' ? '. Some files were not reached; the report says which.' : '.'}`
       : result?.status === 'refused'
         ? `Upload refused. ${result.message ?? ''}`
         : result?.status === 'error'
@@ -742,7 +811,7 @@ export function AnalyzePage({
                 type="button"
                 className="button button--secondary"
                 disabled={running}
-                onClick={() => folderInputRef.current?.click()}
+                onClick={() => void handleChooseFolder()}
               >
                 <FolderOpen size={16} aria-hidden="true" />
                 Choose a folder

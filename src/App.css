@@ -2997,6 +2997,31 @@ textarea[aria-invalid='true'] {
   font-weight: 620;
 }
 
+.analyze-notes {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1.1rem;
+}
+
+.analyze-notes summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 620;
+}
+
+.analyze-notes[open] summary {
+  margin-bottom: 0.7rem;
+}
+
+.analyze-notes .field-hint {
+  margin: 0 0 0.6rem;
+  max-width: 68ch;
+}
+
+.analyze-notes .analyze-show-more {
+  margin-top: 0.9rem;
+}
+
 .analyze-filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 14rem)) auto;

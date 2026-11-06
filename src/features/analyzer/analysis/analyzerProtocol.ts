@@ -1,5 +1,5 @@
 import type { ArchiveEntry } from '../archive/guard'
-import type { AnalysisBatchResult, AnalysisLimits, AnalysisProgress } from './engine'
+import type { AnalysisBatchResult, AnalysisLimits, AnalysisProgress, FileAnalysis } from './engine'
 
 export interface AnalyzeRequest {
   type: 'analyze'
@@ -21,6 +21,13 @@ export interface AnalyzerProgressMessage {
   progress: AnalysisProgress
 }
 
+/** One slice of a large result, so each message the page deserializes stays a short task. */
+export interface AnalyzerBatchMessage {
+  type: 'batch'
+  id: number
+  files: FileAnalysis[]
+}
+
 export interface AnalyzerDoneMessage {
   type: 'done'
   id: number
@@ -28,7 +35,7 @@ export interface AnalyzerDoneMessage {
   error: string | null
 }
 
-export type AnalyzerResponse = AnalyzerProgressMessage | AnalyzerDoneMessage
+export type AnalyzerResponse = AnalyzerProgressMessage | AnalyzerBatchMessage | AnalyzerDoneMessage
 
 /** The subset of the module Worker surface the worker entry needs. */
 export interface WorkerScope {

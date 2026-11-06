@@ -61,7 +61,8 @@ export async function readLooseFiles(
     refusal,
     entries: refusal ? [] : entries,
     skipped: refusal ? [] : skipped,
-    stats: { ...stats, durationMs: Date.now() - started },
+    // Every other reader counts what it produced; a refusal keeps the counter at zero like a read that never started.
+    stats: { ...stats, entries: refusal ? 0 : entries.length, durationMs: Date.now() - started },
   })
   const fail = (code: ArchiveRefusalCode, subject: string | number = ''): LooseFilesResult =>
     finish({ code, message: archiveReasonMessage(code, subject) })

@@ -6,6 +6,7 @@ import type { DownloadReportFile } from '../export/reportFiles'
 import { prepareFixPlan as prepareFixPlanDefault, type FixPlan } from '../fixes/plan'
 import type { FixCandidate } from '../fixes/types'
 import { NOT_CHECKED_BY_LANGUAGE, languageLabel } from '../languages'
+import { splitNoteFindings } from '../rules/notes'
 import { sanitizeCodeForDisplay, sanitizeForDisplay, truncateForDisplay } from '../sanitize/display'
 import type { AnalyzerFinding, AnalyzerReport, CoverageTier } from '../types'
 
@@ -29,6 +30,7 @@ const EMPTY_PLAN: FixPlan = { available: [], unavailable: new Map(), dropped: []
 
 /** Rendering every card of a 20,000-finding report is what froze the page; these caps keep it alive. */
 const FINDINGS_PAGE_SIZE = 40
+const NOTE_PAGE_SIZE = 40
 const COVERAGE_PAGE_SIZE = 100
 
 /**
@@ -244,6 +246,7 @@ export function AnalyzeResults({
   const [severity, setSeverity] = useState<'all' | Severity>('all')
   const [file, setFile] = useState('all')
   const [findingLimit, setFindingLimit] = useState(FINDINGS_PAGE_SIZE)
+  const [noteLimit, setNoteLimit] = useState(NOTE_PAGE_SIZE)
   const [coverageLimit, setCoverageLimit] = useState(COVERAGE_PAGE_SIZE)
   const [includeSnippets, setIncludeSnippets] = useState(false)
   const [exportStatus, setExportStatus] = useState<string | null>(null)
@@ -320,17 +323,22 @@ export function AnalyzeResults({
     reviewButtonRef.current?.focus()
   }
 
+  // Note-level rules are listed separately; they never drive the headline counts or severity filters.
+  const { actionable, notes } = useMemo(() => splitNoteFindings(report.findings), [report.findings])
+
   const findingFiles = useMemo(
-    () => [...new Set(report.findings.map((finding) => finding.file))].sort((a, b) => a.localeCompare(b)),
-    [report.findings],
+    () => [...new Set(actionable.map((finding) => finding.file))].sort((a, b) => a.localeCompare(b)),
+    [actionable],
   )
-  const filtered = report.findings.filter(
+  const filtered = actionable.filter(
     (finding) =>
       (severity === 'all' || finding.severity === severity) && (file === 'all' || finding.file === file),
   )
   const visibleFindings = filtered.slice(0, findingLimit)
   const groups = findingGroups(visibleFindings)
   const hiddenFindings = filtered.length - visibleFindings.length
+  const visibleNotes = notes.slice(0, noteLimit)
+  const hiddenNotes = notes.length - visibleNotes.length
   const visibleCoverage = report.coverage.slice(0, coverageLimit)
   const hiddenCoverage = report.coverage.length - visibleCoverage.length
 
@@ -400,7 +408,7 @@ export function AnalyzeResults({
 
       <div className="analyze-stats" role="group" aria-label="Analysis summary">
         <div className="analyze-stat">
-          <span className="analyze-stat-value">{report.summary.findings}</span>
+          <span className="analyze-stat-value">{actionable.length}</span>
           <span className="analyze-stat-label">Findings</span>
         </div>
         <div className="analyze-stat">
@@ -566,7 +574,7 @@ export function AnalyzeResults({
         </div>
 
         <div className="analyze-body">
-          {report.findings.length > 0 ? (
+          {actionable.length > 0 ? (
             <>
               <div className="analyze-filters">
                 <div className="field">
@@ -622,8 +630,8 @@ export function AnalyzeResults({
                 </button>
               </div>
               <p className="field-hint" role="status" aria-label="Filtered finding count">
-                Showing {filtered.length} of {report.findings.length} finding
-                {report.findings.length === 1 ? '' : 's'}.
+                Showing {filtered.length} of {actionable.length} finding
+                {actionable.length === 1 ? '' : 's'}.
               </p>
 
               {hiddenFindings > 0 ? (
@@ -678,6 +686,14 @@ export function AnalyzeResults({
                 </button>
               ) : null}
             </>
+          ) : notes.length > 0 ? (
+            <div className="analyze-no-findings">
+              <h3>No actionable findings matched this upload</h3>
+              <p className="prose">
+                The rules only matched note-level items, which are listed under Notes below. Notes
+                are counted in the exported report but do not change the headline severity counts.
+              </p>
+            </div>
           ) : (
             <div className="analyze-no-findings">
               <h3>No rule matched this upload</h3>
@@ -687,6 +703,40 @@ export function AnalyzeResults({
               </p>
             </div>
           )}
+
+          {notes.length > 0 ? (
+            <details className="analyze-notes">
+              <summary>Notes ({notes.length})</summary>
+              <p className="field-hint">
+                Lower-value matches kept out of the headline counts: todo markers, long lines,
+                oversized files, plain http:// links and mixed indentation. They stay in the
+                exported report like every other rule.
+              </p>
+              <ul className="analyze-findings">
+                {visibleNotes.map((finding) => (
+                  <li key={finding.id}>
+                    <FindingCard
+                      finding={finding}
+                      candidate={candidatesByFinding.get(finding.id)}
+                      unavailableReason={plan?.unavailable.get(finding.id)}
+                      checked={selected.has(finding.id)}
+                      onSelect={(checked) => toggleSelection(finding.id, checked)}
+                    />
+                  </li>
+                ))}
+              </ul>
+              {hiddenNotes > 0 ? (
+                <button
+                  type="button"
+                  className="button button--secondary analyze-show-more"
+                  onClick={() => setNoteLimit((current) => current + NOTE_PAGE_SIZE)}
+                >
+                  Show {Math.min(NOTE_PAGE_SIZE, hiddenNotes)} more note
+                  {Math.min(NOTE_PAGE_SIZE, hiddenNotes) === 1 ? '' : 's'}
+                </button>
+              ) : null}
+            </details>
+          ) : null}
         </div>
       </div>
 

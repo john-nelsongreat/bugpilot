@@ -212,19 +212,21 @@ describe('Analyze page', () => {
     expect(options.archiveBytes).toBeGreaterThan(0)
 
     expect(screen.getByText('Possible AWS access key id.')).toBeVisible()
+    expect(screen.queryByText('Plain HTTP URL to a non-local host.')).not.toBeVisible()
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Notes (1)'))
     expect(screen.getByText('Plain HTTP URL to a non-local host.')).toBeVisible()
     expect(screen.getByText('No findings does not mean no bugs')).toBeVisible()
     expect(screen.getAllByText(/TypeScript/).length).toBeGreaterThan(0)
     expect(screen.getByText(/No Python syntax engine is bundled/)).toBeVisible()
     expect(screen.getByText(/Binary file skipped/)).toBeVisible()
 
-    const user = userEvent.setup()
     await user.selectOptions(screen.getByLabelText('Severity'), 'Low')
 
     expect(screen.queryByText('Possible AWS access key id.')).not.toBeInTheDocument()
     expect(screen.getByText('Plain HTTP URL to a non-local host.')).toBeVisible()
     expect(screen.getByRole('status', { name: 'Filtered finding count' })).toHaveTextContent(
-      'Showing 1 of 2 findings.',
+      'Showing 0 of 1 finding.',
     )
 
     await user.click(screen.getByRole('button', { name: 'Reset filters' }))

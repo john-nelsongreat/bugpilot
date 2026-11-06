@@ -158,6 +158,133 @@ describe('archive worker protocol', () => {
   })
 })
 
+function textBytes(text: string): Uint8Array {
+  return new TextEncoder().encode(text)
+}
+
+describe('archive worker loose-file pass', () => {
+  it('reads sources sent as bytes and reports the entries', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+
+    fake.dispatched({
+      type: 'read-files',
+      id: 5,
+      sources: [
+        { path: 'src/a.js', size: 12, bytes: textBytes('// TODO: x\n') },
+        { path: 'data/bad.json', size: 8, bytes: textBytes('{"a":1,}') },
+      ],
+      limits: limitsFor(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      id: number
+      result: { refusal: unknown; entries: Array<{ name: string; language: string }> }
+    }>
+    expect(done).toHaveLength(1)
+    expect(done[0].id).toBe(5)
+    expect(done[0].result.refusal).toBeNull()
+    expect(done[0].result.entries.map((entry) => `${entry.name}:${entry.language}`)).toEqual([
+      'src/a.js:javascript',
+      'data/bad.json:json',
+    ])
+  })
+
+  it('reads a source sent as a picked file handle', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+
+    fake.dispatched({
+      type: 'read-files',
+      id: 6,
+      sources: [{ path: 'notes.md', size: 6, file: new Blob(['# hi\n']) }],
+      limits: limitsFor(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      result: { refusal: unknown; entries: Array<{ name: string }> }
+    }>
+    expect(done).toHaveLength(1)
+    expect(done[0].result.refusal).toBeNull()
+    expect(done[0].result.entries.map((entry) => entry.name)).toEqual(['notes.md'])
+  })
+
+  it('answers a source with neither bytes nor a file instead of hanging', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+
+    fake.dispatched({
+      type: 'read-files',
+      id: 8,
+      sources: [{ path: 'broken.txt', size: 0 }],
+      limits: limitsFor(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const done = fake.posted as Array<{ type: string; result?: { refusal: { code: string } | null } }>
+    expect(done.at(-1)?.type).toBe('done')
+    expect(done.at(-1)?.result?.refusal?.code).toBe('worker_error')
+  })
+
+  it('refuses a second loose-file pass while one is running', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+
+    fake.dispatched({
+      type: 'read-files',
+      id: 1,
+      sources: [{ path: 'src/a.js', size: 2, bytes: textBytes('x\n') }],
+      limits: limitsFor(),
+    })
+    fake.dispatched({
+      type: 'read-files',
+      id: 2,
+      sources: [{ path: 'src/b.js', size: 2, bytes: textBytes('y\n') }],
+      limits: limitsFor(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      id: number
+      result: { refusal: { code: string } | null }
+    }>
+    expect(done.find((message) => message.id === 2)?.result.refusal?.code).toBe('worker_error')
+    expect(done.find((message) => message.id === 1)?.result.refusal).toBeNull()
+  })
+
+  it('delivers a result over 500 entries as batches followed by an empty done', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+
+    fake.dispatched({
+      type: 'read-files',
+      id: 12,
+      sources: Array.from({ length: 501 }, (_, index) => ({
+        path: `src/f${index}.js`,
+        size: 2,
+        bytes: textBytes('x\n'),
+      })),
+      limits: limitsFor(),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    const batches = fake.posted.filter((message) => (message as { type: string }).type === 'batch') as Array<{
+      entries?: Array<{ name: string }>
+      skipped?: unknown[]
+    }>
+    expect(batches.map((batch) => batch.entries?.length ?? 0)).toEqual([500, 1])
+
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      result: { refusal: unknown; entries: unknown[]; skipped: unknown[]; stats: { entries: number } }
+    }>
+    expect(done).toHaveLength(1)
+    expect(done[0].result.entries).toHaveLength(0)
+    expect(done[0].result.stats.entries).toBe(501)
+  })
+})
+
 interface FakeWorker {
   handle: WorkerHandle
   posted: Array<{ message: unknown; transfer?: unknown[] }>
@@ -262,5 +389,73 @@ describe('archive worker client', () => {
     await expect(second).resolves.toMatchObject({ refusal: { code: 'worker_error' } })
     respond(fake, { type: 'done', id: 1, result: { refusal: null, entries: [], skipped: [], stats: {} } })
     await expect(first).resolves.toMatchObject({ refusal: null })
+  })
+
+  it('sends the loose-file pass to the worker with the bytes it holds', async () => {
+    const fake = makeWorker()
+    const bytes = textBytes('x\n')
+    const pending = createArchiveClient(() => fake.handle).readFiles(
+      [
+        { path: 'src/a.js', size: 2, file: new Blob(['x\n']) },
+        { path: 'pasted/a.js', size: 2, bytes },
+      ],
+      { limits: limitsFor() },
+    )
+
+    const posted = fake.posted[0]
+    expect((posted.message as { type: string }).type).toBe('read-files')
+    expect((posted.message as { sources?: Array<{ path: string; file?: unknown; bytes?: unknown }> }).sources).toEqual([
+      { path: 'src/a.js', size: 2, file: expect.anything() },
+      { path: 'pasted/a.js', size: 2, bytes },
+    ])
+    expect(posted.transfer).toEqual([bytes.buffer])
+
+    respond(fake, { type: 'done', id: (posted.message as { id: number }).id, result: { refusal: null, entries: [], skipped: [], stats: {} } })
+    await expect(pending).resolves.toMatchObject({ refusal: null })
+  })
+
+  it('assembles a batched result in order before settling', async () => {
+    const fake = makeWorker()
+    const pending = createArchiveClient(() => fake.handle).readFiles(
+      [{ path: 'src/a.js', size: 2, bytes: textBytes('x\n') }],
+      { limits: limitsFor() },
+    )
+
+    respond(fake, {
+      type: 'batch',
+      id: 1,
+      entries: [{ name: 'src/a.js', text: 'x\n', language: 'javascript', languageSource: 'extension', encoding: 'utf-8', bytes: 2 }],
+    })
+    respond(fake, { type: 'batch', id: 1, skipped: [{ name: 'img.png', code: 'binary_content', message: 'binary' }] })
+    respond(fake, { type: 'batch', id: 1, entries: [{ name: 'src/b.js', text: 'y\n', language: 'javascript', languageSource: 'extension', encoding: 'utf-8', bytes: 2 }] })
+    respond(fake, { type: 'done', id: 1, result: { refusal: null, entries: [], skipped: [], stats: { walkedRecords: 3, producedBytes: 4, entries: 2, skipped: 1, durationMs: 5, peakEntryBytes: 2 } } })
+
+    const result = await pending
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
+    expect(result.skipped.map((item) => item.name)).toEqual(['img.png'])
+    expect(result.stats.entries).toBe(2)
+  })
+
+  it('keeps a plain done result when the worker never batched', async () => {
+    const fake = makeWorker()
+    const pending = createArchiveClient(() => fake.handle).readFiles(
+      [{ path: 'src/a.js', size: 2, bytes: textBytes('x\n') }],
+      { limits: limitsFor() },
+    )
+
+    respond(fake, {
+      type: 'done',
+      id: 1,
+      result: {
+        refusal: null,
+        entries: [{ name: 'src/a.js', text: 'x\n', language: 'javascript', languageSource: 'extension', encoding: 'utf-8', bytes: 2 }],
+        skipped: [],
+        stats: { walkedRecords: 1, producedBytes: 2, entries: 1, skipped: 0, durationMs: 1, peakEntryBytes: 2 },
+      },
+    })
+
+    const result = await pending
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js'])
+    expect(result.skipped).toEqual([])
   })
 })
