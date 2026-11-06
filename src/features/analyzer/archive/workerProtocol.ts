@@ -32,6 +32,8 @@ export interface ReadArchiveRequest {
   includeGenerated?: boolean
   /** Keep what was read when a budget or the user stops the pass, and mark the result partial. */
   keepPartial?: boolean
+  /** Names an earlier pass settled, sent as an array because it crosses a message boundary. */
+  resumeProcessedNames?: readonly string[]
 }
 
 export interface CancelRequest {
@@ -124,6 +126,7 @@ export function startArchiveWorker(scope: WorkerScope): void {
       limits: data.limits,
       includeGenerated: data.includeGenerated === true,
       keepPartial: data.keepPartial === true,
+      resumeProcessedNames: data.resumeProcessedNames ? new Set(data.resumeProcessedNames) : undefined,
       signal: controller.signal,
       onProgress: (progress) => {
         scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)

@@ -181,8 +181,8 @@ describe('Analyze page', () => {
 
     expect(screen.getByRole('heading', { name: 'Analyze code', level: 1 })).toBeVisible()
     expect(screen.getByText(/Local analysis only/)).toBeVisible()
-    expect(screen.getByText(/Zip up to 250 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 20,000 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 2 GiB/)).toBeVisible()
+    expect(screen.getByText(/analyses up to 20,000 files/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose files' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose a folder' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'No files checked yet' })).toBeVisible()

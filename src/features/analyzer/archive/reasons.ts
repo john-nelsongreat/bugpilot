@@ -26,7 +26,6 @@ export const ARCHIVE_REFUSAL_CODES = [
   'central_directory_too_large',
   'overlapping_entries',
   'local_central_disagreement',
-  'analysable_budget_exceeded',
   'corrupt_central_directory',
   'corrupt_local_header',
   'corrupt_deflate_stream',
@@ -66,7 +65,7 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
   archive_too_large: (n) =>
     `This archive is ${n} bytes, over the byte ceiling BugPilot reads in the browser. Split it into a smaller archive or pick the files you want checked.`,
   entry_count_exceeded: (n) =>
-    `This archive holds more than ${n} entries. BugPilot stops reading at that count so a huge archive cannot fill the tab.`,
+    `This archive holds more than ${n} files for BugPilot to check in one pass, which is over the cap that keeps the tab responsive. Nothing was kept. Split the archive or leave out files you do not need checked.`,
   wall_clock_exceeded: (n) =>
     `BugPilot spent more than ${n} second(s) reading this upload and stopped, so nothing was kept. A very large or deeply nested upload looks like this from the inside, so pick a smaller folder or split the archive.`,
   total_uncompressed_exceeded: (n) =>
@@ -113,8 +112,6 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
       : `The entry "${name}" ${extra}, so the archive is refused.`,
   local_central_disagreement: (name) =>
     `The local header for "${name}" disagrees with the archive index about its name, sizes, checksum or compression. BugPilot cannot tell which record is real, so the archive is refused.`,
-  analysable_budget_exceeded: (n) =>
-    `The files to analyse add up to more than ${n} bytes, which is the analysis budget for this upload. Nothing was read, because this run keeps nothing partial.`,
   corrupt_central_directory: () =>
     'The archive index is damaged or points outside the file, so BugPilot stopped reading.',
   corrupt_local_header: (name) =>
@@ -177,11 +174,11 @@ export function archiveReasonMessage(code: ArchiveReasonCode, subject: string | 
  */
 const PARTIAL_MESSAGES: Partial<Record<ArchiveReasonCode, PlainMessage>> = {
   wall_clock_exceeded: (n) =>
-    `BugPilot reached its ${n} second reading limit. The files and findings read before that point are kept and clearly marked as a partial result.`,
+    `BugPilot reached its ${n} second reading limit for this pass. The files and findings read before that point are kept and clearly marked as a partial result.`,
   total_uncompressed_exceeded: (n) =>
-    `BugPilot reached its ${n} byte unpacking budget. The files and findings read before that point are kept and clearly marked as a partial result.`,
-  analysable_budget_exceeded: (n) =>
-    `The files to analyse add up to more than ${n} bytes, the analysis budget for this upload. BugPilot kept the files that still fitted inside it and marks the rest as not reached, so this report is a partial result.`,
+    `BugPilot reached its ${n} byte unpacking budget for this pass. The files and findings read before that point are kept and clearly marked as a partial result.`,
+  entry_count_exceeded: (n) =>
+    `BugPilot reached its cap of ${n} analysed files in this pass. The files analysed before that point are kept and clearly marked as a partial result; use Continue analysis to check the rest.`,
   cancelled: () =>
     'You cancelled the upload. The files and findings read before you cancelled are kept and clearly marked as a partial result.',
 }

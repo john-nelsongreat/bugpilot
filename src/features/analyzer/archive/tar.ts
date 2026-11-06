@@ -327,7 +327,9 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
       }
       verifyHeader(block, at === 0)
       run.stats.walkedRecords += 1
-      if (run.stats.walkedRecords > run.limits.maxEntryCount) refuse('entry_count_exceeded', run.limits.maxEntryCount)
+      if (run.stats.walkedRecords > run.limits.maxParsedEntryCount) {
+        refuse('entry_count_exceeded', run.limits.maxParsedEntryCount)
+      }
 
       const headerSize = readSizeField(block)
       const typeFlag = block[TYPE_FLAG_OFFSET]
@@ -382,6 +384,15 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
       // Every length the reader is about to use has to exist in the file before it is used.
       if (at + BLOCK_BYTES + bodyBytes > bytes.length) refuse('archive_truncated', printable(name))
 
+      // A previous pass already read this entry. Walk past its body without decoding it: the
+      // bytes still cost I/O here, and re-inflate for a .tar.gz at the gzip layer, but they are
+      // not analysed again and do not count against this pass's budgets.
+      if (run.resumeProcessedNames?.has(name)) {
+        at += BLOCK_BYTES + bodyBytes
+        await breathe(run)
+        continue
+      }
+
       currentName = name
       currentSize = size
       const skipCode = declaredSkip(typeFlag, label, name, size, run)
@@ -389,16 +400,15 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
         skipped.push(skipFor(skipCode, name, label ?? undefined))
         run.stats.skipped = skipped.length
       } else {
+        if (entries.length >= run.limits.maxEntryCount) {
+          // The cap counts files analysed, not records walked, so a tar full of directories and
+          // skipped binaries can still hold far more records than this cap.
+          if (!run.keepPartial) refuse('entry_count_exceeded', run.limits.maxEntryCount)
+          return partialAt('entry_count_exceeded', run.limits.maxEntryCount)
+        }
         if (declaredBudget + size > run.limits.maxTotalUncompressedBytes) {
           if (!run.keepPartial) refuse('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
           return partialAt('total_uncompressed_exceeded', run.limits.maxTotalUncompressedBytes)
-        }
-        // A tar has no index, so the text budget can only be checked as the walk reaches each
-        // entry. tar stores sizes exactly, so the declared length is the real one here — the
-        // body is re-measured below and the reader refuses a header that lies about it.
-        if (run.stats.producedBytes + size > run.limits.maxAnalysableTextBytes) {
-          if (!run.keepPartial) refuse('analysable_budget_exceeded', run.limits.maxAnalysableTextBytes)
-          return partialAt('analysable_budget_exceeded', run.limits.maxAnalysableTextBytes)
         }
         const bodyStart = at + BLOCK_BYTES
         try {

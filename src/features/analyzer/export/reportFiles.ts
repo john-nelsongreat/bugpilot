@@ -41,6 +41,18 @@ export function renderReportMarkdown(report: AnalyzerReport): string {
 
   push('# BugPilot code analysis report')
   push()
+  if (report.truncated) {
+    const truncated = report.truncated
+    push(
+      `> **TRUNCATED FINDINGS LIST.** The report stores the first ${truncated.stored.toLocaleString('en-US')} findings; ` +
+        `${truncated.suppressed.toLocaleString('en-US')} more matched but are not stored. Per rule: ` +
+        Object.entries(truncated.perRule)
+          .sort((left, right) => right[1] - left[1])
+          .map(([rule, count]) => `${codeSpan(rule)}: ${count.toLocaleString('en-US')}`)
+          .join(', '),
+    )
+    push()
+  }
   if (report.session.partial) {
     const partial = report.session.partial
     push(`> **PARTIAL REPORT.** ${escapeMarkdown(partial.message)}`)

@@ -26,6 +26,11 @@ export interface ReadLooseFilesOptions {
   includeGenerated?: boolean
   /** Keep the files read before a clock, budget or cancel stop and mark the rest unreached. */
   keepPartial?: boolean
+  /**
+   * Paths an earlier pass already analysed or decided to skip. They are walked past without
+   * being read, so a continuation pass spends its budget only on new files.
+   */
+  resumeProcessedNames?: ReadonlySet<string>
 }
 
 export type LooseFilesResult = ArchiveReadResult
@@ -101,7 +106,7 @@ export async function readLooseFiles(
         : fail('wall_clock_exceeded', wallClockSeconds(limits))
     }
     stats.walkedRecords += 1
-    if (stats.walkedRecords > limits.maxEntryCount) return fail('entry_count_exceeded', limits.maxEntryCount)
+    if (stats.walkedRecords > limits.maxParsedEntryCount) return fail('entry_count_exceeded', limits.maxParsedEntryCount)
     const pathProblem = relativePathRefusal(item.path)
     if (pathProblem) return fail(pathProblem)
     if (item.path.length > limits.maxEntryNameBytes) return fail('name_too_long', item.path.length)
@@ -110,6 +115,8 @@ export async function readLooseFiles(
     // A dropped folder is a container too, so an archive inside it is refused exactly the way
     // an archive inside an archive is.
     if (isNestedArchive(item.path)) return fail('nested_archive', item.path)
+    // A previous pass settled this file; it is neither read nor recorded here.
+    if (options.resumeProcessedNames?.has(item.path)) continue
 
     const skipCode = skipCodeFor(item, limits, options.includeGenerated === true)
     if (skipCode) {
@@ -138,6 +145,12 @@ export async function readLooseFiles(
         ? partial('wall_clock_exceeded', wallClockSeconds(limits), accepted.slice(index))
         : fail('wall_clock_exceeded', wallClockSeconds(limits))
     }
+    // The cap counts files analysed, so files skipped along the way never consume it.
+    if (entries.length >= limits.maxEntryCount) {
+      return keepPartial
+        ? partial('entry_count_exceeded', limits.maxEntryCount, accepted.slice(index))
+        : fail('entry_count_exceeded', limits.maxEntryCount)
+    }
     let bytes: Uint8Array
     try {
       bytes = await item.read()
@@ -160,13 +173,6 @@ export async function readLooseFiles(
         message: archiveReasonMessage('binary_content', item.path),
       })
       continue
-    }
-    // Loose files are read whole, so the text budget is judged on the bytes that are really text:
-    // a skipped binary or oversized file never charges against it.
-    if (stats.producedBytes + bytes.length > limits.maxAnalysableTextBytes) {
-      return keepPartial
-        ? partial('analysable_budget_exceeded', limits.maxAnalysableTextBytes, accepted.slice(index))
-        : fail('analysable_budget_exceeded', limits.maxAnalysableTextBytes)
     }
     const decoded = decodeBytes(bytes)
     const detection = detectLanguage(item.path, decoded.text)

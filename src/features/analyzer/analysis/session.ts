@@ -28,7 +28,14 @@ import type { FileAnalysis } from './engine'
 import { makeFinding } from './finding'
 import { splitGeneratedEntries } from './generated'
 import { sensitiveFindings } from '../rules/sensitiveFiles'
-import { buildReport } from './reportModel'
+import {
+  buildReport,
+  capStoredFindings,
+  findingsTruncationNote,
+  isTruncationNote,
+  sortReportFindings,
+  summarizeFindings,
+} from './reportModel'
 import { createDefaultTsClient, TS_FILE_TIMEOUT_MS, type TsSyntaxClient } from './typescript/tsClient'
 
 export type SessionPhase = 'reading' | 'rules' | 'typescript' | 'engines'
@@ -132,6 +139,12 @@ export interface AnalyzeUploadOptions {
   maxRetainedBytes?: number
   /** Read generated and vendored files too. `.git` is skipped at every setting. */
   includeGenerated?: boolean
+  /**
+   * Names an earlier pass already analysed or decided to skip, for a continuation pass on the
+   * same upload. The reader walks past them, so this pass spends its budget only on new files;
+   * the page then merges the two results with `mergeSessionResults`.
+   */
+  resumeProcessedNames?: ReadonlySet<string>
 }
 
 export interface SessionDeps {
@@ -297,6 +310,7 @@ export async function analyzeUpload(
     signal,
     includeGenerated: options.includeGenerated === true,
     keepPartial: true,
+    resumeProcessedNames: options.resumeProcessedNames,
     onProgress: (progress: ArchiveReadProgress) => emit(readingProgress(progress)),
   }
 
@@ -341,6 +355,11 @@ export async function analyzeUpload(
   }
 
   if (partial && signal?.aborted) return partialBeforeAnalysis(entries, skipped, stats, partial, options, note)
+
+  // A continuation pass that reached no new file before its budget ran out is a real outcome,
+  // not an error: sequential formats re-inflate everything before them on the way to new files.
+  const resumedWithoutProgress =
+    input.kind !== 'pre-read' && options.resumeProcessedNames !== undefined && entries.length === 0 && partial !== null
 
   // Sensitive names are judged before generated files are set aside: a credential file BugPilot
   // will not analyse is still worth reporting, and most of those rules need no content at all.
@@ -465,6 +484,7 @@ export async function analyzeUpload(
     ...(note ? [note] : []),
     ...(notebookNote ? [notebookNote] : []),
     ...(partial ? [partial.message] : []),
+    ...(resumedWithoutProgress ? [RESUME_NO_PROGRESS_MESSAGE] : []),
   ]
 
   if (engineFiles.length > 0 && options.engines === 'approved') {
@@ -533,11 +553,11 @@ export async function analyzeUpload(
     partial,
   })
 
-  const retained = retainedSources(entries, analyses, options.maxRetainedBytes ?? MAX_RETAINED_TEXT_BYTES)
+  const retained = retainedSources(entries, implicatedFiles(analyses), options.maxRetainedBytes ?? MAX_RETAINED_TEXT_BYTES)
 
   return {
     status: partial ? 'partial' : 'completed',
-    message: partial ? partial.message : null,
+    message: resumedWithoutProgress ? RESUME_NO_PROGRESS_MESSAGE : partial ? partial.message : null,
     report,
     stats,
     sources: retained.sources,
@@ -545,6 +565,209 @@ export async function analyzeUpload(
     skipped,
     partial,
   }
+}
+
+/**
+ * What a continuation pass that reached no new file means for the user, and what to do about it.
+ */
+export const RESUME_NO_PROGRESS_MESSAGE =
+  'This continuation pass reached no new files before its budget ran out. A sequential format such as .tar.gz ' +
+  're-inflates the files an earlier pass already read on its way to new ones, which can spend a whole pass; ' +
+  'continuing again may make no more progress, and a .zip upload continues without the re-read.'
+
+export const CANCELLED_CONTINUATION_MESSAGE =
+  'You cancelled the continuation pass. The report below still covers the files the earlier passes analysed.'
+
+function implicatedFiles(analyses: readonly FileAnalysis[]): ReadonlySet<string> {
+  const files = new Set<string>()
+  for (const analysis of analyses) {
+    for (const finding of analysis.findings) files.add(finding.file)
+  }
+  return files
+}
+
+function mergeStats(previous: ArchiveReadStats | null, next: ArchiveReadStats | null): ArchiveReadStats | null {
+  if (!previous) return next
+  if (!next) return previous
+  return {
+    walkedRecords: previous.walkedRecords + next.walkedRecords,
+    producedBytes: previous.producedBytes + next.producedBytes,
+    inflatedBytes: (previous.inflatedBytes ?? 0) + (next.inflatedBytes ?? 0),
+    entries: previous.entries + next.entries,
+    skipped: previous.skipped + next.skipped,
+    durationMs: previous.durationMs + next.durationMs,
+    peakEntryBytes: Math.max(previous.peakEntryBytes, next.peakEntryBytes),
+  }
+}
+
+/**
+ * The names a continuation pass should walk past: every file an earlier pass analysed, plus every
+ * skip it decided (with a reason) rather than left unreached. Not-reached names are deliberately
+ * absent — they are exactly the work the next pass exists to do.
+ */
+export function resumeNamesFrom(previous: AnalysisSessionResult): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const row of previous.report?.coverage ?? []) {
+    if (row.status === 'analysed') names.add(row.file)
+  }
+  for (const item of previous.skipped ?? []) {
+    if (item.code !== 'not_reached') names.add(item.name)
+  }
+  return names
+}
+
+/**
+ * Lines that narrate THIS report's partial state. A continuation that completes the upload retires
+ * them: the merged report is complete, and a stale "this is a partial result" sentence would
+ * contradict it.
+ */
+function isPartialNarrative(line: string): boolean {
+  return (
+    line.includes('clearly marked as a partial result') ||
+    line === RESUME_NO_PROGRESS_MESSAGE ||
+    line === CANCELLED_BEFORE_ANALYSIS
+  )
+}
+
+/**
+ * One continuation pass on top of the result it continues. Findings and coverage are unioned by
+ * id and file (re-running the same pass changes nothing), the summary is recomputed from the
+ * union, and the partial marker describes the whole upload: both passes' plans and both passes'
+ * bytes. A pass that produced no report of its own — cancelled, refused, or a handle the browser
+ * would not open again — leaves the earlier report standing and explains itself in the message.
+ */
+export function mergeSessionResults(
+  previous: AnalysisSessionResult,
+  next: AnalysisSessionResult,
+  maxRetainedBytes: number = MAX_RETAINED_TEXT_BYTES,
+): AnalysisSessionResult {
+  const previousReport = previous.report
+  if (!previousReport) return next
+  if (!next.report) {
+    // The pass produced no report of its own (cancelled, refused, or a handle the browser would
+    // not open again): the earlier report stands and the pass's message explains what happened.
+    const message =
+      next.message ?? (next.status === 'cancelled' ? CANCELLED_CONTINUATION_MESSAGE : previous.message)
+    return {
+      ...previous,
+      status: next.status,
+      message,
+      stats: next.stats ?? previous.stats,
+      partial: next.partial ?? previous.partial,
+      handleStale: next.handleStale === true || previous.handleStale === true,
+    }
+  }
+  const byId = new Map<string, AnalyzerFinding>()
+  for (const finding of previousReport.findings) byId.set(finding.id, finding)
+  for (const finding of next.report.findings) byId.set(finding.id, finding)
+  const allFindings = sortReportFindings([...byId.values()])
+  const summary = summarizeFindings(allFindings)
+  const { findings, truncation } = capStoredFindings(allFindings)
+
+  // Coverage keeps the earlier row for a file both passes saw, EXCEPT when the earlier pass left
+  // it not reached and the continuation analysed it: the analysed row is the truthful one. A
+  // completed continuation settled the whole tail, so rows for names it never reported (including
+  // the sequential readers' "(rest of the archive)" marker) are retired — the union then matches
+  // what one uninterrupted run would have reported.
+  const settled = next.partial === null
+  const nextCoverage = new Map<string, FileCoverage>()
+  for (const row of next.report.coverage) nextCoverage.set(row.file, row)
+  const coverageByName = new Map<string, FileCoverage>()
+  for (const row of previousReport.coverage) {
+    if (
+      settled &&
+      row.status === 'skipped' &&
+      row.skipReason?.includes('was not reached') &&
+      !nextCoverage.has(row.file)
+    ) {
+      continue
+    }
+    coverageByName.set(row.file, row)
+  }
+  for (const row of next.report.coverage) {
+    const earlier = coverageByName.get(row.file)
+    if (earlier && !(earlier.status === 'skipped' && row.status === 'analysed')) continue
+    coverageByName.set(row.file, row)
+  }
+  const coverage = [...coverageByName.values()]
+
+  const skippedByName = new Map<string, ArchiveSkippedEntry>()
+  for (const item of previous.skipped ?? []) {
+    if (settled && item.code === 'not_reached') continue
+    skippedByName.set(item.name, item)
+  }
+  for (const item of next.skipped ?? []) skippedByName.set(item.name, item)
+  const skipped = [...skippedByName.values()]
+
+  const analysedCount = coverage.filter((row) => row.status === 'analysed').length
+  const skippedCount = coverage.filter((row) => row.status === 'skipped').length
+
+  // The union plan: a pass plans only the files it was offered, so the plan after a pass is the
+  // files already analysed plus the plan of the pass itself. The larger of the two passes'
+  // cumulative plans is the honest total, and a completed earlier pass planned nothing unreached.
+  const analysedBefore = previousReport.session.analysedCount
+  const previousPlanned = previous.partial?.plannedFiles ?? analysedBefore
+  const nextPlanned = next.partial ? analysedBefore + next.partial.plannedFiles : analysedBefore
+  const plannedFiles = Math.max(previousPlanned, nextPlanned)
+  const partial = next.partial
+    ? {
+        ...next.partial,
+        analysedFiles: analysedBefore + next.partial.analysedFiles,
+        plannedFiles,
+        unreachedFiles: Math.max(0, plannedFiles - (analysedBefore + next.partial.analysedFiles)),
+        producedBytes: (previous.stats?.producedBytes ?? 0) + next.partial.producedBytes,
+        plannedBytes:
+          (previous.partial?.plannedBytes ?? previous.stats?.plannedBytes ?? 0) + next.partial.plannedBytes,
+      }
+    : null
+
+  const report: AnalyzerReport = {
+    ...next.report,
+    session: {
+      archiveBytes: next.report.session.archiveBytes,
+      fileCount: coverage.length,
+      analysedCount,
+      skippedCount,
+      skipped: skipped.map((item) => ({ file: item.name, reason: item.message })),
+      ...(partial ? { partial: { ...partial } } : {}),
+    },
+    summary,
+    findings,
+    coverage,
+    limitations: [
+      ...new Set(
+        [
+          ...(settled ? previousReport.limitations.filter((line) => !isPartialNarrative(line)) : previousReport.limitations),
+          ...next.report.limitations,
+        ].filter((line) => !isTruncationNote(line)),
+      ),
+      ...(truncation ? [findingsTruncationNote(truncation)] : []),
+    ],
+    ...(truncation ? { truncated: truncation } : {}),
+  }
+
+  const retained = retainedSources(
+    [...(previous.sources ?? []), ...(next.sources ?? [])],
+    implicatedFilesFromFindings(report.findings),
+    maxRetainedBytes,
+  )
+
+  return {
+    status: partial ? 'partial' : 'completed',
+    message: next.message,
+    report,
+    stats: mergeStats(previous.stats, next.stats),
+    sources: retained.sources,
+    retention: retained.retention,
+    skipped,
+    partial,
+  }
+}
+
+function implicatedFilesFromFindings(findings: readonly AnalyzerFinding[]): ReadonlySet<string> {
+  const files = new Set<string>()
+  for (const finding of findings) files.add(finding.file)
+  return files
 }
 
 /**
@@ -627,7 +850,7 @@ function redactNotebookAnalysis(analysis: FileAnalysis): FileAnalysis {
  */
 function retainedSources(
   entries: readonly ArchiveEntry[],
-  analyses: readonly FileAnalysis[],
+  implicatedFiles: ReadonlySet<string>,
   maxRetainedBytes: number,
 ): { sources: readonly ArchiveEntry[]; retention: Retention } {
   // Notebook output is never retained, whether or not it produced a finding: the credential that
@@ -638,12 +861,7 @@ function retainedSources(
   let held = 0
   for (const entry of keepable) held += entry.bytes
   if (held <= maxRetainedBytes) return { sources: keepable, retention: 'all' }
-
-  const implicated = new Set<string>()
-  for (const analysis of analyses) {
-    for (const finding of analysis.findings) implicated.add(finding.file)
-  }
-  return { sources: keepable.filter((entry) => implicated.has(entry.name)), retention: 'findings' }
+  return { sources: keepable.filter((entry) => implicatedFiles.has(entry.name)), retention: 'findings' }
 }
 
 function countFindings(analyses: readonly FileAnalysis[]): number {

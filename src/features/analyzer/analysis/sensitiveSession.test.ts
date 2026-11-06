@@ -163,14 +163,14 @@ describe('sensitive file names in the analysis session', () => {
       maxArchiveBytes: 1,
       maxTarArchiveBytes: 1,
       maxTotalUncompressedBytes: 2,
-      maxAnalysableTextBytes: 2,
       maxCentralDirectoryBytes: 16,
       maxSingleFileUncompressedBytes: 3,
+      maxParsedEntryCount: 10,
       maxEntryCount: 4,
       maxEntryNameBytes: 5,
       maxDeclaredRatio: 6,
       maxActualRatio: 7,
-      maxWallClockMs: 8,
+      maxChunkWallClockMs: 8,
       inflateChunkBytes: 9,
     }
     await analyzeUpload(

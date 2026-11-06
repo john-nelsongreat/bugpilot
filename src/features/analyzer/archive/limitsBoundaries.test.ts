@@ -71,30 +71,25 @@ describe('zip ceilings at their exact boundary', () => {
     ])
   })
 
-  it('accepts exactly maxAnalysableTextBytes and stops one byte short', async () => {
+  it('analyses exactly maxEntryCount files and keeps the rest for a continuation', async () => {
     const bytes = buildZip([
       { name: 'src/a.js', content: 'a'.repeat(100) },
       { name: 'src/b.js', content: 'b'.repeat(100) },
     ])
 
     const atCeiling = await readArchive(bytes, {
-      limits: limits({ maxAnalysableTextBytes: 200, maxTotalUncompressedBytes: 10_000 }),
-    })
-    const oneShort = await readArchive(bytes, {
-      limits: limits({ maxAnalysableTextBytes: 199, maxTotalUncompressedBytes: 10_000 }),
+      limits: limits({ maxEntryCount: 2, maxTotalUncompressedBytes: 10_000 }),
     })
     const keptPartial = await readArchive(bytes, {
-      limits: limits({ maxAnalysableTextBytes: 199, maxTotalUncompressedBytes: 10_000 }),
+      limits: limits({ maxEntryCount: 1, maxTotalUncompressedBytes: 10_000 }),
       keepPartial: true,
     })
 
     expect(atCeiling.refusal).toBeNull()
     expect(atCeiling.entries).toHaveLength(2)
-    expect(oneShort.refusal?.code).toBe('total_uncompressed_exceeded')
-    expect(oneShort.entries).toHaveLength(0)
     expect(keptPartial.refusal).toBeNull()
     expect(keptPartial.entries.map((entry) => entry.name)).toEqual(['src/a.js'])
-    expect(keptPartial.partial?.code).toBe('analysable_budget_exceeded')
+    expect(keptPartial.partial?.code).toBe('entry_count_exceeded')
     expect(keptPartial.skipped.map((entry) => [entry.name, entry.code])).toEqual([
       ['src/b.js', 'not_reached'],
     ])
@@ -105,7 +100,7 @@ describe('zip ceilings at their exact boundary', () => {
       { name: 'src/a.js', content: 'a'.repeat(100) },
       { name: 'src/b.js', content: 'b'.repeat(100) },
     ])
-    const base = { maxAnalysableTextBytes: 10_000, keepPartial: true as const }
+    const base = { keepPartial: true as const }
 
     const atCeiling = await readArchive(bytes, {
       ...base,

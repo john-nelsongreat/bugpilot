@@ -17,6 +17,8 @@ export interface ArchiveClientReadOptions {
   includeGenerated?: boolean
   /** Keep entries read before a budget or cancel stop and mark the result partial. */
   keepPartial?: boolean
+  /** Names an earlier pass settled; the reader walks past them without reading. */
+  resumeProcessedNames?: ReadonlySet<string>
 }
 
 /** A copied buffer for tests and callers that hold bytes, or the picked file for random access. */
@@ -124,6 +126,7 @@ export function createArchiveClient(getWorker: () => WorkerHandle): ArchiveClien
             limits: options.limits,
             includeGenerated: options.includeGenerated === true,
             keepPartial: options.keepPartial === true,
+            resumeProcessedNames: options.resumeProcessedNames ? [...options.resumeProcessedNames] : undefined,
           },
           input instanceof Blob ? [] : [input.buffer as ArrayBuffer],
         )

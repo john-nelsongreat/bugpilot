@@ -52,7 +52,7 @@ export interface ArchiveReadStats {
   producedBytes: number
   /** Every byte produced from a compressed stream, including entries later skipped as binary. */
   inflatedBytes?: number
-  /** Analysable entries the index planned before extraction, including budget-stopped ones. */
+  /** Analysable entries the index planned before extraction, including cap-stopped ones. */
   plannedEntries?: number
   plannedBytes?: number
   entries: number
@@ -103,6 +103,12 @@ export interface ReadOptions {
    * a `partial` marker instead of refusing with nothing. Default is all-or-nothing.
    */
   keepPartial?: boolean
+  /**
+   * Names an earlier pass already analysed or decided to skip. Entries on this list are walked
+   * past without being read, so a continuation pass spends its budget only on new files. Names
+   * the earlier pass never reached are deliberately absent: they are this pass's work.
+   */
+  resumeProcessedNames?: ReadonlySet<string>
 }
 
 export class RefuseArchive extends Error {
@@ -178,11 +184,11 @@ const SLICE_MS = 12
 
 /** Whether the read has used up its wall clock. Readers that cannot throw ask this directly. */
 export function isWallClockSpent(limits: ArchiveLimits, started: number): boolean {
-  return Date.now() - started >= limits.maxWallClockMs
+  return Date.now() - started >= limits.maxChunkWallClockMs
 }
 
 export function wallClockSeconds(limits: ArchiveLimits): number {
-  return Math.round(limits.maxWallClockMs / 1000)
+  return Math.round(limits.maxChunkWallClockMs / 1000)
 }
 
 export interface ReadRun {
@@ -194,6 +200,7 @@ export interface ReadRun {
   onProgress?: (progress: ArchiveReadProgress) => void
   includeGenerated: boolean
   keepPartial: boolean
+  resumeProcessedNames: ReadonlySet<string> | null
 }
 
 export function createRun(options: ReadOptions): ReadRun {
@@ -217,6 +224,7 @@ export function createRun(options: ReadOptions): ReadRun {
     onProgress: options.onProgress,
     includeGenerated: options.includeGenerated === true,
     keepPartial: options.keepPartial === true,
+    resumeProcessedNames: options.resumeProcessedNames ?? null,
   }
 }
 
@@ -300,18 +308,18 @@ export function spendWorkBudget(run: ReadRun, bytes: number): void {
   }
 }
 
-/** The four stops a read may keep its partial result for. */
+/** The stops a read may keep its partial result for. */
 export type PartialStopCode =
   | 'cancelled'
   | 'wall_clock_exceeded'
   | 'total_uncompressed_exceeded'
-  | 'analysable_budget_exceeded'
+  | 'entry_count_exceeded'
 
 /** Why the rest of a container was not reached, in words that fit inside a coverage row. */
 export function partialStopPhrase(code: string): string {
   if (code === 'cancelled') return 'you cancelled the upload'
   if (code === 'wall_clock_exceeded') return 'the wall clock ran out'
-  if (code === 'analysable_budget_exceeded') return 'the analysis budget was reached'
+  if (code === 'entry_count_exceeded') return 'the analysed-entry cap for one pass was reached'
   return 'the unpacking work budget ran out'
 }
 

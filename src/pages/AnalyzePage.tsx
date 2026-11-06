@@ -3,6 +3,8 @@ import { AlertTriangle, Clipboard, FileSearch, FolderOpen, Plus, ShieldCheck, Up
 import {
   analyzeUpload,
   isStaleHandleError,
+  mergeSessionResults,
+  resumeNamesFrom,
   STALE_HANDLE_MESSAGE,
   type AnalysisSessionResult,
   type AnalyzeUploadOptions,
@@ -16,6 +18,7 @@ import {
   archiveCeilingFor,
   HIGH_CAPACITY_DEVICE_MEMORY_GIB,
   limitsForDevice,
+  MAX_FINDINGS_STORED,
   MAX_RETAINED_TEXT_BYTES,
 } from '../features/analyzer/archive/limits'
 import { wallClockSeconds } from '../features/analyzer/archive/bounds'
@@ -86,6 +89,8 @@ function defaultDownloadReportFile(
 function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`
   if (bytes < 1_048_576) return `${Math.round(bytes / 1_024)} KiB`
+  const gibibytes = bytes / (1_024 * 1_048_576)
+  if (gibibytes >= 1) return `${Number.isInteger(gibibytes) ? gibibytes : gibibytes.toFixed(1)} GiB`
   const mebibytes = bytes / 1_048_576
   return `${Number.isInteger(mebibytes) ? mebibytes : mebibytes.toFixed(1)} MiB`
 }
@@ -224,6 +229,11 @@ export function AnalyzePage({
   const [pasteText, setPasteText] = useState('')
   const [pasteName, setPasteName] = useState('')
   const [pasteExtension, setPasteExtension] = useState(DEFAULT_PASTE_EXTENSION)
+  /**
+   * Whether the current upload can be continued after a partial pass: the input has to be one the
+   * browser can open again (a picked archive or files), not a replay of text already held.
+   */
+  const [resumableInput, setResumableInput] = useState(false)
 
   const busyRef = useRef(false)
   const runTokenRef = useRef(0)
@@ -336,7 +346,11 @@ export function AnalyzePage({
     }
   }
 
-  async function runPass(prepare: () => Promise<PreparedUpload>, mode: PassMode): Promise<void> {
+  async function runPass(
+    prepare: () => Promise<PreparedUpload>,
+    mode: PassMode,
+    resume?: { from: AnalysisSessionResult },
+  ): Promise<void> {
     if (busyRef.current) return
 
     const token = runTokenRef.current + 1
@@ -349,7 +363,9 @@ export function AnalyzePage({
     setElapsedMs(0)
     setRunning(true)
     setProgress(null)
-    setResult(null)
+    // A continuation keeps the earlier report on screen while it runs, so the user can still see
+    // what has already been found; the merged result replaces it when the pass ends.
+    if (!resume) setResult(null)
 
     try {
       let prepared: PreparedUpload | null
@@ -376,6 +392,11 @@ export function AnalyzePage({
         setResult(cancelledResult(null))
         return
       }
+      // Continuation needs an input the browser can open again: a picked archive or the picked
+      // files. A replay of text this tab already held cannot skip what an earlier pass read.
+      setResumableInput(
+        prepared.input.kind === 'archive' ? prepared.input.file !== undefined : prepared.input.kind === 'files',
+      )
       retryRef.current = prepared.retry
       setUploads(prepared.uploads)
 
@@ -390,13 +411,15 @@ export function AnalyzePage({
         },
       }
       if (mode === 'deep') options.engines = 'approved'
+      if (resume) options.resumeProcessedNames = resumeNamesFrom(resume.from)
 
       let outcome = await analyze(prepared.input, options)
-      if (outcome.handleStale === true) {
+      if (outcome.handleStale === true && !resume) {
         const held = heldPass()
         if (held === null) outcome = staleResult()
         else outcome = await analyze(held.input, { ...options, archiveBytes: held.archiveBytes })
       }
+      if (resume) outcome = mergeSessionResults(resume.from, outcome, MAX_RETAINED_TEXT_BYTES)
       if (runTokenRef.current !== token) return
       // A cancel that arrives after the reader kept a partial result is not the same as an
       // empty cancel: the worker answered with the files it had, and that answer is shown.
@@ -442,6 +465,21 @@ export function AnalyzePage({
     void runPass(retry, 'deep')
   }
 
+  /**
+   * Continues a partial pass: the same upload is read again with the names the earlier passes
+   * already settled, and the merged result replaces what is on screen. A pass the user cancelled
+   * offers no continuation, because nothing about it says the user wants more reading.
+   */
+  function handleContinueAnalysis(): void {
+    const retry = retryRef.current
+    const previous = result
+    if (retry === null || busyRef.current) return
+    if (!previous || previous.status !== 'partial' || !previous.partial) return
+    if (previous.partial.code === 'cancelled') return
+    focusProgressRef.current = true
+    void runPass(retry, deepPass ? 'deep' : 'basic', { from: previous })
+  }
+
   function handleDismissGate(): void {
     setGateDismissed(true)
     uploadHeadingRef.current?.focus()
@@ -463,6 +501,7 @@ export function AnalyzePage({
     setPasteName('')
     setDeepPass(false)
     setIncludeGenerated(false)
+    setResumableInput(false)
     setGateDismissed(false)
     uploadHeadingRef.current?.focus()
   }
@@ -652,9 +691,9 @@ export function AnalyzePage({
                 <strong>Large project mode</strong>
                 <span className="analyze-option-hint">
                   For a machine that reports at least {HIGH_CAPACITY_DEVICE_MEMORY_GIB} GiB of memory:
-                  raises the zip, tar and text ceilings shown below. It also lets one read use more
-                  memory and more time, so the tab may slow down while a large upload is checked.
-                  Leave it off unless you need it.
+                  raises the zip and tar ceilings and the per-pass budgets shown below. It also lets
+                  one pass use more memory and more time, so the tab may slow down while a large
+                  upload is checked. Leave it off unless you need it.
                 </span>
               </span>
             </label>
@@ -881,6 +920,29 @@ export function AnalyzePage({
             </div>
           ) : null}
 
+          {!running &&
+          result?.status === 'partial' &&
+          result.partial &&
+          result.partial.code !== 'cancelled' &&
+          resumableInput ? (
+            <div className="notice" role="status">
+              <AlertTriangle size={20} aria-hidden="true" />
+              <div>
+                <strong>Partial analysis — continue to check the rest</strong>
+                <p>{sanitizeForDisplay(result.message ?? '')}</p>
+                <p className="field-hint">
+                  The next pass reads only the files this one did not reach, with a fresh time and
+                  work budget. A zip continues from where it stopped; a .tar.gz re-inflates the
+                  archive from the start, which costs time.
+                </p>
+                <button type="button" className="button button--primary" onClick={handleContinueAnalysis}>
+                  <FileSearch size={16} aria-hidden="true" />
+                  Continue analysis
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="analyze-limits">
             <h3>Limits, applied before anything is analysed</h3>
             <p className="field-hint">
@@ -894,10 +956,18 @@ export function AnalyzePage({
                 to be walked from start to end, so its ceiling is lower.
               </li>
               <li>
-                Unpacking is capped at {formatBytes(limits.maxTotalUncompressedBytes)} of really
-                produced bytes, including files later skipped as binary. At most{' '}
-                {formatBytes(limits.maxAnalysableTextBytes)} of analysable text is collected for
-                one run.
+                Each pass unpacks at most {formatBytes(limits.maxTotalUncompressedBytes)} of really
+                produced bytes, including files later skipped as binary, within{' '}
+                {wallClockSeconds(limits)} seconds. When a pass stops, what it read is kept as a
+                clearly labelled partial report and the page offers Continue analysis.
+              </li>
+              <li>
+                A pass parses up to {limits.maxParsedEntryCount.toLocaleString('en-US')} archive
+                records and analyses up to {limits.maxEntryCount.toLocaleString('en-US')} files;
+                skipped files — binary content, dependency folders, images — never count toward the
+                analysed cap. Continuing runs a new pass with a fresh budget: a zip continues from
+                where it stopped, while a .tar.gz re-inflates the archive from the start to reach
+                the files behind it.
               </li>
               <li>
                 A folder or a multi-file selection is capped at{' '}
@@ -906,9 +976,13 @@ export function AnalyzePage({
                 skipped with a reason instead of stopping the run.
               </li>
               <li>
-                Up to {limits.maxEntryCount.toLocaleString('en-US')} entries. Encrypted entries,
-                nested archives, symbolic links, unsafe paths, overlapping entries and duplicate
-                names are refused.
+                The report stores up to {MAX_FINDINGS_STORED.toLocaleString('en-US')} findings;
+                anything beyond that is counted per rule and named in the report instead of being
+                listed.
+              </li>
+              <li>
+                Encrypted entries, nested archives, symbolic links, unsafe paths, overlapping
+                entries and duplicate names are refused.
               </li>
               <li>
                 Binary files, empty files and dependency folders such as node_modules, .git or dist
@@ -925,12 +999,6 @@ export function AnalyzePage({
               <li>
                 Pasted code is capped at {formatBytes(MAX_PASTED_BYTES)} of UTF-8 and is treated as
                 one file named <code>pasted/snippet.txt</code>.
-              </li>
-              <li>
-                Reading one upload gets {wallClockSeconds(limits)} seconds. If that or the unpacking
-                budget runs out, BugPilot stops and keeps what it had read as a clearly labelled
-                partial report, so a huge folder cannot hang the tab or hide the files that were
-                reached.
               </li>
               <li>
                 The analysed text stays in this tab for the fix review while it fits{' '}

@@ -1,6 +1,7 @@
 import type { Severity } from '../../bugs/types'
+import { MAX_FINDINGS_STORED } from '../archive/limits'
 import type { ArchiveEntry, ArchiveSkippedEntry } from '../archive/guard'
-import type { AnalyzerFinding, AnalyzerPartialInfo, AnalyzerReport, AnalyzerSummary, AnalyzerTier, FileCoverage } from '../types'
+import type { AnalyzerFinding, AnalyzerFindingsTruncation, AnalyzerPartialInfo, AnalyzerReport, AnalyzerSummary, AnalyzerTier, FileCoverage } from '../types'
 import type { FileAnalysis } from './engine'
 
 export const REPORT_LIMITATIONS = [
@@ -36,6 +37,48 @@ export function sortReportFindings(findings: AnalyzerFinding[]): AnalyzerFinding
   })
 }
 
+const TRUNCATION_NOTE_PREFIX = 'The findings store keeps'
+
+export function isTruncationNote(line: string): boolean {
+  return line.startsWith(TRUNCATION_NOTE_PREFIX)
+}
+
+export function findingsTruncationNote(truncation: AnalyzerFindingsTruncation): string {
+  const perRule = Object.entries(truncation.perRule)
+    .sort((left, right) => right[1] - left[1])
+    .map(([rule, count]) => `${rule}: ${count.toLocaleString('en-US')}`)
+    .join(', ')
+  return (
+    `${TRUNCATION_NOTE_PREFIX} the first ${truncation.stored.toLocaleString('en-US')} findings. ` +
+    `${truncation.suppressed.toLocaleString('en-US')} more matched but are not stored (${perRule}). ` +
+    'Exports state the same truncation.'
+  )
+}
+
+/**
+ * The store holds a bounded number of findings so a rule that fires on every line of a generated
+ * file cannot push the tab out of memory. The caller sorts first, so what is kept is a
+ * deterministic prefix, and what is dropped is counted per rule rather than vanished.
+ */
+export function capStoredFindings(
+  findings: AnalyzerFinding[],
+  maxStored: number = MAX_FINDINGS_STORED,
+): {
+  findings: AnalyzerFinding[]
+  truncation: AnalyzerFindingsTruncation | null
+} {
+  if (findings.length <= maxStored) return { findings, truncation: null }
+  const kept = findings.slice(0, maxStored)
+  const perRule: Record<string, number> = {}
+  for (const finding of findings.slice(maxStored)) {
+    perRule[finding.ruleId] = (perRule[finding.ruleId] ?? 0) + 1
+  }
+  return {
+    findings: kept,
+    truncation: { stored: kept.length, suppressed: findings.length - kept.length, perRule },
+  }
+}
+
 export interface ReportBuildInput {
   generatedAt: Date
   archiveBytes: number
@@ -50,7 +93,9 @@ export interface ReportBuildInput {
 }
 
 export function buildReport(input: ReportBuildInput): AnalyzerReport {
-  const findings = sortReportFindings(input.analyses.flatMap((analysis) => analysis.findings))
+  const sorted = sortReportFindings(input.analyses.flatMap((analysis) => analysis.findings))
+  const summary = summarizeFindings(sorted)
+  const { findings, truncation } = capStoredFindings(sorted)
   return {
     schemaVersion: 1,
     generatedAt: input.generatedAt.toISOString(),
@@ -63,10 +108,15 @@ export function buildReport(input: ReportBuildInput): AnalyzerReport {
       skipped: input.skipped.map((item) => ({ file: item.name, reason: item.message })),
       ...(input.partial ? { partial: { ...input.partial } } : {}),
     },
-    summary: summarizeFindings(findings),
+    summary,
     findings,
     coverage: [...input.coverage],
-    limitations: [...REPORT_LIMITATIONS, ...(input.extraLimitations ?? [])],
+    limitations: [
+      ...REPORT_LIMITATIONS,
+      ...(input.extraLimitations ?? []),
+      ...(truncation ? [findingsTruncationNote(truncation)] : []),
+    ],
+    ...(truncation ? { truncated: truncation } : {}),
   }
 }
 

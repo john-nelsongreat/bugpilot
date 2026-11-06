@@ -287,20 +287,20 @@ describe('random-access zip: Blob slicing', () => {
 })
 
 describe('random-access zip: partial results', () => {
-  it('keeps the files read before the analysable budget ran out and names the rest', async () => {
+  it('analyses the first maxEntryCount files and names the rest for a continuation', async () => {
     const bytes = buildZip([
       { name: 'src/a.js', content: 'a'.repeat(100) },
       { name: 'src/b.js', content: 'b'.repeat(100) },
       { name: 'src/c.js', content: 'c'.repeat(100) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 250 }),
+      limits: limits({ maxEntryCount: 2 }),
       keepPartial: true,
     })
 
     expect(result.refusal).toBeNull()
     expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
-    expect(result.partial?.code).toBe('analysable_budget_exceeded')
+    expect(result.partial?.code).toBe('entry_count_exceeded')
     expect(result.skipped.filter((entry) => entry.code === 'not_reached').map((entry) => entry.name)).toEqual(['src/c.js'])
   })
 
@@ -310,7 +310,7 @@ describe('random-access zip: partial results', () => {
       { name: 'src/b.js', content: 'b'.repeat(200) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 10_000, maxTotalUncompressedBytes: 150 }),
+      limits: limits({ maxTotalUncompressedBytes: 150 }),
       keepPartial: true,
     })
 
@@ -343,7 +343,7 @@ describe('random-access zip: partial results', () => {
   it('returns a partial result with a reason when the clock is already spent', async () => {
     const bytes = buildZip([{ name: 'src/a.js', content: 'x\n' }])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxWallClockMs: 0 }),
+      limits: limits({ maxChunkWallClockMs: 0 }),
       keepPartial: true,
     })
 
@@ -358,7 +358,7 @@ describe('random-access zip: partial results', () => {
       { name: 'src/b.js', content: 'b'.repeat(200) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 10_000, maxTotalUncompressedBytes: 150 }),
+      limits: limits({ maxTotalUncompressedBytes: 150 }),
     })
 
     expect(result.refusal?.code).toBe('total_uncompressed_exceeded')
@@ -366,58 +366,50 @@ describe('random-access zip: partial results', () => {
   })
 })
 
-describe('random-access zip: the analysis budget fills with text, not with declared bytes', () => {
-  // The index charges an entry before it is inflated, so a file whose name claims to be source and
-  // whose bytes turn out to be binary would otherwise hold a slice of the text budget that it never
-  // uses. Each test below fixes one half of the defect measured on a 250 MiB archive, where the
-  // first run at the 20 MiB budget reported zero analysed files.
+describe('random-access zip: skipped entries never block the pass', () => {
+  // An entry whose contents turn out to be binary is skipped with a reason; it occupies no slice
+  // of any budget, so the files after it are analysed in the same pass.
   const nulls = new Uint8Array(100).fill(0x00)
 
-  it('gives the room a binary entry occupied back to a file that did not fit', async () => {
+  it('skips a binary entry and still analyses the files after it', async () => {
     const bytes = buildZip([
       { name: 'src/sneaky.js', content: nulls },
       { name: 'src/a.js', content: 'a'.repeat(100) },
       { name: 'src/b.js', content: 'b'.repeat(100) },
-      { name: 'src/c.js', content: 'c'.repeat(100) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 200 }),
+      limits: limits({ maxEntryCount: 3 }),
       keepPartial: true,
     })
 
     expect(result.refusal).toBeNull()
-    // Round one can only pay for the binary entry and `src/a.js`. The refund, after inflation shows
-    // the binary entry holds no text, is what lets `src/b.js` in on round two; without it only one
-    // of the three text files would be analysed.
     expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
     expect(result.skipped).toEqual([
       { name: 'src/sneaky.js', code: 'binary_content', message: expect.stringMatching(/binary file/) },
-      { name: 'src/c.js', code: 'not_reached', message: expect.stringMatching(/did not fit the analysis budget/) },
     ])
-    expect(result.partial?.code).toBe('analysable_budget_exceeded')
-    expect(result.stats.producedBytes).toBe(200)
+    expect(result.partial).toBeNull()
   })
 
-  it('names the files that never fitted once the budget is full as not reached', async () => {
+  it('names the files past the analysed cap as not reached, with a reason that says so', async () => {
     const bytes = buildZip([
       { name: 'src/a.js', content: 'a'.repeat(100) },
       { name: 'src/b.js', content: 'b'.repeat(100) },
       { name: 'src/c.js', content: 'c'.repeat(100) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 200 }),
+      limits: limits({ maxEntryCount: 2 }),
       keepPartial: true,
     })
 
     expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
     const unreached = result.skipped.filter((entry) => entry.code === 'not_reached')
     expect(unreached.map((entry) => entry.name)).toEqual(['src/c.js'])
-    // The reason has to say the budget was full, not that the file was skipped for being unreadable.
-    expect(unreached[0].message).toMatch(/did not fit the analysis budget/)
+    // The reason has to name the cap, not pretend the file was unreadable.
+    expect(unreached[0].message).toMatch(/cap/)
     expect(unreached[0].message).toMatch(/only the files BugPilot actually read/)
   })
 
-  it('counts every record once when the refund re-queues the files that did not fit', async () => {
+  it('counts every record once, whether it was analysed, skipped or left unreached', async () => {
     const bytes = buildZip([
       { name: 'src/sneaky.js', content: nulls },
       { name: 'src/a.js', content: 'a'.repeat(100) },
@@ -425,7 +417,7 @@ describe('random-access zip: the analysis budget fills with text, not with decla
       { name: 'src/c.js', content: 'c'.repeat(100) },
     ])
     const result = await readArchiveSource(createMemorySource(bytes), {
-      limits: limits({ maxAnalysableTextBytes: 200 }),
+      limits: limits({ maxEntryCount: 2 }),
       keepPartial: true,
     })
 

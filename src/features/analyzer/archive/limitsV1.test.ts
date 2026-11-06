@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ARCHIVE_LIMITS,
   HIGH_CAPACITY_ARCHIVE_LIMITS,
+  MAX_FINDINGS_STORED,
   MAX_RETAINED_TEXT_BYTES,
   archiveCeilingFor,
   limitsForDevice,
@@ -16,8 +17,8 @@ function halved(limits: ArchiveLimits): ArchiveLimits {
     maxArchiveBytes: limits.maxArchiveBytes / 2,
     maxTarArchiveBytes: limits.maxTarArchiveBytes / 2,
     maxTotalUncompressedBytes: limits.maxTotalUncompressedBytes / 2,
-    maxAnalysableTextBytes: limits.maxAnalysableTextBytes / 2,
     maxSingleFileUncompressedBytes: limits.maxSingleFileUncompressedBytes / 2,
+    maxParsedEntryCount: Math.floor(limits.maxParsedEntryCount / 2),
     maxEntryCount: Math.floor(limits.maxEntryCount / 2),
   }
 }
@@ -25,28 +26,32 @@ function halved(limits: ArchiveLimits): ArchiveLimits {
 describe('the upload ceilings', () => {
   it('matches the measured numbers for a normal machine', () => {
     expect(DEFAULT_ARCHIVE_LIMITS).toMatchObject({
-      maxArchiveBytes: 250 * MIB,
-      maxTarArchiveBytes: 100 * MIB,
+      maxArchiveBytes: 2 * 1024 * MIB,
+      maxTarArchiveBytes: 400 * MIB,
       maxTotalUncompressedBytes: 600 * MIB,
-      maxAnalysableTextBytes: 12 * MIB,
       maxSingleFileUncompressedBytes: 2 * MIB,
+      maxParsedEntryCount: 250_000,
       maxEntryCount: 20_000,
-      maxCentralDirectoryBytes: 16 * MIB,
+      maxCentralDirectoryBytes: 64 * MIB,
       maxDeclaredRatio: 60,
       maxActualRatio: 300,
-      maxWallClockMs: 300_000,
+      maxChunkWallClockMs: 300_000,
     })
     expect(MAX_RETAINED_TEXT_BYTES).toBe(32 * MIB)
+    expect(MAX_FINDINGS_STORED).toBe(200_000)
   })
 
-  it('keeps the opt-in tier at the largest analysed amount that was measured in a browser', () => {
-    // 20 MiB of analysed text measured a 281 ms task with no findings at all, and 150 MiB measured
-    // 2,537 ms with a 1,049 MiB process tree. The opt-in tier stops where the pause is still under a
-    // second, and buys its extra reach with archive bytes, work and time instead.
-    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxAnalysableTextBytes).toBe(40 * MIB)
-    // The normal tier never retains more text than the session can hold, so the deep pass always
-    // works from the complete set here; the retention cut-in belongs to the opt-in tier.
-    expect(DEFAULT_ARCHIVE_LIMITS.maxAnalysableTextBytes).toBeLessThan(MAX_RETAINED_TEXT_BYTES)
+  it('keeps the opt-in tier at the largest budgets a browser was measured to survive', () => {
+    // The opt-in tier buys reach in archive bytes, inflated work, analysed entries and clock —
+    // the budgets one pass spends — never in freezing the tab. It is opt-in for that reason.
+    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxArchiveBytes).toBe(8 * 1024 * MIB)
+    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxTarArchiveBytes).toBe(1024 * MIB)
+    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxTotalUncompressedBytes).toBe(1024 * MIB)
+    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxEntryCount).toBe(40_000)
+    expect(HIGH_CAPACITY_ARCHIVE_LIMITS.maxChunkWallClockMs).toBe(600_000)
+    // A pass walks far more index records than it analyses files: skipping an entry is cheap,
+    // analysing one is not, so the parsed cap sits well above the analysed cap.
+    expect(DEFAULT_ARCHIVE_LIMITS.maxParsedEntryCount).toBeGreaterThan(DEFAULT_ARCHIVE_LIMITS.maxEntryCount)
   })
 
   it('halves the ceilings that hold memory on a 2 GiB device', () => {
@@ -61,7 +66,7 @@ describe('the upload ceilings', () => {
     expect(small.maxActualRatio).toBe(DEFAULT_ARCHIVE_LIMITS.maxActualRatio)
     // A slower machine needs the same wall clock, not a shorter one: halving the time budget
     // would refuse a legitimate upload that the same machine could still have read.
-    expect(small.maxWallClockMs).toBe(DEFAULT_ARCHIVE_LIMITS.maxWallClockMs)
+    expect(small.maxChunkWallClockMs).toBe(DEFAULT_ARCHIVE_LIMITS.maxChunkWallClockMs)
     expect(small.inflateChunkBytes).toBe(DEFAULT_ARCHIVE_LIMITS.inflateChunkBytes)
   })
 
@@ -91,10 +96,10 @@ describe('the upload ceilings', () => {
   })
 
   it('reports the ceiling that applies to each upload shape', () => {
-    expect(archiveCeilingFor('zip', DEFAULT_ARCHIVE_LIMITS)).toBe(250 * MIB)
-    expect(archiveCeilingFor('tar', DEFAULT_ARCHIVE_LIMITS)).toBe(100 * MIB)
-    expect(archiveCeilingFor('gzip', DEFAULT_ARCHIVE_LIMITS)).toBe(100 * MIB)
+    expect(archiveCeilingFor('zip', DEFAULT_ARCHIVE_LIMITS)).toBe(2 * 1024 * MIB)
+    expect(archiveCeilingFor('tar', DEFAULT_ARCHIVE_LIMITS)).toBe(400 * MIB)
+    expect(archiveCeilingFor('gzip', DEFAULT_ARCHIVE_LIMITS)).toBe(400 * MIB)
     expect(archiveCeilingFor('folder', DEFAULT_ARCHIVE_LIMITS)).toBe(600 * MIB)
-    expect(archiveCeilingFor('zip', HIGH_CAPACITY_ARCHIVE_LIMITS)).toBe(500 * MIB)
+    expect(archiveCeilingFor('zip', HIGH_CAPACITY_ARCHIVE_LIMITS)).toBe(8 * 1024 * MIB)
   })
 })

@@ -145,8 +145,8 @@ describe('Analyze page deep pass and memory ceilings', () => {
     const analyze = vi.fn<AnalyzeFunction>(async () => ({ status: 'cancelled', message: null, report: null, stats: STATS }))
     render(<AnalyzePage analyze={analyze} />)
 
-    expect(screen.getByText(/Zip up to 125 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 10,000 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 1 GiB/)).toBeVisible()
+    expect(screen.getByText(/analyses up to 10,000 files/)).toBeVisible()
 
     selectFiles([new File(['hello\n'], 'notes.txt', { type: 'text/plain' })])
     await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1))

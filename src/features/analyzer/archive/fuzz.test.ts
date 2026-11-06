@@ -81,7 +81,7 @@ const TAR_GZ_BASE = gzipSync(TAR_BASE)
 
 function checkInvariants(result: ContainerReadResult): void {
   const limits = DEFAULT_ARCHIVE_LIMITS
-  expect(result.stats.walkedRecords).toBeLessThanOrEqual(limits.maxEntryCount)
+  expect(result.stats.walkedRecords).toBeLessThanOrEqual(limits.maxParsedEntryCount)
   expect(result.stats.producedBytes).toBeLessThanOrEqual(limits.maxTotalUncompressedBytes)
   if (result.refusal) {
     expect(result.entries).toEqual([])

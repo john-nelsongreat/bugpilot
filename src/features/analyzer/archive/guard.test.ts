@@ -8,6 +8,7 @@ const smallLimits = {
   maxArchiveBytes: 4096,
   maxTotalUncompressedBytes: 8192,
   maxSingleFileUncompressedBytes: 1024,
+  maxParsedEntryCount: 25,
   maxEntryCount: 20,
 }
 
@@ -122,15 +123,15 @@ describe('readArchive: refuses archive structures the reader must not follow', (
   })
 })
 
-describe('readArchive: leak A — the entry cap is measured on records actually walked', () => {
-  it('stops at the cap when the archive declares far fewer entries than it holds', async () => {
-    const records = manyEntries(smallLimits.maxEntryCount + 5)
+describe('readArchive: leak A — the parsed-entry cap is measured on records actually walked', () => {
+  it('stops at the parsed cap when the archive declares far fewer entries than it holds', async () => {
+    const records = manyEntries(smallLimits.maxParsedEntryCount + 5)
     const bytes = buildZip(records, { declaredEntryCount: 3 })
     const result = await readArchive(bytes, { limits: smallLimits })
 
     expect(result.refusal?.code).toBe('entry_count_exceeded')
     expect(result.entries).toHaveLength(0)
-    expect(result.stats.walkedRecords).toBeLessThanOrEqual(smallLimits.maxEntryCount + 1)
+    expect(result.stats.walkedRecords).toBeLessThanOrEqual(smallLimits.maxParsedEntryCount + 1)
   })
 
   it('refuses an archive holding more real entries than the default cap', async () => {

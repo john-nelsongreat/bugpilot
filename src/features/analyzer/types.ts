@@ -90,6 +90,19 @@ export interface AnalyzerSummary {
   byTier: Record<AnalyzerTier, number>
 }
 
+/**
+ * Present only when the rules matched more findings than the store keeps. The suppressed part is
+ * counted per rule rather than vanished, so the user can see which rule produced the flood.
+ */
+export interface AnalyzerFindingsTruncation {
+  /** How many findings the report stores. */
+  stored: number
+  /** How many matched but are not stored. */
+  suppressed: number
+  /** Suppressed findings per rule id, highest count first when displayed. */
+  perRule: Record<string, number>
+}
+
 export interface AnalyzerReport {
   schemaVersion: 1
   generatedAt: string
@@ -99,4 +112,5 @@ export interface AnalyzerReport {
   findings: AnalyzerFinding[]
   coverage: FileCoverage[]
   limitations: string[]
+  truncated?: AnalyzerFindingsTruncation
 }

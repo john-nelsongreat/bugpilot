@@ -58,27 +58,32 @@ describe('Large project mode', () => {
     const user = userEvent.setup()
     render(<AnalyzePage analyze={vi.fn<AnalyzeFunction>()} />)
 
-    expect(screen.getByText(/Zip up to 250 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 20,000 entries/)).toBeVisible()
-    expect(screen.getByText(/12 MiB of analysable text/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 2 GiB/)).toBeVisible()
+    expect(screen.getByText(/parses up to 250,000 archive records/)).toBeVisible()
+    expect(screen.getByText(/analyses up to 20,000 files/)).toBeVisible()
+    expect(screen.getByText(/unpacks at most 600 MiB/)).toBeVisible()
+    expect(screen.getByText(/within 300 seconds/)).toBeVisible()
+    expect(screen.getByText(/200,000 findings/)).toBeVisible()
     expect(screen.getByText('Effective for this machine.')).toBeVisible()
 
     const toggle = screen.getByLabelText(/Large project mode/) as HTMLInputElement
     expect(toggle.checked).toBe(false)
     expect(
-      screen.getByText(/raises the zip, tar and text ceilings/),
+      screen.getByText(/raises the zip and tar ceilings/),
     ).toBeVisible()
     expect(
-      screen.getByText(/lets one read use more memory and more time/),
+      screen.getByText(/lets one pass use more memory and more time/),
     ).toBeVisible()
 
     await user.click(toggle)
 
     expect(toggle.checked).toBe(true)
-    expect(screen.getByText(/Zip up to 500 MiB/)).toBeVisible()
-    expect(screen.getByText(/tar and tar.gz up to 200 MiB/)).toBeVisible()
-    expect(screen.getByText(/40 MiB of analysable text/)).toBeVisible()
-    expect(screen.getByText(/Up to 40,000 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 8 GiB/)).toBeVisible()
+    expect(screen.getByText(/tar and tar.gz up to 1 GiB/)).toBeVisible()
+    expect(screen.getByText(/unpacks at most 1 GiB/)).toBeVisible()
+    expect(screen.getByText(/within 600 seconds/)).toBeVisible()
+    expect(screen.getByText(/parses up to 250,000 archive records/)).toBeVisible()
+    expect(screen.getByText(/analyses up to 40,000 files/)).toBeVisible()
     expect(screen.getByText('Effective for this machine in large project mode.')).toBeVisible()
   })
 
@@ -111,8 +116,8 @@ describe('Large project mode', () => {
     render(<AnalyzePage analyze={vi.fn<AnalyzeFunction>()} />)
 
     expect(screen.queryByLabelText(/Large project mode/)).toBeNull()
-    expect(screen.getByText(/Zip up to 125 MiB/)).toBeVisible()
-    expect(screen.getByText(/Up to 10,000 entries/)).toBeVisible()
+    expect(screen.getByText(/Zip up to 1 GiB/)).toBeVisible()
+    expect(screen.getByText(/analyses up to 10,000 files/)).toBeVisible()
   })
 
   it('passes an axe audit with the opt-in offered and ticked', async () => {

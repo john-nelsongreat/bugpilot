@@ -9,7 +9,7 @@ import { DEFAULT_ARCHIVE_LIMITS } from './limits'
 import { buildZip } from '../../../test/zipFixtures'
 import { buildTar } from '../../../test/tarFixtures'
 
-const STOPPED_EVERYWHERE = { ...DEFAULT_ARCHIVE_LIMITS, maxWallClockMs: 0 }
+const STOPPED_EVERYWHERE = { ...DEFAULT_ARCHIVE_LIMITS, maxChunkWallClockMs: 0 }
 
 function looseSources(): IntakeSource[] {
   const body = 'const a = 1\n'
@@ -51,7 +51,9 @@ describe('the wall clock every reader shares', () => {
   })
 
   it('says how long it spent, in the message', async () => {
-    const result = await readLooseFiles(looseSources(), { limits: { ...DEFAULT_ARCHIVE_LIMITS, maxWallClockMs: 45_000 } })
+    const result = await readLooseFiles(looseSources(), {
+      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxChunkWallClockMs: 45_000 },
+    })
     expect(result.refusal).toBeNull()
     const stopped = await readLooseFiles(looseSources(), { limits: STOPPED_EVERYWHERE })
     expect(stopped.refusal?.message).toContain('second')

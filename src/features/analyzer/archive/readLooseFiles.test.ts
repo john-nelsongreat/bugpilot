@@ -132,35 +132,35 @@ describe('readLooseFiles: caps and hostile paths', () => {
     expect(result.refusal?.code).toBe('name_too_long')
   })
 
-  it('truncates the drop at the analysis budget, not at the unpacking ceiling', async () => {
+  it('truncates the drop at the analysed cap, not at the unpacking ceiling', async () => {
     const files = [source('src/a.js', 'a'.repeat(120)), source('src/b.js', 'b'.repeat(120)), source('src/c.js', 'c'.repeat(120))]
-    const limits = { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 }
+    const limits = { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxEntryCount: 2 }
 
     const kept = await readLooseFiles(files, { limits, keepPartial: true })
     expect(kept.refusal).toBeNull()
     expect(kept.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
-    expect(kept.partial?.code).toBe('analysable_budget_exceeded')
+    expect(kept.partial?.code).toBe('entry_count_exceeded')
     expect(kept.skipped.map((entry) => [entry.name, entry.code])).toEqual([['src/c.js', 'not_reached']])
 
     const refused = await readLooseFiles(files, { limits })
-    expect(refused.refusal?.code).toBe('analysable_budget_exceeded')
+    expect(refused.refusal?.code).toBe('entry_count_exceeded')
     expect(refused.entries).toHaveLength(0)
   })
 
-  it('does not let a skipped file spend the analysis budget', async () => {
+  it('does not count a skipped file toward the analysed cap', async () => {
     const files = [
       { path: 'src/sneaky.js', size: 120, read: async () => new Uint8Array(120).fill(0x00) },
       source('src/a.js', 'a'.repeat(120)),
       source('src/b.js', 'b'.repeat(120)),
     ]
     const result = await readLooseFiles(files, {
-      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxAnalysableTextBytes: 240 },
+      limits: { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 10_000, maxEntryCount: 2 },
       keepPartial: true,
     })
 
     expect(result.refusal).toBeNull()
-    // The budget is 240 and the two text files add up to exactly that; the file whose bytes turned
-    // out to be binary was read, found to hold no text and set aside without charging anything.
+    // The cap counts files analysed, and the file whose bytes turned out to be binary was skipped
+    // with a reason instead of consuming one of the two places.
     expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js', 'src/b.js'])
     expect(result.skipped.map((entry) => entry.code)).toEqual(['binary_content'])
     expect(result.partial).toBeUndefined()

@@ -81,9 +81,6 @@ const METHOD_DEFLATE = 8
 /** Deflate can make a file slightly bigger; anything past this is not a 2 MiB text file. */
 const COMPRESSED_OVERHEAD_BYTES = 65_536
 
-/** Shown next to a file the analysis budget had no room for. */
-const DID_NOT_FIT = 'it did not fit the analysis budget left for this upload'
-
 function unixFileType(externalAttrs: number): number {
   return (externalAttrs >>> 16) & UNIX_FILE_TYPE_MASK
 }
@@ -347,7 +344,9 @@ async function walkCentralDirectory(
     if (view.getUint32(pos, true) !== SIG_CENTRAL_HEADER) refuse('corrupt_central_directory')
     // The cap is measured on records actually walked, never on the declared total.
     run.stats.walkedRecords += 1
-    if (run.stats.walkedRecords > run.limits.maxEntryCount) refuse('entry_count_exceeded', run.limits.maxEntryCount)
+    if (run.stats.walkedRecords > run.limits.maxParsedEntryCount) {
+      refuse('entry_count_exceeded', run.limits.maxParsedEntryCount)
+    }
 
     const flags = view.getUint16(pos + 8, true)
     const method = view.getUint16(pos + 10, true)
@@ -413,15 +412,15 @@ async function walkCentralDirectory(
 /**
  * Every decision that can be made from the index is made here, before a compressed byte is read.
  * Ignored trees, media and oversized files are skipped without ever being inflated, which is what
- * makes a 250 MiB zip full of node_modules cheap. The return value is the skip reason, or
- * `'candidate'` for an entry that should be analysed if the text budget still has room for it —
- * the budget itself is judged by the fill loop, not here, because a file that does not fit now
- * may fit again once another candidate proves not to be text.
+ * makes a multi-gigabyte zip full of node_modules cheap. The return value is the skip reason,
+ * `'candidate'` for an entry this pass should analyse, or `'already_processed'` for an entry a
+ * previous pass settled, which the caller walks past without recording.
  */
-function classifyDeclared(record: CentralRecord, run: ReadRun): ArchiveSkipCode | 'candidate' {
+function classifyDeclared(record: CentralRecord, run: ReadRun): ArchiveSkipCode | 'candidate' | 'already_processed' {
   const { limits } = run
   validateName(record.name)
   if (isNestedArchive(record.name)) refuse('nested_archive', record.name)
+  if (run.resumeProcessedNames?.has(record.name)) return 'already_processed'
   if (isDirectoryEntry(record.externalAttrs)) return 'directory_entry'
   if (isIgnoredPath(record.name, run.includeGenerated)) return 'ignored_folder'
   if (!run.includeGenerated && isOsMetadataFile(record.name)) return 'generated_file'
@@ -434,13 +433,6 @@ function classifyDeclared(record: CentralRecord, run: ReadRun): ArchiveSkipCode 
   if (record.uncompressedSize > limits.maxSingleFileUncompressedBytes) return 'single_file_too_large'
   if (record.compressedSize > limits.maxSingleFileUncompressedBytes + COMPRESSED_OVERHEAD_BYTES) return 'single_file_too_large'
   return 'candidate'
-}
-
-function analysisBudget(run: ReadRun): number {
-  if (run.keepPartial) return run.limits.maxAnalysableTextBytes
-  // All-or-nothing callers keep the historical meaning of the total ceiling: the declared sum is
-  // checked against it before anything is inflated.
-  return Math.min(run.limits.maxAnalysableTextBytes, run.limits.maxTotalUncompressedBytes)
 }
 
 /**
@@ -628,7 +620,7 @@ async function extractRecord(source: ByteSource, planned: PlannedEntry, run: Rea
 
 function finishPartial(
   run: ReadRun,
-  code: 'cancelled' | 'wall_clock_exceeded' | 'total_uncompressed_exceeded' | 'analysable_budget_exceeded',
+  code: PartialStopCode,
   subject: string | number,
   entries: ArchiveEntry[],
   skipped: ArchiveSkippedEntry[],
@@ -642,7 +634,6 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
   const entries: ArchiveEntry[] = []
   const skipped: ArchiveSkippedEntry[] = []
   const finish = (refusal: ArchiveRefusal | null): ArchiveReadResult => finishRun(run, refusal, entries, skipped)
-  let planned: PlannedEntry[] = []
   let records: CentralRecord[] = []
 
   try {
@@ -700,145 +691,100 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
         candidates.push(record)
         continue
       }
+      // An entry a previous pass settled is neither read nor recorded here: the earlier pass
+      // already reported it, and this pass's coverage is only ever merged beside that one.
+      if (verdict === 'already_processed') continue
       skipped.push({ name: record.name, code: verdict, message: archiveReasonMessage(verdict, record.name) })
     }
+    run.stats.plannedEntries = candidates.length
+    run.stats.plannedBytes = candidates.reduce((sum, record) => sum + record.uncompressedSize, 0)
 
-    let plannedBytes = 0
-    let queue = candidates
-    const unreached: CentralRecord[] = []
-    for (;;) {
-      const accepted: PlannedEntry[] = []
-      const overBudget: CentralRecord[] = []
-      for (const record of queue) {
-        if (plannedBytes + record.uncompressedSize > analysisBudget(run)) {
-          overBudget.push(record)
+    // The analysed cap bounds the files this pass may take. Everything past it is named as not
+    // reached and the pass ends as a partial the user can continue; all-or-nothing callers get
+    // the refusal instead, because they asked to keep nothing. The capped set is still validated
+    // and extracted, so a pass always analyses up to the cap and never stalls at zero.
+    let capStopped = false
+    if (candidates.length > run.limits.maxEntryCount) {
+      const rest = candidates.splice(run.limits.maxEntryCount)
+      if (!run.keepPartial) refuse('entry_count_exceeded', run.limits.maxEntryCount)
+      for (const record of rest) skipped.push(notReachedEntry(record.name, 'entry_count_exceeded'))
+      capStopped = true
+    }
+
+    const planned: PlannedEntry[] = []
+    for (const record of candidates) {
+      await breathe(run)
+      try {
+        planned.push(await validateLocalHeader(source, record, centralOffset, run.signal))
+      } catch (error) {
+        // An entry whose own header or descriptor does not add up is dropped with a reason.
+        if (error instanceof SkipSingle) {
+          skipped.push({ name: record.name, code: error.code, message: archiveReasonMessage(error.code, record.name) })
+          run.stats.skipped = skipped.length
           continue
         }
-        plannedBytes += record.uncompressedSize
-        accepted.push({ record, dataStart: -1, dataEnd: -1, rangeEnd: -1 })
-      }
-      if (!run.keepPartial) {
-        // All-or-nothing callers keep the historical meaning of the ceiling: one declared sum is
-        // checked against it, and a plan that does not fit is refused instead of truncated.
-        if (overBudget.length > 0) refuse('total_uncompressed_exceeded', analysisBudget(run))
-      }
-      if (accepted.length === 0) {
-        unreached.push(...overBudget)
-        break
-      }
-
-      let freedBytes = 0
-      const ready: PlannedEntry[] = []
-      for (const item of accepted) {
-        await breathe(run)
-        try {
-          Object.assign(item, await validateLocalHeader(source, item.record, centralOffset, run.signal))
-          ready.push(item)
-        } catch (error) {
-          // An entry whose own header or descriptor does not add up is dropped with a reason. It
-          // was charged against the text budget, so the charge is withdrawn like any skip.
-          if (error instanceof SkipSingle) {
-            skipped.push({ name: item.record.name, code: error.code, message: archiveReasonMessage(error.code, item.record.name) })
-            run.stats.skipped = skipped.length
-            freedBytes += item.record.uncompressedSize
-            plannedBytes -= item.record.uncompressedSize
-            continue
-          }
-          if (isAbortError(error)) {
-            if (run.keepPartial) throw error
-            refuse('cancelled')
-          }
-          throw error
+        if (isAbortError(error)) {
+          if (run.keepPartial) throw error
+          refuse('cancelled')
         }
+        throw error
       }
-      if (ready.length === 0) {
-        // Everything this round charged was skipped on its own header. The budget is now free, so
-        // the files still waiting get their turn; nothing here is counted as planned or reached.
-        if (overBudget.length === 0) break
-        queue = overBudget
-        continue
-      }
-      planned.push(...ready)
-      run.stats.plannedEntries = planned.length + overBudget.length
-      run.stats.plannedBytes = plannedBytes
+    }
 
-      checkRanges(planned, centralOffset)
+    checkRanges(planned, centralOffset)
 
-      let stoppedCode: PartialStopCode | null = null
-      let stoppedSubject: string | number = ''
-      let stoppedAt = 0
-      for (let index = 0; index < ready.length; index += 1) {
-        const item = ready[index]
-        stoppedAt = index
-        await breathe(run)
-        try {
-          entries.push(await extractRecord(source, item, run))
-          run.stats.entries = entries.length
+    let stoppedCode: PartialStopCode | null = null
+    let stoppedSubject: string | number = ''
+    let stoppedAt = 0
+    for (let index = 0; index < planned.length; index += 1) {
+      const item = planned[index]
+      stoppedAt = index
+      await breathe(run)
+      try {
+        entries.push(await extractRecord(source, item, run))
+        run.stats.entries = entries.length
+        run.stats.skipped = skipped.length
+        reportProgress(run, 'extract')
+      } catch (error) {
+        if (error instanceof SkipSingle) {
+          skipped.push({ name: item.record.name, code: error.code, message: archiveReasonMessage(error.code, item.record.name) })
           run.stats.skipped = skipped.length
-          reportProgress(run, 'extract')
-        } catch (error) {
-          if (error instanceof SkipSingle) {
-            skipped.push({ name: item.record.name, code: error.code, message: archiveReasonMessage(error.code, item.record.name) })
-            run.stats.skipped = skipped.length
-            // The index charged this entry against the text budget and it turned out to hold no
-            // text, so the charge is withdrawn and another round gets the files that did not fit.
-            freedBytes += item.record.uncompressedSize
-            plannedBytes -= item.record.uncompressedSize
-            continue
-          }
-          if (error instanceof PartialStop) {
-            stoppedCode = error.code as PartialStopCode
-            stoppedSubject = error.subject
-          } else if (run.keepPartial && isAbortError(error)) {
-            stoppedCode = 'cancelled'
-            stoppedSubject = ''
-          } else {
-            return finish(toRefusal(error))
-          }
-          break
+          continue
         }
-      }
-      if (stoppedCode !== null) {
-        // A stop inside the round: the rest of this round, and everything still waiting for the
-        // budget, are named as not reached. The refund above is not re-offered, because the run
-        // stopped for a reason that has nothing to do with how full the budget was.
-        for (const rest of ready.slice(stoppedAt)) {
-          skipped.push(notReachedEntry(rest.record.name, stoppedCode))
+        if (error instanceof PartialStop) {
+          stoppedCode = error.code as PartialStopCode
+          stoppedSubject = error.subject
+        } else if (run.keepPartial && isAbortError(error)) {
+          stoppedCode = 'cancelled'
+          stoppedSubject = ''
+        } else {
+          return finish(toRefusal(error))
         }
-        for (const rest of overBudget) {
-          skipped.push(notReachedEntry(rest.name, stoppedCode))
-        }
-        run.stats.plannedEntries = planned.length + ready.length - stoppedAt + overBudget.length
-        return finishPartial(run, stoppedCode, stoppedSubject, entries, skipped)
-      }
-      if (freedBytes === 0 || overBudget.length === 0) {
-        unreached.push(...overBudget)
         break
       }
-      // The refund made room, so the files that did not fit this round are tried again. They are
-      // only named as not reached once, in the round that finally cannot take anything more.
-      queue = overBudget
     }
-
-    for (const record of unreached) {
-      skipped.push(notReachedEntry(record.name, 'analysable_budget_exceeded', DID_NOT_FIT))
+    if (stoppedCode !== null) {
+      // A stop inside the pass: this entry and everything behind it are named as not reached.
+      for (const rest of planned.slice(stoppedAt)) {
+        skipped.push(notReachedEntry(rest.record.name, stoppedCode))
+      }
+      return finishPartial(run, stoppedCode, stoppedSubject, entries, skipped)
     }
-    run.stats.plannedEntries = planned.length + unreached.length
-    run.stats.plannedBytes = plannedBytes
-    if (unreached.length > 0) {
-      return finishPartial(run, 'analysable_budget_exceeded', run.limits.maxAnalysableTextBytes, entries, skipped)
+    if (capStopped) {
+      return finishPartial(run, 'entry_count_exceeded', run.limits.maxEntryCount, entries, skipped)
     }
   } catch (error) {
     if (error instanceof PartialStop || (run.keepPartial && isAbortError(error))) {
       const code = error instanceof PartialStop ? error.code : 'cancelled'
       const subject = error instanceof PartialStop ? error.subject : ''
       for (const record of records) {
+        if (run.resumeProcessedNames?.has(record.name)) continue
         if (!skipped.some((entry) => entry.name === record.name)) {
           skipped.push(notReachedEntry(record.name, code))
         }
       }
       run.stats.plannedEntries = Math.max(run.stats.plannedEntries ?? 0, records.length)
-      return finishPartial(run, code as 'cancelled' | 'wall_clock_exceeded', subject, entries, skipped)
+      return finishPartial(run, code as PartialStopCode, subject, entries, skipped)
     }
     return finish(toRefusal(error))
   }
