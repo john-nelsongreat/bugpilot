@@ -24,7 +24,7 @@ import { archiveReasonMessage, type ArchiveSkipCode } from './reasons'
 import { base256Field, octalField } from './format'
 import { detectLanguage } from './classify'
 import { decodeBytes, looksBinary } from './decode'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive } from './paths'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile } from './paths'
 
 /**
  * A strictly bounded tar reader. Nothing here trusts a header: every length field is checked
@@ -273,6 +273,7 @@ function declaredSkip(typeFlag: number, label: string | null, name: string, size
   if (label) return 'special_entry'
   if (typeFlag === FLAG.directory) return 'directory_entry'
   if (isIgnoredPath(name, run.includeGenerated)) return 'ignored_folder'
+  if (!run.includeGenerated && isOsMetadataFile(name)) return 'generated_file'
   if (hasBinaryExtension(name)) return 'binary_content'
   if (size === 0) return 'empty_entry'
   if (size > run.limits.maxSingleFileUncompressedBytes) return 'single_file_too_large'

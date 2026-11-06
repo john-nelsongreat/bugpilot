@@ -50,12 +50,28 @@ describe('random-access zip: locating the end of the central directory', () => {
     expect(result.entries).toHaveLength(1)
   })
 
-  it('refuses trailing bytes after the end record', async () => {
+  it('steps over trailing bytes after the end record instead of refusing the archive', async () => {
     const clean = buildZip([{ name: 'src/a.js', content: 'x\n' }])
     const bytes = new Uint8Array(clean.length + 12)
     bytes.set(clean, 0)
     bytes.fill(0x41, clean.length)
     const result = await readArchiveSource(createMemorySource(bytes))
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/a.js'])
+  })
+
+  it('refuses an archive whose junk pushes the end record past the scan window', async () => {
+    const bytes = buildZip([{ name: 'src/a.js', content: 'x\n' }], { append: new Uint8Array(70_000).fill(0x41) })
+    const result = await readArchiveSource(createMemorySource(bytes))
+
+    expect(result.refusal?.code).toBe('not_a_zip')
+  })
+
+  it('refuses an end record whose comment is cut off, junk or no junk', async () => {
+    const bytes = buildZip([{ name: 'src/a.js', content: 'x\n' }], { comment: 'a tail that is not all there' })
+    const truncated = bytes.subarray(0, bytes.length - 10)
+    const result = await readArchiveSource(createMemorySource(truncated))
 
     expect(result.refusal?.code).toBe('not_a_zip')
   })
@@ -191,9 +207,10 @@ describe('random-access zip: formats and record flags the reader still refuses',
     expect(result.refusal?.code).toBe('multi_disk_not_supported')
   })
 
-  it('refuses zip64 through its locator', async () => {
+  it('reads a zip64 archive reached through its locator', async () => {
     const result = await readArchiveSource(createMemorySource(zip64Archive()))
-    expect(result.refusal?.code).toBe('zip64_not_supported')
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['a.txt'])
   })
 
   it('keeps the encrypted, symlink, duplicate and traversal refusals', async () => {

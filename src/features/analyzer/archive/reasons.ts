@@ -22,7 +22,6 @@ export const ARCHIVE_REFUSAL_CODES = [
   'not_a_zip',
   'not_a_tar',
   'unsupported_format',
-  'zip64_not_supported',
   'multi_disk_not_supported',
   'central_directory_too_large',
   'overlapping_entries',
@@ -37,7 +36,6 @@ export const ARCHIVE_REFUSAL_CODES = [
   'archive_truncated',
   'crc_mismatch',
   'unsupported_compression',
-  'data_descriptor_not_supported',
   'null_byte_in_name',
   'cancelled',
   'worker_error',
@@ -53,6 +51,7 @@ export const ARCHIVE_SKIP_CODES = [
   'source_set_aside',
   'notebook_unreadable',
   'generated_file',
+  'data_descriptor_mismatch',
   'not_reached',
 ] as const
 
@@ -104,8 +103,6 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     kind === ''
       ? 'BugPilot could not recognise this file: it does not carry the signature of a .zip, .tar or .gz archive, and it is not plain text. Only those formats are read in the browser.'
       : `This is a .${kind} archive. BugPilot does not decode .${kind} files in the browser. Re-archive the project as a .zip or a .tar.gz and upload that instead.`,
-  zip64_not_supported: () =>
-    'This archive uses the ZIP64 format, which this reader does not support. Nothing was unpacked.',
   multi_disk_not_supported: () =>
     'This archive is split across several disks or volumes. BugPilot reads one file, so the archive is refused.',
   central_directory_too_large: (n) =>
@@ -138,14 +135,14 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `The contents of "${name}" do not match the checksum stored in the archive, so the archive is refused.`,
   unsupported_compression: (name, extra) =>
     `The entry "${name}" uses compression method ${extra ?? 'unknown'}, which BugPilot cannot unpack.`,
-  data_descriptor_not_supported: (name) =>
-    `The entry "${name}" stores its sizes after its data instead of in the header, so BugPilot cannot know how much to unpack and refuses the archive.`,
   null_byte_in_name: (name) =>
     `A file name inside the archive is cut short by a NUL byte ("${name}"), which is how path-traversal tricks hide a second name. The archive is refused.`,
   cancelled: () => 'You cancelled the upload, so nothing was read.',
   worker_error: () => 'The file reader stopped with an unexpected error. Nothing was stored.',
   single_file_too_large: (name) =>
     `"${name}" is bigger than the per-file ceiling, so BugPilot skipped this file and kept going with the rest.`,
+  data_descriptor_mismatch: (name) =>
+    `"${name}" stores its checksum and sizes after its data, and that record does not match the archive index, so BugPilot skipped this file and kept going with the rest.`,
   binary_content: (name) =>
     `"${name}" is a binary file, not text, so there is nothing for BugPilot to read.`,
   ignored_folder: (name) =>

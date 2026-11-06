@@ -138,7 +138,11 @@ export const IGNORED_FOLDER_SEGMENTS: readonly string[] = [
   '.vscode',
   '.gradle',
   '.terraform',
+  '__MACOSX',
 ]
+
+/** Files the operating system leaves behind in a folder; no editor writes them. */
+export const OS_METADATA_FILES: readonly string[] = ['.DS_Store', 'Thumbs.db', 'desktop.ini']
 
 /** Archives that must never be re-opened from inside an archive. */
 export const NESTED_ARCHIVE_EXTENSIONS: readonly string[] = [

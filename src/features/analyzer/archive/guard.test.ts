@@ -114,10 +114,11 @@ describe('readArchive: refuses archive structures the reader must not follow', (
     expect(result.refusal?.code).toBe('nested_archive')
   })
 
-  it('refuses a zip64 archive with a specific reason', async () => {
+  it('reads a zip64 archive through its end record', async () => {
     const result = await readArchive(zip64Archive())
 
-    expect(result.refusal?.code).toBe('zip64_not_supported')
+    expect(result.refusal).toBeNull()
+    expect(result.entries[0].name).toBe('a.txt')
   })
 })
 
@@ -414,11 +415,12 @@ describe('readArchive: damaged and lying archives', () => {
     expect(result.refusal?.code).toBe('null_byte_in_name')
   })
 
-  it('refuses an entry that stores its sizes after its data', async () => {
+  it('reads an entry that stores its sizes after its data', async () => {
     const bytes = buildZip([{ name: 'src/a.js', content: 'x\n', dataDescriptor: true }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('data_descriptor_not_supported')
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.text)).toEqual(['x\n'])
   })
 })
 

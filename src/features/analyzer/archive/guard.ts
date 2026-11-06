@@ -28,7 +28,7 @@ import { crc32, crc32Finish } from './crc32'
 import { detectLanguage } from './classify'
 import { decodeBytes, looksBinary } from './decode'
 import { archiveReasonMessage, type ArchiveSkipCode } from './reasons'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive } from './paths'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile } from './paths'
 import { createMemorySource, type ByteSource } from './source'
 
 export { DEFAULT_ARCHIVE_LIMITS } from './limits'
@@ -51,12 +51,22 @@ export type {
 const SIG_LOCAL_HEADER = 0x04034b50
 const SIG_CENTRAL_HEADER = 0x02014b50
 const SIG_END_OF_CENTRAL = 0x06054b50
+const SIG_ZIP64_EOCD = 0x06064b50
 const SIG_ZIP64_LOCATOR = 0x07064b50
+const SIG_DATA_DESCRIPTOR = 0x08074b50
 const END_OF_CENTRAL_MIN_SIZE = 22
 const END_OF_CENTRAL_SCAN_WINDOW = 65_535 + END_OF_CENTRAL_MIN_SIZE
 const CENTRAL_HEADER_SIZE = 46
 const LOCAL_HEADER_SIZE = 30
 const ZIP64_LOCATOR_SIZE = 20
+const ZIP64_EOCD_MIN_SIZE = 56
+/** A descriptor is 12 or 20 bytes, plus the optional 4-byte signature it may start with. */
+const DATA_DESCRIPTOR_MAX_BYTES = 24
+/** The 32-bit fields a zip64 archive marks as "the real number is in the extra field". */
+const UINT32_MAX = 0xffffffff
+const UINT16_MAX = 0xffff
+const EXTRA_ZIP64 = 0x0001
+const EXTRA_UNICODE_PATH = 0x7855
 
 const FLAG_ENCRYPTED = 0x0001
 const FLAG_DATA_DESCRIPTOR = 0x0008
@@ -86,10 +96,14 @@ function isDirectoryEntry(externalAttrs: number): boolean {
   return unixFileType(externalAttrs) === UNIX_DIRECTORY || (externalAttrs & DOS_DIRECTORY_BIT) === DOS_DIRECTORY_BIT
 }
 
-function decodeEntryName(bytes: Uint8Array, flags: number): string {
+function rejectNullBytes(bytes: Uint8Array): void {
   for (let i = 0; i < bytes.length; i += 1) {
     if (bytes[i] === 0) refuse('null_byte_in_name', asciiPrefix(bytes))
   }
+}
+
+function decodeEntryName(bytes: Uint8Array, flags: number): string {
+  rejectNullBytes(bytes)
   if (flags & FLAG_NAME_IS_UTF8) {
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -98,6 +112,23 @@ function decodeEntryName(bytes: Uint8Array, flags: number): string {
     }
   }
   return new TextDecoder('iso-8859-1').decode(bytes)
+}
+
+/**
+ * Decode a name that is UTF-8 where the header's own bytes are not. Info-ZIP stores a CP437
+ * rendering of the name in the two headers and the real spelling in a `0x7855` field, guarded by
+ * the checksum of the bytes it replaces. A field whose checksum does not match is ignored rather
+ * than trusted: the header bytes it claims to describe are the ones the offsets were built from.
+ */
+function unicodePathName(body: Uint8Array | null, nameBytes: Uint8Array): string | null {
+  if (body === null || body.length < 5) return null
+  if (viewOf(body).getUint32(0, true) !== crc32Finish(crc32(nameBytes))) return null
+  rejectNullBytes(nameBytes)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(body.subarray(4))
+  } catch {
+    return null
+  }
 }
 
 function asciiPrefix(bytes: Uint8Array): string {
@@ -146,23 +177,156 @@ interface CentralRecord {
   uncompressedSize: number
   externalAttrs: number
   localHeaderOffset: number
+  /** The volume the entry's local header starts on; a nonzero value is a split archive. */
+  startDisk: number
+  /** General-purpose bit 3: this entry's crc and sizes also live in a data descriptor. */
+  dataDescriptor: boolean
+  /** The sizes or the offset came from a zip64 extra field. */
+  zip64: boolean
 }
 
 interface PlannedEntry {
   record: CentralRecord
   dataStart: number
   dataEnd: number
+  /** `dataEnd` plus the data descriptor, so the alias check sees every byte the entry owns. */
+  rangeEnd: number
 }
 
-/** The end record is found by scanning back only the window a comment can occupy. */
+/**
+ * The end record is found by scanning back only the window a comment can occupy. A file that was
+ * transferred badly, mailed with a footer or produced by a streaming writer can carry bytes past
+ * the comment, so a record whose comment does not reach the end of the file is accepted when no
+ * exact fit exists. Both passes take the rightmost record they can, which is the one a writer
+ * appended last.
+ */
 function findEndOfCentralDirectory(tail: Uint8Array): number {
   const view = viewOf(tail)
+  let trailing = -1
   for (let pos = tail.length - END_OF_CENTRAL_MIN_SIZE; pos >= 0; pos -= 1) {
     if (view.getUint32(pos, true) !== SIG_END_OF_CENTRAL) continue
     const commentLength = view.getUint16(pos + 20, true)
     if (pos + END_OF_CENTRAL_MIN_SIZE + commentLength === tail.length) return pos
+    if (trailing < 0 && pos + END_OF_CENTRAL_MIN_SIZE + commentLength < tail.length) trailing = pos
   }
-  return -1
+  return trailing
+}
+
+/** A zip64 eight-byte field, refused rather than wrapped when no JS integer can hold it. */
+function readU64(view: DataView, at: number, subject: string): number {
+  if (at + 8 > view.byteLength) refuse('corrupt_central_directory', subject)
+  const wide = view.getBigUint64(at, true)
+  if (wide > BigInt(Number.MAX_SAFE_INTEGER)) refuse('corrupt_central_directory', subject)
+  return Number(wide)
+}
+
+/**
+ * Resolve the zip64 extra field (0x0001). The specification stores only the fields whose 32-bit
+ * copy was the all-ones marker, in the order uncompressed size, compressed size, header offset,
+ * disk number — but writers that always emit the full set exist too, and a 24 or 28 byte body is
+ * that shape. Both readings are decided from the body length before anything is read, so a value
+ * is never taken from the wrong slot. A marker neither reading resolves is a size the reader can
+ * only guess, so it costs the archive rather than the truth of every later byte range.
+ */
+function applyZip64Extra(record: CentralRecord, body: Uint8Array): void {
+  const view = viewOf(body)
+  const dense = view.byteLength === 24 || view.byteLength === 28
+  let at = 0
+  const sizeAt = (where: number): number => readU64(view, where, record.name)
+  const diskAt = (where: number): number => {
+    if (where + 4 > view.byteLength) refuse('corrupt_central_directory', record.name)
+    return view.getUint32(where, true)
+  }
+  if (record.uncompressedSize === UINT32_MAX) {
+    record.uncompressedSize = sizeAt(dense ? 0 : at)
+    if (!dense) at += 8
+  }
+  if (record.compressedSize === UINT32_MAX) {
+    record.compressedSize = sizeAt(dense ? 8 : at)
+    if (!dense) at += 8
+  }
+  if (record.localHeaderOffset === UINT32_MAX) {
+    record.localHeaderOffset = sizeAt(dense ? 16 : at)
+    if (!dense) at += 8
+  }
+  if (record.startDisk === UINT16_MAX) {
+    record.startDisk = diskAt(dense ? 24 : at)
+    if (!dense) at += 4
+  }
+  record.zip64 = true
+  if (
+    record.uncompressedSize === UINT32_MAX ||
+    record.compressedSize === UINT32_MAX ||
+    record.localHeaderOffset === UINT32_MAX ||
+    record.startDisk === UINT16_MAX
+  ) {
+    refuse('corrupt_central_directory', record.name)
+  }
+}
+
+/** Walk one entry's extra fields, which is where zip64 hides its real numbers. */
+function applyExtraFields(record: CentralRecord, extra: Uint8Array): Uint8Array | null {
+  let zip64Body: Uint8Array | null = null
+  let unicodeBody: Uint8Array | null = null
+  let cursor = 0
+  while (cursor + 4 <= extra.length) {
+    const head = viewOf(extra.subarray(cursor, cursor + 4))
+    const headerId = head.getUint16(0, true)
+    const size = head.getUint16(2, true)
+    if (cursor + 4 + size > extra.length) refuse('corrupt_central_directory', record.name)
+    if (headerId === EXTRA_ZIP64 && zip64Body === null) zip64Body = extra.subarray(cursor + 4, cursor + 4 + size)
+    if (headerId === EXTRA_UNICODE_PATH && unicodeBody === null) {
+      unicodeBody = size >= 4 ? extra.subarray(cursor + 4, cursor + 4 + size) : null
+    }
+    cursor += 4 + size
+  }
+  if (zip64Body === null) {
+    if (
+      record.uncompressedSize === UINT32_MAX ||
+      record.compressedSize === UINT32_MAX ||
+      record.localHeaderOffset === UINT32_MAX ||
+      record.startDisk === UINT16_MAX
+    ) {
+      refuse('corrupt_central_directory', record.name)
+    }
+    return unicodeBody
+  }
+  applyZip64Extra(record, zip64Body)
+  return unicodeBody
+}
+
+/**
+ * The zip64 end record, reached through the twenty-byte locator that sits in front of the
+ * ordinary one. Returns null when no locator is there, which is the archive everyone expects.
+ * Every number here decides where the index is read from, so each is bounded before it is used.
+ */
+async function readZip64EndRecord(
+  source: ByteSource,
+  tail: Uint8Array,
+  tailStart: number,
+  eocd: number,
+  signal?: AbortSignal,
+): Promise<{ centralSize: number; centralOffset: number } | null> {
+  const locatorStart = eocd - ZIP64_LOCATOR_SIZE
+  if (locatorStart < 0) return null
+  const locatorRel = locatorStart - tailStart
+  const locator = locatorRel >= 0 && locatorRel + ZIP64_LOCATOR_SIZE <= tail.length
+    ? tail.subarray(locatorRel, locatorRel + ZIP64_LOCATOR_SIZE)
+    : await source.read(locatorStart, eocd, signal)
+  const head = viewOf(locator)
+  if (head.getUint32(0, true) !== SIG_ZIP64_LOCATOR) return null
+  // A locator or a record that names a second volume describes a split archive. BugPilot reads
+  // one file and says so plainly rather than guessing which volume it was given.
+  if (head.getUint32(4, true) !== 0 || head.getUint32(16, true) !== 1) refuse('multi_disk_not_supported')
+  const recordStart = readU64(head, 8, '')
+  if (recordStart + ZIP64_EOCD_MIN_SIZE > locatorStart) refuse('corrupt_central_directory')
+  const record = viewOf(await source.read(recordStart, recordStart + ZIP64_EOCD_MIN_SIZE, signal))
+  if (record.getUint32(0, true) !== SIG_ZIP64_EOCD) refuse('corrupt_central_directory')
+  const recordSize = readU64(record, 4, '')
+  if (recordSize < ZIP64_EOCD_MIN_SIZE - 12) refuse('corrupt_central_directory')
+  if (recordStart + 12 + recordSize > locatorStart) refuse('corrupt_central_directory')
+  if (record.getUint32(16, true) !== 0 || record.getUint32(20, true) !== 0) refuse('multi_disk_not_supported')
+  return { centralSize: readU64(record, 40, ''), centralOffset: readU64(record, 48, '') }
 }
 
 async function walkCentralDirectory(
@@ -193,29 +357,52 @@ async function walkCentralDirectory(
     const nameLength = view.getUint16(pos + 28, true)
     const extraLength = view.getUint16(pos + 30, true)
     const commentLength = view.getUint16(pos + 32, true)
+    const startDisk = view.getUint16(pos + 34, true)
     const externalAttrs = view.getUint32(pos + 38, true)
     const localHeaderOffset = view.getUint32(pos + 42, true)
     const recordEnd = pos + CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength
     if (recordEnd > bytes.length) refuse('corrupt_central_directory')
 
-    // Encryption and symlinks are diagnosed before the name is judged, so a hostile name cannot
-    // hide the more serious property.
+    const record: CentralRecord = {
+      name: '',
+      nameBytes: bytes.subarray(pos + CENTRAL_HEADER_SIZE, pos + CENTRAL_HEADER_SIZE + nameLength),
+      flags,
+      method,
+      crc,
+      compressedSize,
+      uncompressedSize,
+      externalAttrs,
+      localHeaderOffset,
+      startDisk,
+      dataDescriptor: (flags & FLAG_DATA_DESCRIPTOR) !== 0,
+      zip64: false,
+    }
+    // Zip64 replaces the all-ones markers in this record's own extra field, so the real sizes and
+    // offset are settled before anything is judged from them.
+    const unicodeBody = applyExtraFields(
+      record,
+      bytes.subarray(pos + CENTRAL_HEADER_SIZE + nameLength, pos + CENTRAL_HEADER_SIZE + nameLength + extraLength),
+    )
+
+    // Encryption, foreign volumes and symlinks are diagnosed before the name is judged, so a
+    // hostile name cannot hide the more serious property.
     if (flags & FLAG_ENCRYPTED) {
-      refuse('encrypted_entry', messageName(bytes.subarray(pos + CENTRAL_HEADER_SIZE, pos + CENTRAL_HEADER_SIZE + nameLength), flags))
+      refuse('encrypted_entry', messageName(record.nameBytes, flags))
     }
-    if (flags & FLAG_DATA_DESCRIPTOR) {
-      refuse('data_descriptor_not_supported', messageName(bytes.subarray(pos + CENTRAL_HEADER_SIZE, pos + CENTRAL_HEADER_SIZE + nameLength), flags))
-    }
-    if (isSymbolicLink(externalAttrs)) {
-      refuse('symlink_entry', messageName(bytes.subarray(pos + CENTRAL_HEADER_SIZE, pos + CENTRAL_HEADER_SIZE + nameLength), flags))
+    if (record.startDisk !== 0) refuse('multi_disk_not_supported', messageName(record.nameBytes, flags))
+    if (isSymbolicLink(record.externalAttrs)) {
+      refuse('symlink_entry', messageName(record.nameBytes, flags))
     }
 
     if (nameLength > run.limits.maxEntryNameBytes) refuse('name_too_long', nameLength)
-    const nameBytes = bytes.subarray(pos + CENTRAL_HEADER_SIZE, pos + CENTRAL_HEADER_SIZE + nameLength)
-    const name = decodeEntryName(nameBytes, flags)
+    if (unicodeBody !== null && unicodeBody.length > run.limits.maxEntryNameBytes) {
+      refuse('name_too_long', unicodeBody.length)
+    }
+    const name = unicodePathName(unicodeBody, record.nameBytes) ?? decodeEntryName(record.nameBytes, flags)
     if (name.length === 0) refuse('corrupt_central_directory')
+    record.name = name
 
-    records.push({ name, nameBytes, flags, method, crc, compressedSize, uncompressedSize, externalAttrs, localHeaderOffset })
+    records.push(record)
     pos = recordEnd
     await breathe(run)
   }
@@ -237,6 +424,7 @@ function classifyDeclared(record: CentralRecord, run: ReadRun): ArchiveSkipCode 
   if (isNestedArchive(record.name)) refuse('nested_archive', record.name)
   if (isDirectoryEntry(record.externalAttrs)) return 'directory_entry'
   if (isIgnoredPath(record.name, run.includeGenerated)) return 'ignored_folder'
+  if (!run.includeGenerated && isOsMetadataFile(record.name)) return 'generated_file'
   if (hasBinaryExtension(record.name)) return 'binary_content'
   if (record.method !== METHOD_STORE && record.method !== METHOD_DEFLATE) refuse('unsupported_compression', record.name, String(record.method))
   if (record.uncompressedSize === 0) return 'empty_entry'
@@ -255,14 +443,73 @@ function analysisBudget(run: ReadRun): number {
   return Math.min(run.limits.maxAnalysableTextBytes, run.limits.maxTotalUncompressedBytes)
 }
 
-async function validateLocalHeader(source: ByteSource, record: CentralRecord, centralOffset: number): Promise<PlannedEntry> {
+/**
+ * The local header's copy of a number the index already gave. Bit 3 legitimately zeroes these
+ * fields, and a zip64 entry marks them with all-ones because 32 bits cannot hold them, so either
+ * spelling counts as "not stated here" rather than as a disagreement. Any other difference means
+ * two records claim to be the same file and say different things about it.
+ */
+function agreesWithIndex(local: number, central: number, indexOnly: boolean): boolean {
+  if (local === central) return true
+  return indexOnly && (local === 0 || local === UINT32_MAX || local === UINT16_MAX)
+}
+
+/** A size field is four bytes, or eight when the entry stores it the zip64 way. */
+function readSizeField(view: DataView, at: number, width: number): number {
+  if (width === 4) return view.getUint32(at, true)
+  const wide = view.getBigUint64(at, true)
+  if (wide > BigInt(Number.MAX_SAFE_INTEGER)) return Number.NaN
+  return Number(wide)
+}
+
+/**
+ * A bit-3 entry repeats its checksum and sizes after its data, which is how writers that could not
+ * seek back — streaming downloads, `zip -r -`, Explorer's own copy step — produce a readable
+ * archive. The index already carries the true values, so the descriptor is checked against them
+ * and never trusted on its own. The signature is optional and the size fields are four or eight
+ * bytes, so every layout is tried and only one that agrees on all three numbers is accepted.
+ * A descriptor that is missing or lies costs this entry; the rest of the index stays sound.
+ */
+async function checkDataDescriptor(
+  source: ByteSource,
+  record: CentralRecord,
+  dataEnd: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  const available = Math.min(DATA_DESCRIPTOR_MAX_BYTES, source.size - dataEnd)
+  if (available < 12) skipEntry('data_descriptor_mismatch')
+  const view = viewOf(await source.read(dataEnd, dataEnd + available, signal))
+  const signed = view.getUint32(0, true) === SIG_DATA_DESCRIPTOR
+  const starts = signed ? [4, 0] : [0]
+  for (const start of starts) {
+    for (const width of [4, 8]) {
+      const length = start + 4 + width * 2
+      if (length > available) continue
+      if (
+        view.getUint32(start, true) === record.crc &&
+        readSizeField(view, start + 4, width) === record.compressedSize &&
+        readSizeField(view, start + 4 + width, width) === record.uncompressedSize
+      ) {
+        return length
+      }
+    }
+  }
+  skipEntry('data_descriptor_mismatch')
+}
+
+async function validateLocalHeader(
+  source: ByteSource,
+  record: CentralRecord,
+  centralOffset: number,
+  signal?: AbortSignal,
+): Promise<PlannedEntry> {
   const at = record.localHeaderOffset
   if (at < 0 || at + LOCAL_HEADER_SIZE > source.size || at >= centralOffset) refuse('corrupt_local_header', record.name)
-  const head = await source.read(at, at + LOCAL_HEADER_SIZE)
+  const head = await source.read(at, at + LOCAL_HEADER_SIZE, signal)
   const headView = viewOf(head)
   if (headView.getUint32(0, true) !== SIG_LOCAL_HEADER) refuse('corrupt_local_header', record.name)
 
-  const localFlags = headView.getUint16(4, true)
+  const localFlags = headView.getUint16(6, true)
   const localMethod = headView.getUint16(8, true)
   const localCrc = headView.getUint32(14, true)
   const localCompressed = headView.getUint32(18, true)
@@ -271,39 +518,49 @@ async function validateLocalHeader(source: ByteSource, record: CentralRecord, ce
   const localExtraLength = headView.getUint16(28, true)
 
   if (localFlags & FLAG_ENCRYPTED) refuse('encrypted_entry', record.name)
-  if (localFlags & FLAG_DATA_DESCRIPTOR) refuse('local_central_disagreement', record.name)
+  // Bit 3 is the only flag whose absence in one header changes how many bytes follow the data,
+  // so the two headers have to agree about it before anything else is trusted.
+  if (((localFlags & FLAG_DATA_DESCRIPTOR) !== 0) !== record.dataDescriptor) {
+    refuse('local_central_disagreement', record.name)
+  }
+  const indexOnly = record.dataDescriptor || record.zip64
   if (
     localMethod !== record.method ||
-    localCrc !== record.crc ||
-    localCompressed !== record.compressedSize ||
-    localUncompressed !== record.uncompressedSize
+    !agreesWithIndex(localCrc, record.crc, indexOnly) ||
+    !agreesWithIndex(localCompressed, record.compressedSize, indexOnly) ||
+    !agreesWithIndex(localUncompressed, record.uncompressedSize, indexOnly)
   ) {
     refuse('local_central_disagreement', record.name)
   }
   if (localNameLength !== record.nameBytes.length) refuse('corrupt_local_header', record.name)
   const nameEnd = at + LOCAL_HEADER_SIZE + localNameLength
   const dataStart = nameEnd + localExtraLength
-  if (dataStart + record.compressedSize > source.size) refuse('corrupt_local_header', record.name)
-  const localName = await source.read(at + LOCAL_HEADER_SIZE, nameEnd)
+  const dataEnd = dataStart + record.compressedSize
+  if (dataEnd > source.size) refuse('corrupt_local_header', record.name)
+  const localName = await source.read(at + LOCAL_HEADER_SIZE, nameEnd, signal)
   if (!sameBytes(localName, record.nameBytes)) refuse('corrupt_local_header', record.name)
-  return { record, dataStart, dataEnd: dataStart + record.compressedSize }
+  if (!record.dataDescriptor) return { record, dataStart, dataEnd, rangeEnd: dataEnd }
+  const descriptorBytes = await checkDataDescriptor(source, record, dataEnd, signal)
+  return { record, dataStart, dataEnd, rangeEnd: dataEnd + descriptorBytes }
 }
 
 /**
  * Two index records may not describe the same compressed bytes. Without this, a small archive
  * can list thousands of entries that all inflate the same range, multiplying decompression work
- * by the entry count. Ranges that reach into the index are refused for the same reason.
+ * by the entry count. Ranges that reach into the index are refused for the same reason. The range
+ * ends after the data descriptor when an entry has one, because those bytes belong to this entry
+ * and cannot be the next entry's header.
  */
 function checkRanges(planned: PlannedEntry[], centralOffset: number): void {
   const sorted = [...planned].sort((a, b) => a.record.localHeaderOffset - b.record.localHeaderOffset)
   let previousEnd = -1
   for (const item of sorted) {
     if (item.dataStart < item.record.localHeaderOffset) refuse('overlapping_entries', item.record.name)
-    if (item.dataEnd > centralOffset) refuse('overlapping_entries', item.record.name, 'runs into the archive index')
+    if (item.rangeEnd > centralOffset) refuse('overlapping_entries', item.record.name, 'runs into the archive index')
     if (item.record.localHeaderOffset < previousEnd || item.dataStart < previousEnd) {
       refuse('overlapping_entries', item.record.name)
     }
-    previousEnd = Math.max(previousEnd, item.dataEnd)
+    previousEnd = Math.max(previousEnd, item.rangeEnd)
   }
 }
 
@@ -405,22 +662,29 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
     const centralDisk = tailView.getUint16(eocdRel + 6, true)
     if (diskNumber !== 0 || centralDisk !== 0) refuse('multi_disk_not_supported')
 
-    if (eocd >= ZIP64_LOCATOR_SIZE) {
-      const locatorRel = eocd - ZIP64_LOCATOR_SIZE - tailStart
-      const locator = locatorRel >= 0 && locatorRel + ZIP64_LOCATOR_SIZE <= tail.length
-        ? tail.subarray(locatorRel, locatorRel + ZIP64_LOCATOR_SIZE)
-        : await source.read(eocd - ZIP64_LOCATOR_SIZE, eocd, run.signal)
-      if (viewOf(locator).getUint32(0, true) === SIG_ZIP64_LOCATOR) refuse('zip64_not_supported')
-    }
-    const overflowedFields =
-      tailView.getUint16(eocdRel + 8, true) === 0xffff ||
-      tailView.getUint16(eocdRel + 10, true) === 0xffff ||
-      tailView.getUint32(eocdRel + 12, true) === 0xffffffff ||
-      tailView.getUint32(eocdRel + 16, true) === 0xffffffff
-    if (overflowedFields) refuse('zip64_not_supported')
+    let centralSize = tailView.getUint32(eocdRel + 12, true)
+    let centralOffset = tailView.getUint32(eocdRel + 16, true)
+    const marked =
+      tailView.getUint16(eocdRel + 8, true) === UINT16_MAX ||
+      tailView.getUint16(eocdRel + 10, true) === UINT16_MAX ||
+      centralSize === UINT32_MAX ||
+      centralOffset === UINT32_MAX
 
-    const centralSize = tailView.getUint32(eocdRel + 12, true)
-    const centralOffset = tailView.getUint32(eocdRel + 16, true)
+    // A zip64 archive keeps its real index position in a second end record, reached through the
+    // twenty-byte locator that sits in front of the ordinary one. The ordinary record's all-ones
+    // fields only promise that number, so a promise with no locator behind it is a lie.
+    if (marked || eocd >= ZIP64_LOCATOR_SIZE) {
+      const zip64 = await readZip64EndRecord(source, tail, tailStart, eocd, run.signal)
+      if (zip64 === null) {
+        if (marked) refuse('corrupt_central_directory')
+      } else {
+        if (centralSize === UINT32_MAX) centralSize = zip64.centralSize
+        else if (centralSize !== zip64.centralSize) refuse('corrupt_central_directory')
+        if (centralOffset === UINT32_MAX) centralOffset = zip64.centralOffset
+        else if (centralOffset !== zip64.centralOffset) refuse('corrupt_central_directory')
+      }
+    }
+    if (centralSize === UINT32_MAX || centralOffset === UINT32_MAX) refuse('corrupt_central_directory')
     if (centralOffset + centralSize > eocd) refuse('corrupt_central_directory')
 
     records = await walkCentralDirectory(source, centralOffset, centralSize, run)
@@ -451,7 +715,7 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
           continue
         }
         plannedBytes += record.uncompressedSize
-        accepted.push({ record, dataStart: -1, dataEnd: -1 })
+        accepted.push({ record, dataStart: -1, dataEnd: -1, rangeEnd: -1 })
       }
       if (!run.keepPartial) {
         // All-or-nothing callers keep the historical meaning of the ceiling: one declared sum is
@@ -462,21 +726,49 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
         unreached.push(...overBudget)
         break
       }
-      planned.push(...accepted)
+
+      let freedBytes = 0
+      const ready: PlannedEntry[] = []
+      for (const item of accepted) {
+        await breathe(run)
+        try {
+          Object.assign(item, await validateLocalHeader(source, item.record, centralOffset, run.signal))
+          ready.push(item)
+        } catch (error) {
+          // An entry whose own header or descriptor does not add up is dropped with a reason. It
+          // was charged against the text budget, so the charge is withdrawn like any skip.
+          if (error instanceof SkipSingle) {
+            skipped.push({ name: item.record.name, code: error.code, message: archiveReasonMessage(error.code, item.record.name) })
+            run.stats.skipped = skipped.length
+            freedBytes += item.record.uncompressedSize
+            plannedBytes -= item.record.uncompressedSize
+            continue
+          }
+          if (isAbortError(error)) {
+            if (run.keepPartial) throw error
+            refuse('cancelled')
+          }
+          throw error
+        }
+      }
+      if (ready.length === 0) {
+        // Everything this round charged was skipped on its own header. The budget is now free, so
+        // the files still waiting get their turn; nothing here is counted as planned or reached.
+        if (overBudget.length === 0) break
+        queue = overBudget
+        continue
+      }
+      planned.push(...ready)
       run.stats.plannedEntries = planned.length + overBudget.length
       run.stats.plannedBytes = plannedBytes
 
-      for (const item of accepted) {
-        Object.assign(item, await validateLocalHeader(source, item.record, centralOffset))
-      }
       checkRanges(planned, centralOffset)
 
-      let freedBytes = 0
       let stoppedCode: PartialStopCode | null = null
       let stoppedSubject: string | number = ''
       let stoppedAt = 0
-      for (let index = 0; index < accepted.length; index += 1) {
-        const item = accepted[index]
+      for (let index = 0; index < ready.length; index += 1) {
+        const item = ready[index]
         stoppedAt = index
         await breathe(run)
         try {
@@ -510,13 +802,13 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
         // A stop inside the round: the rest of this round, and everything still waiting for the
         // budget, are named as not reached. The refund above is not re-offered, because the run
         // stopped for a reason that has nothing to do with how full the budget was.
-        for (const rest of accepted.slice(stoppedAt)) {
+        for (const rest of ready.slice(stoppedAt)) {
           skipped.push(notReachedEntry(rest.record.name, stoppedCode))
         }
         for (const rest of overBudget) {
           skipped.push(notReachedEntry(rest.name, stoppedCode))
         }
-        run.stats.plannedEntries = planned.length + accepted.length - stoppedAt + overBudget.length
+        run.stats.plannedEntries = planned.length + ready.length - stoppedAt + overBudget.length
         return finishPartial(run, stoppedCode, stoppedSubject, entries, skipped)
       }
       if (freedBytes === 0 || overBudget.length === 0) {

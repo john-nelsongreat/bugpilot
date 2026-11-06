@@ -3,7 +3,7 @@ import { isAbortError, isWallClockSpent, notReachedEntry, partialReadResult, wal
 import { decodeBytes, looksBinary, type TextEncoding } from './decode'
 import { DEFAULT_ARCHIVE_LIMITS, type ArchiveLimits } from './limits'
 import type { ArchiveEntry, ArchiveReadProgress, ArchiveReadResult, ArchiveReadStats, ArchiveRefusal, ArchiveSkippedEntry } from './guard'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive, relativePathRefusal } from './paths'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile, relativePathRefusal } from './paths'
 import { archiveReasonMessage, type ArchiveRefusalCode } from './reasons'
 
 /**
@@ -188,6 +188,7 @@ export async function readLooseFiles(
 
 function skipCodeFor(item: IntakeSource, limits: ArchiveLimits, includeGenerated: boolean) {
   if (isIgnoredPath(item.path, includeGenerated)) return 'ignored_folder' as const
+  if (!includeGenerated && isOsMetadataFile(item.path)) return 'generated_file' as const
   if (hasBinaryExtension(item.path)) return 'binary_content' as const
   if (item.size === 0) return 'empty_entry' as const
   if (item.size > limits.maxSingleFileUncompressedBytes) return 'single_file_too_large' as const
