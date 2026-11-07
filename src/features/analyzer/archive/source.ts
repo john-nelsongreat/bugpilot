@@ -33,16 +33,40 @@ export function createMemorySource(bytes: Uint8Array): ByteSource {
   }
 }
 
+/**
+ * How much one Blob read fetches beyond the range asked for. A zip is walked entry by entry in
+ * file order, and each entry costs three or four small reads (local header, name, data,
+ * descriptor). One slice call per read makes a many-entry archive pay minutes of per-call
+ * latency for kilobytes of real data — a 512 KiB window answers thousands of neighbouring
+ * reads from one fetch while keeping the worker's memory bounded.
+ */
+const BLOB_WINDOW_BYTES = 512 * 1024
+
 export function createBlobSource(blob: Blob): ByteSource {
+  let windowStart = 0
+  let windowEnd = 0
+  let windowData: Uint8Array | null = null
   return {
     size: blob.size,
     async read(start, end, signal) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       checkRange(blob.size, start, end)
       if (end === start) return new Uint8Array(0)
-      const buffer = await blob.slice(start, end).arrayBuffer()
+      if (windowData && start >= windowStart && end <= windowEnd) {
+        return windowData.subarray(start - windowStart, end - windowStart)
+      }
+      if (end - start >= BLOB_WINDOW_BYTES) {
+        const buffer = await blob.slice(start, end).arrayBuffer()
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        return new Uint8Array(buffer)
+      }
+      const fetchEnd = Math.min(blob.size, start + BLOB_WINDOW_BYTES)
+      const buffer = await blob.slice(start, fetchEnd).arrayBuffer()
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      return new Uint8Array(buffer)
+      windowStart = start
+      windowEnd = fetchEnd
+      windowData = new Uint8Array(buffer)
+      return windowData.subarray(0, end - start)
     },
   }
 }

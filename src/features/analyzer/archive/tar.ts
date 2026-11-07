@@ -24,7 +24,7 @@ import { archiveReasonMessage, type ArchiveSkipCode } from './reasons'
 import { base256Field, octalField } from './format'
 import { detectLanguage } from './classify'
 import { decodeBytes, looksBinary } from './decode'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile } from './paths'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile, normalizeEntryName } from './paths'
 
 /**
  * A strictly bounded tar reader. Nothing here trusts a header: every length field is checked
@@ -368,7 +368,7 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
       pendingLongName = null
       pax.path = null
       pax.size = null
-      const name = longName ?? paxPath ?? (prefix === '' ? nameField : `${prefix}/${nameField}`)
+      const name = normalizeEntryName(longName ?? paxPath ?? (prefix === '' ? nameField : `${prefix}/${nameField}`))
       // A special entry is named so the user can see what was skipped, but an ordinary entry with
       // no name at all is a damaged header, not a file.
       if (name === '') refuse('corrupt_tar_header', printable(`${nameField}${prefix}`), 'it carries no file name')

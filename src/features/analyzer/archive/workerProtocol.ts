@@ -109,6 +109,38 @@ function isRequest(value: unknown): value is WorkerRequest {
 /** The size of one result slice; chosen so each deserialization stays a short task. */
 const RESULT_BATCH_ENTRIES = 500
 
+/**
+ * The reader reports progress per entry, which for a twenty-thousand-entry archive is twenty
+ * thousand messages; every one becomes a page render. The worker forwards the first event of a
+ * phase, then one per hundred entries or per 200 ms: live enough to feel current, few enough
+ * that the page stays free. The finished counts arrive with the result itself.
+ */
+const PROGRESS_FORWARD_EVERY = 100
+const PROGRESS_FORWARD_INTERVAL_MS = 200
+
+function createProgressForwarder(
+  post: (progress: ArchiveReadProgress) => void,
+): (progress: ArchiveReadProgress) => void {
+  let lastAt = 0
+  let lastPhase = ''
+  let sinceLast = 0
+  return (progress) => {
+    sinceLast += 1
+    const now = Date.now()
+    if (
+      lastAt === 0 ||
+      progress.phase !== lastPhase ||
+      sinceLast >= PROGRESS_FORWARD_EVERY ||
+      now - lastAt >= PROGRESS_FORWARD_INTERVAL_MS
+    ) {
+      lastAt = now
+      lastPhase = progress.phase
+      sinceLast = 0
+      post(progress)
+    }
+  }
+}
+
 function emptyReadResult(): ArchiveReadResult {
   return {
     refusal: null,
@@ -200,15 +232,16 @@ export function startArchiveWorker(scope: WorkerScope): void {
       }
       const controller = new AbortController()
       running.set(id, controller)
+      const forwardProgress = createProgressForwarder((progress) => {
+        scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)
+      })
       void readLooseFiles(sources, {
         limits: data.limits,
         signal: controller.signal,
         includeGenerated: data.includeGenerated === true,
         keepPartial: data.keepPartial === true,
         resumeProcessedNames: data.resumeProcessedNames ? new Set(data.resumeProcessedNames) : undefined,
-        onProgress: (progress) => {
-          scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)
-        },
+        onProgress: forwardProgress,
       })
         .then((result) => finish(id, result))
         .catch(() => fail(id, 'The file reader stopped with an unexpected error. Nothing was stored.'))
@@ -217,6 +250,9 @@ export function startArchiveWorker(scope: WorkerScope): void {
 
     const controller = new AbortController()
     running.set(id, controller)
+    const forwardProgress = createProgressForwarder((progress) => {
+      scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)
+    })
     let source: ByteSource
     if (data.blob) {
       source = createBlobSource(data.blob)
@@ -238,9 +274,7 @@ export function startArchiveWorker(scope: WorkerScope): void {
       keepPartial: data.keepPartial === true,
       resumeProcessedNames: data.resumeProcessedNames ? new Set(data.resumeProcessedNames) : undefined,
       signal: controller.signal,
-      onProgress: (progress) => {
-        scope.postMessage({ type: 'progress', id, progress } satisfies WorkerResponse)
-      },
+      onProgress: forwardProgress,
     })
       .then((result) => finish(id, result))
       .catch(() => fail(id, 'The file reader stopped with an unexpected error. Nothing was stored.'))

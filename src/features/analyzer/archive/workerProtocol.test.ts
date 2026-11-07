@@ -41,6 +41,15 @@ function limitsFor(): ArchiveLimits {
   return { ...DEFAULT_ARCHIVE_LIMITS, maxArchiveBytes: 65_536 }
 }
 
+async function waitForDone(fake: FakeScope, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (fake.posted.some((message) => (message as { type: string }).type === 'done')) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(`the worker sent no done message within ${timeoutMs}ms`)
+}
+
 describe('archive worker protocol', () => {
   it('answers a read request with the extracted entries', async () => {
     const fake = makeScope()
@@ -88,11 +97,32 @@ describe('archive worker protocol', () => {
     const bytes = buildZip([filler('src/a.js', 200), filler('src/b.js', 200)])
 
     fake.dispatched({ type: 'read-archive', id: 1, bytes: bytes.buffer, limits: limitsFor() })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForDone(fake)
 
     const types = fake.posted.map((message) => (message as { type: string }).type)
     expect(types).toContain('progress')
     expect(types[types.length - 1]).toBe('done')
+  })
+
+  it('forwards reader progress in bounded steps instead of per entry', async () => {
+    const fake = makeScope()
+    startArchiveWorker(fake.scope)
+    const bytes = buildZip(Array.from({ length: 250 }, (_, index) => filler(`src/m${index}.js`, 60)))
+
+    fake.dispatched({ type: 'read-archive', id: 21, bytes: bytes.buffer, limits: limitsFor() })
+    await waitForDone(fake)
+
+    const progress = fake.posted.filter((message) => (message as { type: string }).type === 'progress') as Array<{
+      progress: { phase: string; walkedRecords?: number }
+    }>
+    // A per-entry forwarder would post ~251 times; the throttle posts the phase changes and
+    // one step per hundred entries.
+    expect(progress.length).toBeGreaterThan(1)
+    expect(progress.length).toBeLessThanOrEqual(8)
+    const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<{
+      result: { entries: Array<unknown> }
+    }>
+    expect(done[0].result.entries).toHaveLength(250)
   })
 
   it('cancels the job in flight when a cancel message arrives', async () => {
@@ -268,7 +298,7 @@ describe('archive worker loose-file pass', () => {
       })),
       limits: limitsFor(),
     })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await waitForDone(fake)
 
     const batches = fake.posted.filter((message) => (message as { type: string }).type === 'batch') as Array<{
       entries?: Array<{ name: string }>

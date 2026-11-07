@@ -7,9 +7,10 @@ import { DEFAULT_ARCHIVE_LIMITS } from './limits'
 import { relativePathRefusal } from './paths'
 
 /**
- * Mutation fuzzing with a fixed seed: every run checks the same 900 inputs, so a failure is
- * reproducible. The reader is allowed to refuse anything, but it may never throw, retain bytes
- * behind a refusal, exceed a ceiling or hand back an unsafe path.
+ * Mutation fuzzing with a fixed seed: every run checks the same 1,500 inputs (300 mutations per
+ * format plus the honest base), so a failure is reproducible. The reader is allowed to refuse
+ * anything, but it may never throw, retain bytes behind a refusal, exceed a ceiling or hand back
+ * an unsafe path.
  */
 
 const SEED = 0xb06f1170
@@ -73,6 +74,18 @@ const ZIP_BASE = buildZip([
   { name: 'src/b.py', content: 'print(1)\n' },
   { name: 'src/data.json', content: '{"a":1}\n' },
 ])
+// Streaming writers (PowerShell, Java) emit bit-3 entries with the sizes in a trailing
+// descriptor; the zip64 base exercises the wide-record path. Mutating both guards the
+// descriptor and zip64 parsing that ordinary zips never reach.
+const ZIP_DESCRIPTOR_BASE = buildZip([
+  { name: 'src/a.js', content: 'const a = 1\n', dataDescriptor: true },
+  { name: 'src/b.py', content: 'print(1)\n', dataDescriptor: true, descriptorSignature: false },
+  { name: 'src/data.json', content: '{"a":1}\n', dataDescriptor: true, descriptorZip64Sizes: true },
+])
+const ZIP_ZIP64_BASE = buildZip(
+  [{ name: 'src/a.js', content: 'const a = 1\n', zip64: true }, { name: 'src/b.py', content: 'print(1)\n' }],
+  { zip64: true },
+)
 const TAR_BASE = buildTar([
   { name: 'src/a.js', content: 'const a = 1\n' },
   { name: 'src/b.py', content: 'print(1)\n' },
@@ -102,6 +115,8 @@ function checkInvariants(result: ContainerReadResult): void {
 describe('seeded mutation fuzz', () => {
   it.each([
     ['zip', ZIP_BASE, 'upload.zip'],
+    ['zip-descriptors', ZIP_DESCRIPTOR_BASE, 'upload.zip'],
+    ['zip-zip64', ZIP_ZIP64_BASE, 'upload.zip'],
     ['tar', TAR_BASE, 'upload.tar'],
     ['tar.gz', TAR_GZ_BASE, 'upload.tar.gz'],
   ] as const)('survives %s mutations without throwing or exceeding a ceiling', async (format, base, name) => {
@@ -109,6 +124,7 @@ describe('seeded mutation fuzz', () => {
     let successful = 0
     let refused = 0
     let sawExpectedFormat = 0
+    const expectedFormat = format.startsWith('zip') ? 'zip' : format === 'tar.gz' ? 'gzip' : format
 
     for (let index = 0; index <= MUTATIONS_PER_FORMAT; index += 1) {
       const bytes = index === 0 ? base : mutate(base, random)
@@ -123,7 +139,7 @@ describe('seeded mutation fuzz', () => {
       checkInvariants(result)
       if (result.refusal) refused += 1
       else successful += 1
-      if (result.format === (format === 'tar.gz' ? 'gzip' : format)) sawExpectedFormat += 1
+      if (result.format === expectedFormat) sawExpectedFormat += 1
       if (index === 0) {
         expect(result.refusal).toBeNull()
         expect(result.entries.length).toBeGreaterThan(0)

@@ -15,6 +15,17 @@ export function relativePathRefusal(name: string): ArchiveRefusalCode | null {
 }
 
 /**
+ * The ZIP APPNOTE and ustar say entry names use "/" separators, but Windows writers — PowerShell
+ * Compress-Archive above all — emit "\". No archive format gives "\" meaning inside a name, so it
+ * is normalized the same way Explorer and 7-Zip extract: as a separator. The rules above then run
+ * on the normalized name, so a `..\` escape still refuses as traversal. Loose files keep the
+ * strict rule: a dropped file really named with a backslash stays refused.
+ */
+export function normalizeEntryName(name: string): string {
+  return name.replace(/\\/g, '/')
+}
+
+/**
  * `.git` is never read, even when the user asks for generated files: its objects are compressed
  * history rather than files. Every other ignored folder yields to that checkbox.
  */

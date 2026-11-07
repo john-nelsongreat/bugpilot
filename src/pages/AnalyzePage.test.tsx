@@ -455,4 +455,82 @@ describe('Analyze page', () => {
 
     unmount()
   })
+
+  it("offers Continue analysis after a partial archive pass and resumes with the earlier passes' names", async () => {
+    const user = userEvent.setup()
+    const partial = makeReport()
+    const partialStop = {
+      code: 'wall_clock_exceeded' as const,
+      message: 'BugPilot reached its 300 second reading limit.',
+      analysedFiles: 2,
+      plannedFiles: 3,
+      unreachedFiles: 1,
+      producedBytes: 64,
+      plannedBytes: 80,
+    }
+    partial.session.partial = partialStop
+    const analyze = vi.fn<AnalyzeFunction>()
+      .mockImplementationOnce(async () => ({
+        status: 'partial',
+        message: partialStop.message,
+        report: partial,
+        stats: STATS,
+        partial: partialStop,
+      }))
+      .mockImplementationOnce(async (_input, options) => {
+        // The continuation must skip the names the first pass already settled: both analysed
+        // coverage rows. Nothing here was left "not reached", so the set is exactly those two.
+        const resumed = options.resumeProcessedNames ?? new Set<string>()
+        expect(resumed.has('src/app.ts')).toBe(true)
+        expect(resumed.has('scripts/tool.py')).toBe(true)
+        expect(resumed.size).toBe(2)
+        return { status: 'completed', message: null, report: makeReport(), stats: STATS, partial: null }
+      })
+    const { container } = render(
+      <AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />,
+    )
+
+    selectFiles([new File(['zip bytes'], 'bundle.zip', { type: 'application/zip' })])
+    expect(await screen.findByRole('heading', { name: 'Partial results for 2 files' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Continue analysis' })).toBeVisible()
+    expect(await getAxeViolations(container)).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: 'Continue analysis' }))
+
+    expect(await screen.findByRole('heading', { name: 'Results for 2 files' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Continue analysis' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Partial report — this is not the whole upload')).not.toBeInTheDocument()
+    expect(analyze).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not offer continuation when the partial pass was cancelled', async () => {
+    const partialStop = {
+      code: 'cancelled' as const,
+      message: 'You cancelled the analysis.',
+      analysedFiles: 2,
+      plannedFiles: 3,
+      unreachedFiles: 1,
+      producedBytes: 64,
+      plannedBytes: 80,
+    }
+    const report = makeReport()
+    report.session.partial = partialStop
+    const analyze = vi.fn<AnalyzeFunction>(
+      async () =>
+        ({
+          status: 'partial',
+          message: partialStop.message,
+          report,
+          stats: STATS,
+          partial: partialStop,
+        }) as AnalysisSessionResult,
+    )
+    render(<AnalyzePage analyze={analyze} />)
+
+    selectFiles([new File(['zip bytes'], 'bundle.zip', { type: 'application/zip' })])
+    expect(await screen.findByRole('heading', { name: 'Partial results for 2 files' })).toBeVisible()
+
+    expect(screen.queryByRole('button', { name: 'Continue analysis' })).not.toBeInTheDocument()
+    expect(analyze).toHaveBeenCalledTimes(1)
+  })
 })

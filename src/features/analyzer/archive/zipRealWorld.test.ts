@@ -135,6 +135,26 @@ describe('archives written by the tools people actually use', () => {
     })
   }
 
+  it('reads a PowerShell Compress-Archive archive whose names use backslash separators', async () => {
+    // Real Compress-Archive output writes "\" between segments (the .NET writer predates the
+    // APPNOTE recommendation). The reader normalizes it the way Explorer extracts, so the tool's
+    // output is read while a backslash escape still refuses as traversal.
+    const compressArchive = WRITERS[1]
+    const bytes = writerZip(compressArchive, [
+      { path: 'BMI CALCULATOR( final boss)\\bmi.py', body: BMI, method: 8 },
+      { path: 'BMI CALCULATOR( final boss)\\read me.txt', body: 'hello\n', method: 8 },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual([
+      'BMI CALCULATOR( final boss)/bmi.py',
+      'BMI CALCULATOR( final boss)/read me.txt',
+    ])
+    expect(result.entries[0].language).toBe('python')
+    expect(result.entries[1].language).toBe('text')
+  })
+
   it('skips the directory records a folder-oriented writer adds', async () => {
     const explorer = WRITERS[0]
     const result = await readArchive(writerZip(explorer, PROJECT))

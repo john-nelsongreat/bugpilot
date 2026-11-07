@@ -28,7 +28,7 @@ import { crc32, crc32Finish } from './crc32'
 import { detectLanguage } from './classify'
 import { decodeBytes, looksBinary } from './decode'
 import { archiveReasonMessage, type ArchiveSkipCode } from './reasons'
-import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile } from './paths'
+import { hasBinaryExtension, isIgnoredPath, isNestedArchive, isOsMetadataFile, normalizeEntryName } from './paths'
 import { createMemorySource, type ByteSource } from './source'
 
 export { DEFAULT_ARCHIVE_LIMITS } from './limits'
@@ -399,7 +399,7 @@ async function walkCentralDirectory(
     }
     const name = unicodePathName(unicodeBody, record.nameBytes) ?? decodeEntryName(record.nameBytes, flags)
     if (name.length === 0) refuse('corrupt_central_directory')
-    record.name = name
+    record.name = normalizeEntryName(name)
 
     records.push(record)
     pos = recordEnd
@@ -777,10 +777,15 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
     if (error instanceof PartialStop || (run.keepPartial && isAbortError(error))) {
       const code = error instanceof PartialStop ? error.code : 'cancelled'
       const subject = error instanceof PartialStop ? error.subject : ''
+      // A linear `skipped.some` per record is O(records × skipped) — minutes of pure scanning
+      // when a stop leaves tens of thousands of names on both sides. Names are unique here
+      // (duplicates are refused during the walk), so a set decides membership.
+      const skippedNames = new Set(skipped.map((entry) => entry.name))
       for (const record of records) {
         if (run.resumeProcessedNames?.has(record.name)) continue
-        if (!skipped.some((entry) => entry.name === record.name)) {
+        if (!skippedNames.has(record.name)) {
           skipped.push(notReachedEntry(record.name, code))
+          skippedNames.add(record.name)
         }
       }
       run.stats.plannedEntries = Math.max(run.stats.plannedEntries ?? 0, records.length)

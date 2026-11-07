@@ -178,9 +178,15 @@ describe('readTar: hostile headers', () => {
     expect(result.refusal?.code).toBe('drive_letter_path')
   })
 
-  it('refuses a backslash path', async () => {
+  it('reads a backslash path as a separator, the way extraction tools do', async () => {
     const result = await readTar(headerBytes('src\\evil.js', 'x\n'))
-    expect(result.refusal?.code).toBe('backslash_in_path')
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/evil.js'])
+  })
+
+  it('refuses a backslash escape after normalization', async () => {
+    const result = await readTar(headerBytes('src\\..\\evil.js', 'x\n'))
+    expect(result.refusal?.code).toBe('path_traversal')
   })
 
   it('refuses a PAX path that traverses, before reading a byte of its body', async () => {

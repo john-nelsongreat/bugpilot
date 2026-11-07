@@ -80,7 +80,34 @@ describe('analyzer worker protocol', () => {
     const types = fake.posted.map((message) => message.type)
     expect(types).toContain('progress')
     expect(types[types.length - 1]).toBe('done')
-    expect(fake.posted.filter((message) => message.type === 'progress').length).toBeGreaterThanOrEqual(3)
+    // Progress is throttled: an opening post and one final post bracket a tiny run.
+    expect(fake.posted.filter((message) => message.type === 'progress')).toHaveLength(2)
+  })
+
+  it('throttles progress for a large run instead of posting per file', async () => {
+    const fake = makeScope()
+    startAnalyzerWorker(fake.scope)
+
+    const many = Array.from({ length: 1_000 }, (_, index) => entry(`src/f${index}.js`, '// TODO: x\nconst a = 1;\n'))
+    fake.dispatched({ type: 'analyze', id: 5, entries: many, limits })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    const progress = fake.posted.filter((message) => message.type === 'progress') as unknown as Array<{
+      progress: { filesDone: number; filesTotal: number }
+    }>
+    // One opening post, one per 50 files, one closing post — never one per file.
+    expect(progress.length).toBeLessThanOrEqual(25)
+    const batches = fake.posted.filter((message) => message.type === 'batch') as unknown as Array<{
+      files: unknown[]
+    }>
+    const done = fake.posted.filter((message) => message.type === 'done') as unknown as Array<{
+      result: { files: unknown[]; cancelled: boolean }
+    }>
+    expect(done).toHaveLength(1)
+    expect(done[0].result.cancelled).toBe(false)
+    expect(batches.reduce((total, batch) => total + batch.files.length, 0)).toBe(1_000)
+    expect(progress.at(-1)?.progress.filesDone).toBe(1_000)
+    expect(progress.at(-1)?.progress.filesTotal).toBe(1_000)
   })
 
   it('cancels between files and returns nothing', async () => {
