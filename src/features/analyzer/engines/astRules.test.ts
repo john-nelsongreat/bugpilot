@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { makeRuleFile } from '../rules/context'
 import type { RuleFile } from '../rules/types'
 import type { GrammarId } from './assets'
+import { AST_RULES } from './astQueries'
 import {
   evaluateAstRule,
   evaluateAstRules,
@@ -26,16 +27,18 @@ function fileOf(text: string): RuleFile {
   })
 }
 
-function capture(name: string, text: string, options: Partial<{ row: number; column: number; endRow: number; endColumn: number; type: string }> = {}) {
+function capture(name: string, text: string, options: Partial<{ row: number; column: number; endRow: number; endColumn: number; type: string; startIndex: number; parent: AstMatchLike['captures'][number]['node'] | null; hasError: boolean }> = {}) {
   return {
     name,
     node: {
       type: options.type ?? 'block',
       text,
-      startIndex: 0,
-      endIndex: text.length,
+      startIndex: options.startIndex ?? 0,
+      endIndex: (options.startIndex ?? 0) + text.length,
       startPosition: { row: options.row ?? 0, column: options.column ?? 0 },
       endPosition: { row: options.endRow ?? options.row ?? 0, column: options.endColumn ?? (options.column ?? 0) + text.length },
+      parent: options.parent,
+      hasError: options.hasError,
     },
   }
 }
@@ -289,4 +292,105 @@ describe('AST rule evaluator', () => {
     expect(hits[0].message.length).toBeLessThan(140)
     expect(hits[0].message).toContain('…')
   })
+})
+
+/** One shipped rule per AST family, with captures that pass the rule's own guards. */
+const FAMILY_FIXTURES: readonly { id: string; grammar: GrammarId; captures: AstMatchLike['captures'] }[] = [
+  { id: 'bugpilot/ast/empty-catch', grammar: 'python', captures: [capture('ex', 'except ValueError: pass')] },
+  { id: 'bugpilot/ast/unreachable-code', grammar: 'c', captures: [capture('after', 'free(p);')] },
+  { id: 'bugpilot/ast/assignment-in-condition', grammar: 'c', captures: [capture('cond', 'n = count()')] },
+  { id: 'bugpilot/ast/python-bare-except', grammar: 'python', captures: [capture('ex', 'except:')] },
+  {
+    id: 'bugpilot/ast/sql-built-by-concatenation',
+    grammar: 'python',
+    captures: [capture('method', 'execute'), capture('arg', '"SELECT * FROM t WHERE id = " + user_id')],
+  },
+]
+
+function familyRule(id: string, grammar: GrammarId): AstRuleDefinition {
+  const rule = AST_RULES.find((candidate) => candidate.id === id && candidate.grammar === grammar)
+  if (!rule) throw new Error(`missing shipped rule ${id} for ${grammar}`)
+  return rule
+}
+
+describe('AST rules distrust trees with syntax errors', () => {
+  for (const family of FAMILY_FIXTURES) {
+    describe(family.id, () => {
+      const rule = familyRule(family.id, family.grammar)
+
+      it('keeps normal confidence on a clean tree', () => {
+        const [hit] = evaluateAstRule(rule, {
+          file: fileOf('x = 1\n'),
+          grammar: family.grammar,
+          runQuery: () => matches(family.captures),
+          maxHits: 10,
+        })
+        expect(hit.confidence.level).toBe(rule.confidence)
+        expect(hit.confidence.reason).toBe(rule.explanation)
+      })
+
+      it('caps a surviving hit at low confidence with the syntax-error reason', () => {
+        const captures = family.captures.map((one) => ({
+          ...one,
+          node: {
+            ...one.node,
+            startIndex: 5,
+            endIndex: 5 + one.node.text.length,
+            parent: { type: 'declaration', text: '', startIndex: 0, endIndex: 0, startPosition: { row: 0, column: 0 }, endPosition: { row: 0, column: 0 }, parent: { type: 'root', text: '', startIndex: 0, endIndex: 0, startPosition: { row: 0, column: 0 }, endPosition: { row: 0, column: 0 }, parent: null } },
+          },
+        }))
+        const [hit] = evaluateAstRule(rule, {
+          file: fileOf('x = 1\n'),
+          grammar: family.grammar,
+          runQuery: () => matches(captures),
+          maxHits: 10,
+          firstErrorIndex: 500,
+        })
+        expect(hit).toBeDefined()
+        expect(hit.confidence).toEqual({
+          level: 'low',
+          reason: 'This file has syntax errors, so structural checks may be unreliable.',
+        })
+      })
+
+      it('drops a hit at or after the first error position', () => {
+        const captures = family.captures.map((one) => ({
+          ...one,
+          node: { ...one.node, startIndex: 500, endIndex: 500 + one.node.text.length },
+        }))
+        expect(
+          evaluateAstRule(rule, {
+            file: fileOf('x = 1\n'),
+            grammar: family.grammar,
+            runQuery: () => matches(captures),
+            maxHits: 10,
+            firstErrorIndex: 500,
+          }),
+        ).toEqual([])
+      })
+
+      it('drops a hit whose top-level declaration contains the error node', () => {
+        const root = { type: 'root', text: '', startIndex: 0, endIndex: 0, startPosition: { row: 0, column: 0 }, endPosition: { row: 0, column: 0 }, parent: null }
+        const damagedDeclaration = { type: 'declaration', text: '', startIndex: 0, endIndex: 0, startPosition: { row: 0, column: 0 }, endPosition: { row: 0, column: 0 }, parent: root, hasError: true }
+        const captures = family.captures.map((one) => ({
+          ...one,
+          node: {
+            ...one.node,
+            startIndex: 5,
+            endIndex: 5 + one.node.text.length,
+            parent: damagedDeclaration,
+          },
+        }))
+        expect(
+          evaluateAstRule(rule, {
+            file: fileOf('x = 1\n'),
+            grammar: family.grammar,
+            runQuery: () => matches(captures),
+            maxHits: 10,
+            firstErrorIndex: 500,
+          }),
+        ).toEqual([])
+      })
+    })
+  }
 })

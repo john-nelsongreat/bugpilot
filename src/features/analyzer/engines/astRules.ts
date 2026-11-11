@@ -16,6 +16,10 @@ export interface AstNodeLike {
   endIndex: number
   startPosition: { row: number; column: number }
   endPosition: { row: number; column: number }
+  /** Set on real tree-sitter nodes; the injected test runner may leave it out. */
+  parent?: AstNodeLike | null
+  /** True when the node is or contains an ERROR/MISSING node. */
+  hasError?: boolean
 }
 
 export interface AstMatchLike {
@@ -69,6 +73,27 @@ export interface AstRuleInput {
   grammar: GrammarId
   runQuery: AstQueryRunner
   maxHits: number
+  /**
+   * Byte offset of the first ERROR/MISSING node when the file has syntax errors.
+   * When set, hits in or after the damaged region are dropped and surviving hits
+   * are capped at low confidence: the tree beyond the error is the parser's guess.
+   */
+  firstErrorIndex?: number | null
+}
+
+/**
+ * The top-level declaration that owns the anchor: the highest ancestor below the
+ * root. `hasError` on it means an ERROR/MISSING node lives inside that declaration,
+ * so every statement it contains was parsed from a damaged state.
+ */
+function topLevelOf(anchor: AstNodeLike): AstNodeLike {
+  let node: AstNodeLike = anchor
+  let parent = node.parent
+  while (parent != null && parent.parent != null) {
+    node = parent
+    parent = node.parent
+  }
+  return node
 }
 
 function collapse(text: string, max = 90): string {
@@ -138,18 +163,32 @@ export function evaluateAstRule(rule: AstRuleDefinition, input: AstRuleInput): E
     if (rule.rejectAnchorTypes?.includes(anchor.type)) continue
     if (!passesChecks(captures, rule.checks)) continue
 
+    const firstErrorIndex = input.firstErrorIndex ?? null
+    if (firstErrorIndex != null) {
+      // Everything at or after the first ERROR/MISSING node is built by error
+      // recovery, and a declaration that contains the error node is damaged even
+      // where its own text still parses. Only findings from clean top-level
+      // declarations entirely before the error survive.
+      if (anchor.startIndex >= firstErrorIndex) continue
+      if (topLevelOf(anchor).hasError === true) continue
+    }
+
     const lineIndex = anchor.startPosition.row
     const key = `${lineIndex}:${anchor.startPosition.column}:${anchor.endPosition.row}`
     if (seen.has(key)) continue
     seen.add(key)
 
     const quoted = collapse(anchor.text, 200)
+    const confidence: { level: Confidence; reason: string } =
+      firstErrorIndex != null
+        ? { level: 'low', reason: 'This file has syntax errors, so structural checks may be unreliable.' }
+        : { level: rule.confidence, reason: rule.explanation }
     hits.push({
       ruleId: rule.id,
       engine: 'tree-sitter',
       tier: 'pattern',
       severity: rule.severity,
-      confidence: { level: rule.confidence, reason: rule.explanation },
+      confidence,
       range: {
         startLine: lineIndex + 1,
         startColumn: anchor.startPosition.column + 1,

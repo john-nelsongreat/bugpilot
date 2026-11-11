@@ -155,6 +155,7 @@ export async function runEngineFile(entry: ArchiveEntry, ctx: EngineRunContext):
             grammar: profile.grammar,
             runQuery,
             maxHits: ctx.limits.maxHitsPerFile,
+            firstErrorIndex: syntax.firstErrorIndex,
           })
           result.hits.push(...astHits)
           tree.delete()

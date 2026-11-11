@@ -94,6 +94,8 @@ export interface SyntaxScanResult {
   hits: EngineHit[]
   understood: boolean
   errorRegions: number
+  /** Byte offset where the first ERROR/MISSING node starts; null when the tree is clean. */
+  firstErrorIndex: number | null
   notes: string[]
 }
 
@@ -106,13 +108,14 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
   const regions = collectErrorRegions(input.root)
   const notes: string[] = []
 
-  if (regions.length === 0) return { hits: [], understood: true, errorRegions: 0, notes }
+  if (regions.length === 0) return { hits: [], understood: true, errorRegions: 0, firstErrorIndex: null, notes }
 
   if (UNTRUSTED_SYNTAX_GRAMMARS.has(input.grammar)) {
     return {
       hits: [],
       understood: false,
       errorRegions: regions.length,
+      firstErrorIndex: regions[0].node.startIndex,
       notes: [
         `The ${input.grammar} grammar reported ${regions.length} construct(s) it could not match, starting at line ${
           regions[0].node.startPosition.row + 1
@@ -128,6 +131,7 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
       hits: [],
       understood: false,
       errorRegions: regions.length,
+      firstErrorIndex: regions[0].node.startIndex,
       notes: [
         'The grammar stopped understanding this file almost immediately (one error region covers most of it). That is usually the grammar, not the code, so no syntax finding is claimed.',
       ],
@@ -208,5 +212,5 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
     })
   }
 
-  return { hits, understood: true, errorRegions: regions.length, notes }
+  return { hits, understood: true, errorRegions: regions.length, firstErrorIndex: first.startIndex, notes }
 }

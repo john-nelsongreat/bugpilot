@@ -97,7 +97,7 @@ describe('tree-sitter syntax findings', () => {
 
   it('reports nothing when the grammar understood the file', () => {
     const result = scanSyntax({ file: ruleFile('x = 1\n'), root: node(), grammar: 'python' })
-    expect(result).toEqual({ hits: [], understood: true, errorRegions: 0, notes: [] })
+    expect(result).toEqual({ hits: [], understood: true, errorRegions: 0, firstErrorIndex: null, notes: [] })
   })
 
   it('never claims a syntax bug from a grammar it does not trust', () => {

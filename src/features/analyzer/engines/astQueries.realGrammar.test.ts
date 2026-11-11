@@ -9,6 +9,7 @@ import type { RuleFile } from '../rules/types'
 import type { GrammarId } from './assets'
 import { AST_RULES } from './astQueries'
 import { evaluateAstRule, type AstMatchLike, type AstRuleDefinition } from './astRules'
+import { scanSyntax } from './syntax'
 
 /**
  * The comment in `astQueries.ts` claims every query was run against the grammar it ships for.
@@ -374,5 +375,62 @@ describe('AST queries against the shipped grammars', () => {
     expect(hit.fix?.exampleCode).toBe('')
     expect(hit.limitations.length).toBeGreaterThan(0)
     expect(hit.verificationSteps.length).toBeGreaterThan(0)
+  })
+
+  it('keeps the syntax finding and drops the unreachable-code cascade after a missing brace in C', () => {
+    const cGrammar: GrammarId = 'c'
+    const language = grammars.get(cGrammar)
+    if (!language) throw new Error('C grammar must be loaded')
+
+    const code = [
+      'int broken(void) {',
+      '    return 1;',
+      '    int n = 2;',
+      '    return n;',
+      'int fine(void) {',
+      '    return 0;',
+      '    cleanup();',
+      '}',
+      '',
+    ].join('\n')
+
+    const parser = new Parser()
+    parser.setLanguage(language)
+    const tree = parser.parse(code)
+    const file = ruleFileFor(cGrammar, code)
+    const rule = AST_RULES.find((candidate) => candidate.id === 'bugpilot/ast/unreachable-code' && candidate.grammar === cGrammar)
+    if (!rule || !tree) throw new Error('The C rule or the parse tree is missing.')
+
+    const runQuery = (source: string) => {
+      const query = new Query(language, source)
+      try {
+        return query.matches(tree.rootNode as never) as unknown as AstMatchLike[]
+      } finally {
+        query.delete()
+      }
+    }
+
+    try {
+      // Without the guard the broken tree cascades the jump statement into the next
+      // function, so this proves the fixture really has a damaged tree to distrust.
+      const unfiltered = evaluateAstRule(rule, { file, grammar: cGrammar, runQuery, maxHits: 50 })
+      expect(unfiltered.length, `the fixture must cascade before filtering:\n${tree.rootNode.toString().slice(0, 900)}`).toBeGreaterThan(0)
+
+      const syntax = scanSyntax({ file, root: tree.rootNode as never, grammar: cGrammar })
+      expect(syntax.hits.length, 'the syntax finding must survive').toBeGreaterThan(0)
+      expect(syntax.firstErrorIndex).not.toBeNull()
+
+      const filtered = evaluateAstRule(rule, {
+        file,
+        grammar: cGrammar,
+        runQuery,
+        maxHits: 50,
+        firstErrorIndex: syntax.firstErrorIndex,
+      })
+      expect(filtered, tree.rootNode.toString().slice(0, 900)).toEqual([])
+    } finally {
+      tree.delete()
+      parser.delete()
+    }
   })
 })
