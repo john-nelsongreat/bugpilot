@@ -180,6 +180,10 @@ interface CentralRecord {
   dataDescriptor: boolean
   /** The sizes or the offset came from a zip64 extra field. */
   zip64: boolean
+  /** General-purpose bit 0: the entry cannot be read without a password. */
+  encrypted: boolean
+  /** The external attributes mark the entry as a symbolic link. */
+  symlink: boolean
 }
 
 interface PlannedEntry {
@@ -375,6 +379,8 @@ async function walkCentralDirectory(
       startDisk,
       dataDescriptor: (flags & FLAG_DATA_DESCRIPTOR) !== 0,
       zip64: false,
+      encrypted: (flags & FLAG_ENCRYPTED) !== 0,
+      symlink: isSymbolicLink(externalAttrs),
     }
     // Zip64 replaces the all-ones markers in this record's own extra field, so the real sizes and
     // offset are settled before anything is judged from them.
@@ -383,15 +389,10 @@ async function walkCentralDirectory(
       bytes.subarray(pos + CENTRAL_HEADER_SIZE + nameLength, pos + CENTRAL_HEADER_SIZE + nameLength + extraLength),
     )
 
-    // Encryption, foreign volumes and symlinks are diagnosed before the name is judged, so a
-    // hostile name cannot hide the more serious property.
-    if (flags & FLAG_ENCRYPTED) {
-      refuse('encrypted_entry', messageName(record.nameBytes, flags))
-    }
+    // A foreign volume is diagnosed before the name is judged, so a hostile name cannot hide the
+    // more serious property. Encryption and symlinks are recorded here and skipped per entry
+    // below; both are judged from the same early fields.
     if (record.startDisk !== 0) refuse('multi_disk_not_supported', messageName(record.nameBytes, flags))
-    if (isSymbolicLink(record.externalAttrs)) {
-      refuse('symlink_entry', messageName(record.nameBytes, flags))
-    }
 
     if (nameLength > run.limits.maxEntryNameBytes) refuse('name_too_long', nameLength)
     if (unicodeBody !== null && unicodeBody.length > run.limits.maxEntryNameBytes) {
@@ -419,16 +420,20 @@ async function walkCentralDirectory(
 function classifyDeclared(record: CentralRecord, run: ReadRun): ArchiveSkipCode | 'candidate' | 'already_processed' {
   const { limits } = run
   validateName(record.name)
-  if (isNestedArchive(record.name)) refuse('nested_archive', record.name)
   if (run.resumeProcessedNames?.has(record.name)) return 'already_processed'
+  // A hostile name still refuses above; encryption and symlinks are ordinary archive contents a
+  // user legitimately zips, so they are skipped per entry rather than costing the upload.
+  if (record.encrypted) return 'encrypted_entry'
+  if (record.symlink) return 'symlink_entry'
+  if (isNestedArchive(record.name)) return 'nested_archive'
   if (isDirectoryEntry(record.externalAttrs)) return 'directory_entry'
   if (isIgnoredPath(record.name, run.includeGenerated)) return 'ignored_folder'
   if (!run.includeGenerated && isOsMetadataFile(record.name)) return 'generated_file'
   if (hasBinaryExtension(record.name)) return 'binary_content'
-  if (record.method !== METHOD_STORE && record.method !== METHOD_DEFLATE) refuse('unsupported_compression', record.name, String(record.method))
+  if (record.method !== METHOD_STORE && record.method !== METHOD_DEFLATE) return 'unsupported_compression'
   if (record.uncompressedSize === 0) return 'empty_entry'
   if (record.compressedSize === 0 || record.uncompressedSize / record.compressedSize > limits.maxDeclaredRatio) {
-    refuse('declared_ratio_exceeded')
+    return 'declared_ratio_exceeded'
   }
   if (record.uncompressedSize > limits.maxSingleFileUncompressedBytes) return 'single_file_too_large'
   if (record.compressedSize > limits.maxSingleFileUncompressedBytes + COMPRESSED_OVERHEAD_BYTES) return 'single_file_too_large'
@@ -509,7 +514,9 @@ async function validateLocalHeader(
   const localNameLength = headView.getUint16(26, true)
   const localExtraLength = headView.getUint16(28, true)
 
-  if (localFlags & FLAG_ENCRYPTED) refuse('encrypted_entry', record.name)
+  // The index did not mark this entry encrypted, but its own local header does: the data itself
+  // is what needs the password, so the entry is skipped rather than inflated against its will.
+  if (localFlags & FLAG_ENCRYPTED) skipEntry('encrypted_entry')
   // Bit 3 is the only flag whose absence in one header changes how many bytes follow the data,
   // so the two headers have to agree about it before anything else is trusted.
   if (((localFlags & FLAG_DATA_DESCRIPTOR) !== 0) !== record.dataDescriptor) {
@@ -602,7 +609,7 @@ async function extractRecord(source: ByteSource, planned: PlannedEntry, run: Rea
     out = concat(chunks, produced)
   }
 
-  if (crc32Finish(crc32(out)) !== record.crc) refuse('crc_mismatch', record.name)
+  if (crc32Finish(crc32(out)) !== record.crc) skipEntry('crc_mismatch')
   if (looksBinary(out)) skipEntry('binary_content')
   const decoded = decodeBytes(out)
   const detection = detectLanguage(record.name, decoded.text)
@@ -633,7 +640,11 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
   const run = createRun(options)
   const entries: ArchiveEntry[] = []
   const skipped: ArchiveSkippedEntry[] = []
-  const finish = (refusal: ArchiveRefusal | null): ArchiveReadResult => finishRun(run, refusal, entries, skipped)
+  let note: string | null = null
+  const finish = (refusal: ArchiveRefusal | null): ArchiveReadResult => ({
+    ...finishRun(run, refusal, entries, skipped),
+    note,
+  })
   let records: CentralRecord[] = []
 
   try {
@@ -694,7 +705,19 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
       // An entry a previous pass settled is neither read nor recorded here: the earlier pass
       // already reported it, and this pass's coverage is only ever merged beside that one.
       if (verdict === 'already_processed') continue
-      skipped.push({ name: record.name, code: verdict, message: archiveReasonMessage(verdict, record.name) })
+      // The method number matters in the unsupported-compression reason, so it rides along as the
+      // message's second detail; every other skip reason is built from the name alone.
+      const message =
+        verdict === 'unsupported_compression'
+          ? archiveReasonMessage(verdict, record.name, String(record.method))
+          : archiveReasonMessage(verdict, record.name)
+      skipped.push({ name: record.name, code: verdict, message })
+    }
+    // An archive where every entry is encrypted reads as an empty report. The per-entry skips say
+    // why, and this note says it once, in the report's own limitations.
+    if (records.length > 0 && records.every((record) => record.encrypted)) {
+      note =
+        'Every entry in this archive is encrypted. BugPilot does not ask for or handle archive passwords, so nothing was unpacked.'
     }
     run.stats.plannedEntries = candidates.length
     run.stats.plannedBytes = candidates.reduce((sum, record) => sum + record.uncompressedSize, 0)

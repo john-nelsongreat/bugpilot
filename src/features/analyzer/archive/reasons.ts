@@ -7,7 +7,6 @@ export const ARCHIVE_REFUSAL_CODES = [
   'entry_count_exceeded',
   'wall_clock_exceeded',
   'total_uncompressed_exceeded',
-  'declared_ratio_exceeded',
   'actual_ratio_exceeded',
   'declared_size_understated',
   'path_traversal',
@@ -16,9 +15,6 @@ export const ARCHIVE_REFUSAL_CODES = [
   'backslash_in_path',
   'name_too_long',
   'duplicate_name',
-  'symlink_entry',
-  'nested_archive',
-  'encrypted_entry',
   'not_a_zip',
   'not_a_tar',
   'unsupported_format',
@@ -31,10 +27,9 @@ export const ARCHIVE_REFUSAL_CODES = [
   'corrupt_deflate_stream',
   'corrupt_tar_header',
   'corrupt_gzip_stream',
+  'gzip_crc_mismatch',
   'multi_member_gzip',
   'archive_truncated',
-  'crc_mismatch',
-  'unsupported_compression',
   'null_byte_in_name',
   'cancelled',
   'worker_error',
@@ -52,6 +47,12 @@ export const ARCHIVE_SKIP_CODES = [
   'generated_file',
   'data_descriptor_mismatch',
   'not_reached',
+  'declared_ratio_exceeded',
+  'symlink_entry',
+  'nested_archive',
+  'encrypted_entry',
+  'unsupported_compression',
+  'crc_mismatch',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -70,8 +71,6 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `BugPilot spent more than ${n} second(s) reading this upload and stopped, so nothing was kept. A very large or deeply nested upload looks like this from the inside, so pick a smaller folder or split the archive.`,
   total_uncompressed_exceeded: (n) =>
     `The files add up to more than ${n} bytes, which is over the ceiling BugPilot keeps in the browser. A zip bomb looks like this, so nothing was read.`,
-  declared_ratio_exceeded: () =>
-    'An entry claims to expand far more than a normal text file does, so BugPilot refused it before unpacking anything.',
   actual_ratio_exceeded: () =>
     'An entry expanded far more than its own header admitted while it was being unpacked, so reading stopped at that point.',
   declared_size_understated: () =>
@@ -88,12 +87,6 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     'A file name inside the archive is longer than BugPilot will handle, so the archive is refused.',
   duplicate_name: (name) =>
     `Two entries in the archive have the same name ("${name}"). Reading the second would hide the first, so the archive is refused.`,
-  symlink_entry: (name) =>
-    `The entry "${name}" is a symbolic link. Following it could read a file outside the archive, so BugPilot refuses the archive.`,
-  nested_archive: (name) =>
-    `The entry "${name}" is itself an archive. BugPilot does not open archives inside archives, so the upload is refused.`,
-  encrypted_entry: (name) =>
-    `The entry "${name}" is encrypted. BugPilot does not ask for or handle archive passwords, so nothing was unpacked.`,
   not_a_zip: () =>
     'This does not look like a .zip archive: the end-of-directory record is missing. BugPilot only reads .zip, .tar and .gz files.',
   not_a_tar: () =>
@@ -122,16 +115,14 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `A header block in this archive is damaged${name ? ` ("${name}")` : ''}${extra ? `: ${extra}` : ''}. BugPilot stopped reading and unpacked nothing, because a header it cannot trust could point anywhere in the file.`,
   corrupt_gzip_stream: (name, extra) =>
     `The compressed data in "${name || 'this file'}" is damaged or incomplete${extra ? `: ${extra}` : ''}. BugPilot checked the gzip header and the checksum at the end of the stream and unpacked nothing. Re-create the .gz file and upload that.`,
+  gzip_crc_mismatch: (name) =>
+    `"${name || 'this file'}" does not match the checksum stored at the end of its gzip stream, so its unpacked bytes cannot be trusted and nothing was unpacked. Re-create the .gz file and upload that.`,
   multi_member_gzip: (name) =>
     `"${name || 'this file'}" is two or more gzip streams joined into one file. BugPilot reads a single gzip stream, so nothing was unpacked. Split the file, or re-create the archive as one .zip or .tar.gz.`,
   archive_truncated: (name) =>
     name === ''
       ? 'This archive stops partway through: a header or a file body promises more bytes than the file contains. BugPilot read nothing from it. Re-download or re-create the archive.'
       : `This archive is cut off inside "${name}": the header promises more bytes than the file contains. BugPilot read nothing from it. Re-download or re-create the archive.`,
-  crc_mismatch: (name) =>
-    `The contents of "${name}" do not match the checksum stored in the archive, so the archive is refused.`,
-  unsupported_compression: (name, extra) =>
-    `The entry "${name}" uses compression method ${extra ?? 'unknown'}, which BugPilot cannot unpack.`,
   null_byte_in_name: (name) =>
     `A file name inside the archive is cut short by a NUL byte ("${name}"), which is how path-traversal tricks hide a second name. The archive is refused.`,
   cancelled: () => 'You cancelled the upload, so nothing was read.',
@@ -158,6 +149,18 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `"${name}" looks generated or vendored${extra ? ` (${extra})` : ''}, so BugPilot skipped it. Tick "Include generated and vendored files" to check it too; the same size limits apply.`,
   not_reached: (name, extra) =>
     `"${name}" was not reached${extra ? `: ${extra}` : ''}. The report covers only the files BugPilot actually read.`,
+  declared_ratio_exceeded: (name) =>
+    `"${name}" claims to expand far more than a normal text file does, so BugPilot skipped it without unpacking it.`,
+  symlink_entry: (name) =>
+    `"${name}" is a symbolic link. BugPilot never follows links, so it skipped this entry and kept going.`,
+  nested_archive: (name) =>
+    `"${name}" is itself an archive. BugPilot does not open archives inside archives, so it skipped this entry and kept going.`,
+  encrypted_entry: (name) =>
+    `"${name}" is encrypted. BugPilot does not ask for or handle archive passwords, so it skipped this entry and kept going.`,
+  unsupported_compression: (name, extra) =>
+    `"${name}" uses compression method ${extra ?? 'unknown'}, which BugPilot cannot unpack, so it skipped this entry and kept going.`,
+  crc_mismatch: (name) =>
+    `"${name}" does not match the checksum stored in the archive, so BugPilot skipped this entry and kept going.`,
 }
 
 /**

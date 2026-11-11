@@ -224,13 +224,15 @@ describe('zip64 per-entry extra fields', () => {
     expect(result.refusal?.code).toBe('overlapping_entries')
   })
 
-  it('keeps the encrypted and symlink refusals ahead of anything zip64 says', async () => {
+  it('keeps the encrypted and symlink skips ahead of anything zip64 says', async () => {
     const encrypted = await readArchive(zip64Entry({ encrypted: true }))
     const symlink = await readArchive(
       buildZip([{ name: 'link.js', content: '/etc/passwd', symlink: true, zip64: true }]),
     )
 
-    expect(encrypted.refusal?.code).toBe('encrypted_entry')
-    expect(symlink.refusal?.code).toBe('symlink_entry')
+    expect(encrypted.refusal).toBeNull()
+    expect(encrypted.skipped.map((entry) => entry.code)).toEqual(['encrypted_entry'])
+    expect(symlink.refusal).toBeNull()
+    expect(symlink.skipped.map((entry) => entry.code)).toEqual(['symlink_entry'])
   })
 })

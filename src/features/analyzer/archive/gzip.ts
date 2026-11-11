@@ -196,7 +196,7 @@ export async function readGzipPayload(bytes: Uint8Array, options: GzipReadOption
       refuse('corrupt_gzip_stream', '', `its stored length is ${storedSize} but ${produced} bytes were produced`)
     }
     const storedCrc = readLittleEndian(view, bytes.length - TRAILER_BYTES)
-    if (crc32Finish(crc) !== storedCrc) refuse('crc_mismatch', sourceName)
+    if (crc32Finish(crc) !== storedCrc) refuse('gzip_crc_mismatch', sourceName)
 
     return finish(run, null, concat(chunks, produced))
   } catch (error) {

@@ -113,11 +113,14 @@ export async function readLooseFiles(
     if (item.path.length > limits.maxEntryNameBytes) return fail('name_too_long', item.path.length)
     if (seen.has(item.path)) return fail('duplicate_name', item.path)
     seen.add(item.path)
-    // A dropped folder is a container too, so an archive inside it is refused exactly the way
-    // an archive inside an archive is.
-    if (isNestedArchive(item.path)) return fail('nested_archive', item.path)
+    // A dropped folder is a container too, so an archive inside it is skipped the same way an
+    // archive inside an archive is: never opened, never counted against the budgets.
     // A previous pass settled this file; it is neither read nor recorded here.
     if (options.resumeProcessedNames?.has(item.path)) continue
+    if (isNestedArchive(item.path)) {
+      skipped.push({ name: item.path, code: 'nested_archive', message: archiveReasonMessage('nested_archive', item.path) })
+      continue
+    }
 
     const skipCode = skipCodeFor(item, limits, options.includeGenerated === true)
     if (skipCode) {

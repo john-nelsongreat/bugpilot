@@ -164,13 +164,15 @@ describe('archives written by the tools people actually use', () => {
     expect(result.entries).toHaveLength(2)
   })
 
-  it('refuses an entry compressed with a method no decoder ships for', async () => {
+  it('skips an entry compressed with a method no decoder ships for', async () => {
     const bytes = buildZip([{ name: 'project/src/bmi.py', content: BMI, method: 12 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('unsupported_compression')
-    expect(result.refusal?.message).toContain('project/src/bmi.py')
-    expect(result.refusal?.message).toContain('12')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['project/src/bmi.py', 'unsupported_compression'],
+    ])
+    expect(result.skipped[0].message).toContain('12')
   })
 })
 

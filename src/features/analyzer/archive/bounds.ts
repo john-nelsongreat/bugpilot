@@ -88,7 +88,11 @@ export interface ArchiveReadResult {
    * not look at containers at all (loose files) leaves it unset rather than claiming a format.
    */
   format?: ContainerFormat | null
-  /** Set when the uploaded name and the contents disagree. It explains; it never blocks a read. */
+  /**
+   * An explanation for the whole read: the uploaded name disagreed with the contents, or nothing
+   * could be analysed even though the read succeeded (for example, every entry was encrypted). It
+   * explains; it never blocks a read.
+   */
   note?: string | null
 }
 

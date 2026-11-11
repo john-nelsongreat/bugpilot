@@ -135,16 +135,18 @@ describe('zip data descriptors: the agreement rules stay narrow', () => {
     expect(result.refusal?.code).toBe('local_central_disagreement')
   })
 
-  it('still refuses an encrypted entry that also advertises a descriptor', async () => {
+  it('skips an encrypted entry even when it also advertises a descriptor', async () => {
     const result = await readArchive(descriptorArchive({ dataDescriptor: true, encrypted: true }))
 
-    expect(result.refusal?.code).toBe('encrypted_entry')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['encrypted_entry'])
   })
 
-  it('refuses an entry whose local header hides the encrypted flag the index does not show', async () => {
+  it('skips an entry whose local header hides the encrypted flag the index does not show', async () => {
     const result = await readArchive(descriptorArchive({ dataDescriptor: true, localFlagsOverride: 0x0009 }))
 
-    expect(result.refusal?.code).toBe('encrypted_entry')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['encrypted_entry'])
   })
 
   it('still checks the entry name bytes against the index', async () => {

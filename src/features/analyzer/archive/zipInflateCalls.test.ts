@@ -50,4 +50,45 @@ describe('random-access zip: inflate calls follow the classification', () => {
     expect(result.entries).toHaveLength(2)
     expect(counters.inflateCalls).toBe(2)
   })
+
+  it('never inflates an entry the index skips without reading it', async () => {
+    counters.inflateCalls = 0
+    const inner = buildZip([{ name: 'inside.js', content: 'x\n' }])
+    const bytes = buildZip([
+      { name: 'bundles/nested.zip', content: inner, method: 8 },
+      { name: 'link.js', content: '/etc/passwd', symlink: true },
+      { name: 'locked.js', content: 'secret', encrypted: true },
+      { name: 'notes.txt', content: 'line\n'.repeat(200), method: 8 },
+      { name: 'odd.js', content: 'x\n', method: 14 },
+      { name: 'src/app.js', content: 'export const app = 1\n', method: 8 },
+    ])
+
+    const result = await readArchiveSource(createMemorySource(bytes))
+
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['bundles/nested.zip', 'nested_archive'],
+      ['link.js', 'symlink_entry'],
+      ['locked.js', 'encrypted_entry'],
+      ['notes.txt', 'declared_ratio_exceeded'],
+      ['odd.js', 'unsupported_compression'],
+    ])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/app.js'])
+    expect(counters.inflateCalls).toBe(1)
+  })
+
+  it('inflates an entry once before discarding it on a checksum mismatch', async () => {
+    counters.inflateCalls = 0
+    const bytes = buildZip([
+      { name: 'src/bad.js', content: 'export const a = 1\n', method: 8, crcOverride: 1234 },
+      { name: 'src/app.js', content: 'export const app = 1\n', method: 8 },
+    ])
+
+    const result = await readArchiveSource(createMemorySource(bytes))
+
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['src/bad.js', 'crc_mismatch']])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/app.js'])
+    expect(counters.inflateCalls).toBe(2)
+  })
 })

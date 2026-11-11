@@ -137,26 +137,29 @@ describe('readContainer: the bytes decide', () => {
 })
 
 describe('readContainer: what is never opened', () => {
-  it('refuses a zip inside a gzip', async () => {
+  it('skips a zip inside a gzip', async () => {
     const result = await readContainer(gzipSync(zipOf('a.js', 'x\n')), 'payload.gz')
 
-    expect(result.refusal?.code).toBe('nested_archive')
-    expect(result.refusal?.message).toContain('payload.gz')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['payload', 'nested_archive']])
+    expect(result.skipped[0].message).toContain('payload')
     expect(result.entries).toEqual([])
   })
 
-  it('refuses a gzip inside a gzip', async () => {
+  it('skips a gzip inside a gzip', async () => {
     const result = await readContainer(gzipSync(gzipSync(strToU8('x\n'))), 'deeper.gz')
 
-    expect(result.refusal?.code).toBe('nested_archive')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['deeper', 'nested_archive']])
     expect(result.entries).toEqual([])
   })
 
-  it('refuses a tar inside a tar instead of reading it', async () => {
+  it('skips a tar inside a tar instead of reading it', async () => {
     const inner = buildTar([{ name: 'a.js', content: 'x\n' }])
     const result = await readContainer(buildTar([{ name: 'outer/inner.tar', content: inner }]), 'outer.tar')
 
-    expect(result.refusal?.code).toBe('nested_archive')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['outer/inner.tar', 'nested_archive']])
   })
 
   it('refuses a 7z that claims to be a zip, without decoding it', async () => {
@@ -191,11 +194,12 @@ describe('readContainer: what is never opened', () => {
     expect(result.refusal?.code).toBe('archive_truncated')
   })
 
-  it('hands nothing back when it refuses, including stats for the read', async () => {
+  it('hands nothing back but its stats when the inner archive is skipped', async () => {
     const result = await readContainer(gzipSync(zipOf('a.js', 'x\n')), 'payload.gz')
 
+    expect(result.refusal).toBeNull()
     expect(result.entries).toEqual([])
-    expect(result.skipped).toEqual([])
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['nested_archive'])
     expect(result.stats.durationMs).toBeGreaterThanOrEqual(0)
   })
 

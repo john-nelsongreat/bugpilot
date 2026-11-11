@@ -119,10 +119,13 @@ describe('readLooseFiles: caps and hostile paths', () => {
     expect(result.refusal?.code).toBe('duplicate_name')
   })
 
-  it('refuses an archive found inside a dropped folder', async () => {
+  it('skips an archive found inside a dropped folder', async () => {
     const result = await readLooseFiles([source('project/bundles/vendor.zip', 'PK\x03\x04 junk')])
 
-    expect(result.refusal?.code).toBe('nested_archive')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['project/bundles/vendor.zip', 'nested_archive'],
+    ])
     expect(result.entries).toHaveLength(0)
   })
 

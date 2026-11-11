@@ -213,7 +213,7 @@ describe('random-access zip: formats and record flags the reader still refuses',
     expect(result.entries.map((entry) => entry.name)).toEqual(['a.txt'])
   })
 
-  it('keeps the encrypted, symlink, duplicate and traversal refusals', async () => {
+  it('keeps the duplicate and traversal refusals and skips encrypted and symlink entries', async () => {
     const encrypted = await readArchiveSource(
       createMemorySource(buildZip([{ name: 'src/a.js', content: 'x', encrypted: true }])),
     )
@@ -228,8 +228,10 @@ describe('random-access zip: formats and record flags the reader still refuses',
     )
     const traversal = await readArchiveSource(createMemorySource(buildZip([{ name: '../x.js', content: 'x\n' }])))
 
-    expect(encrypted.refusal?.code).toBe('encrypted_entry')
-    expect(symlink.refusal?.code).toBe('symlink_entry')
+    expect(encrypted.refusal).toBeNull()
+    expect(encrypted.skipped.map((entry) => entry.code)).toEqual(['encrypted_entry'])
+    expect(symlink.refusal).toBeNull()
+    expect(symlink.skipped.map((entry) => entry.code)).toEqual(['symlink_entry'])
     expect(duplicate.refusal?.code).toBe('duplicate_name')
     expect(traversal.refusal?.code).toBe('path_traversal')
   })

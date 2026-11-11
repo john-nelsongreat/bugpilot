@@ -272,6 +272,7 @@ function skipFor(code: ArchiveSkipCode, name: string, extra?: string): ArchiveSk
 function declaredSkip(typeFlag: number, label: string | null, name: string, size: number, run: ReadRun): ArchiveSkipCode | null {
   if (label) return 'special_entry'
   if (typeFlag === FLAG.directory) return 'directory_entry'
+  if (isNestedArchive(name)) return 'nested_archive'
   if (isIgnoredPath(name, run.includeGenerated)) return 'ignored_folder'
   if (!run.includeGenerated && isOsMetadataFile(name)) return 'generated_file'
   if (hasBinaryExtension(name)) return 'binary_content'
@@ -375,7 +376,6 @@ export async function readTar(bytes: Uint8Array, options: ReadOptions = {}): Pro
 
       if (nameEncoder.encode(name).length > run.limits.maxEntryNameBytes) refuse('name_too_long', name)
       validateName(name)
-      if (isNestedArchive(name)) refuse('nested_archive', name)
       if (seen.has(name)) refuse('duplicate_name', name)
       seen.add(name)
 

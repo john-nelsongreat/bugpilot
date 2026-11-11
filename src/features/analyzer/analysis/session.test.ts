@@ -125,7 +125,7 @@ describe('analysis session', () => {
       { archiveBytes: 1 },
       {
         readArchive: async () => ({
-          refusal: { code: 'declared_ratio_exceeded', message: 'This archive expands far beyond its compressed size.' },
+          refusal: { code: 'actual_ratio_exceeded', message: 'This archive expands far beyond its compressed size.' },
           entries: [],
           skipped: [],
           stats: { ...STATS, walkedRecords: 400 },

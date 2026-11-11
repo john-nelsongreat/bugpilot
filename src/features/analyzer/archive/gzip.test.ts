@@ -137,7 +137,7 @@ describe('readGzipPayload: damaged and hostile streams', () => {
     packed[packed.length - 8] ^= 0xff
     const result = await readGzipPayload(packed)
 
-    expect(result.refusal?.code).toBe('crc_mismatch')
+    expect(result.refusal?.code).toBe('gzip_crc_mismatch')
     expect(result.payload).toEqual(new Uint8Array(0))
   })
 
@@ -157,7 +157,7 @@ describe('readGzipPayload: damaged and hostile streams', () => {
 
     // A cut stream cannot be pinned to one field: the trailer is no longer where it should be,
     // so it is refused for one of these specific reasons rather than accepted.
-    expect(['corrupt_gzip_stream', 'crc_mismatch', 'archive_truncated']).toContain(result.refusal?.code)
+    expect(['corrupt_gzip_stream', 'gzip_crc_mismatch', 'archive_truncated']).toContain(result.refusal?.code)
     expect(result.payload).toEqual(new Uint8Array(0))
     expect(result.stats.producedBytes).toBe(0)
   })

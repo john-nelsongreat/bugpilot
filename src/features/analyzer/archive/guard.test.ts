@@ -42,12 +42,13 @@ describe('readArchive: accepts a normal archive', () => {
     expect(result.entries[0].language).toBe('javascript')
   })
 
-  it('refuses an entry that declares an impossible expansion ratio', async () => {
+  it('skips an entry that declares an impossible expansion ratio', async () => {
     const body = 'line\n'.repeat(200)
     const bytes = buildZip([{ name: 'notes.txt', content: body, method: 8 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('declared_ratio_exceeded')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['declared_ratio_exceeded'])
     expect(result.stats.producedBytes).toBe(0)
   })
 })
@@ -85,7 +86,7 @@ describe('readArchive: refuses paths that escape the archive', () => {
   })
 })
 
-describe('readArchive: refuses archive structures the reader must not follow', () => {
+describe('readArchive: paths and structures the reader must not follow', () => {
   it('refuses a duplicate entry name', async () => {
     const bytes = buildZip([
       { name: 'a/dup.js', content: 'first\n' },
@@ -96,23 +97,28 @@ describe('readArchive: refuses archive structures the reader must not follow', (
     expect(result.refusal?.code).toBe('duplicate_name')
   })
 
-  it('refuses a symlink entry', async () => {
+  it('skips a symlink entry and keeps the rest', async () => {
     const bytes = buildZip([
       { name: 'link', content: '/etc/passwd', symlink: true },
       { name: 'safe.js', content: 'x\n' },
     ])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('symlink_entry')
-    expect(result.entries).toHaveLength(0)
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['link', 'symlink_entry']])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['safe.js'])
   })
 
-  it('refuses a nested archive instead of reading it', async () => {
+  it('skips a nested archive instead of reading it', async () => {
     const inner = buildZip([{ name: 'inside.js', content: 'x\n' }])
     const bytes = buildZip([{ name: 'bundles/nested.zip', content: inner, method: 8 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('nested_archive')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['bundles/nested.zip', 'nested_archive'],
+    ])
+    expect(result.entries).toHaveLength(0)
   })
 
   it('reads a zip64 archive through its end record', async () => {
@@ -157,24 +163,25 @@ describe('readArchive: leak A — the parsed-entry cap is measured on records ac
   })
 })
 
-describe('readArchive: leak B — encryption is diagnosed before the name', () => {
-  it('reports an encrypted entry even when its name is also hostile', async () => {
+describe('readArchive: leak B — a hostile name is diagnosed before encryption', () => {
+  it('refuses the traversal even when the entry is also encrypted', async () => {
     const bytes = buildZip([{ name: '../secret.enc', content: 'x', encrypted: true }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('encrypted_entry')
-    expect(result.refusal?.message).toMatch(/encrypt/i)
+    expect(result.refusal?.code).toBe('path_traversal')
+    expect(result.refusal?.message).toMatch(/\.\./)
   })
 
-  it('reports an encrypted entry in an otherwise valid archive', async () => {
+  it('skips an encrypted entry in an otherwise valid archive', async () => {
     const bytes = buildZip([
       { name: 'ok.js', content: 'x\n' },
       { name: 'locked.js', content: 'y', encrypted: true },
     ])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('encrypted_entry')
-    expect(result.entries).toHaveLength(0)
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['locked.js', 'encrypted_entry']])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['ok.js'])
   })
 })
 
@@ -262,6 +269,73 @@ describe('readArchive: skips that are not refusals', () => {
       { name: 'src/sneaky.js', code: 'binary_content', message: expect.stringMatching(/binary file/) },
     ])
     expect(result.entries.map((entry) => entry.name)).toEqual(['src/keep.js'])
+  })
+})
+
+describe('readArchive: non-hostile anomalies skip instead of refusing', () => {
+  it('keeps a whole tree when one entry is a nested archive', async () => {
+    const inner = buildZip([{ name: 'vendor.js', content: 'x\n' }])
+    const bytes = buildZip([
+      { name: 'src/index.js', content: 'export const a = 1\n' },
+      { name: 'src/util.js', content: 'export const b = 2\n' },
+      { name: 'vendor/bundle.zip', content: inner, method: 8 },
+      { name: 'README.md', content: '# hi\n' },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/index.js', 'src/util.js', 'README.md'])
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['vendor/bundle.zip', 'nested_archive'],
+    ])
+  })
+
+  it('never inflates a nested bomb, whatever its header claims', async () => {
+    // A 4 GiB declared expansion inside a nested zip must not cost a byte of budget.
+    const bytes = buildZip([
+      {
+        name: 'payloads/bomb.zip',
+        content: 'PK\x03\x04',
+        method: 8,
+        declaredUncompressed: 4 * 1024 * 1024 * 1024,
+      },
+      { name: 'src/app.js', content: 'export const app = 1\n' },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['payloads/bomb.zip', 'nested_archive'],
+    ])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/app.js'])
+    expect(result.stats.producedBytes).toBeLessThan(1024)
+  })
+
+  it('keeps the rest of the archive when one text file declares an extreme ratio', async () => {
+    const bytes = buildZip([
+      { name: 'notes.txt', content: 'line\n'.repeat(200), method: 8 },
+      { name: 'src/app.js', content: 'export const app = 1\n' },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([
+      ['notes.txt', 'declared_ratio_exceeded'],
+    ])
+    expect(result.entries.map((entry) => entry.name)).toEqual(['src/app.js'])
+  })
+
+  it('notes once when every entry is encrypted and nothing was unpacked', async () => {
+    const bytes = buildZip([
+      { name: 'locked.js', content: 'y', encrypted: true },
+      { name: 'also-locked.js', content: 'z', encrypted: true },
+    ])
+    const result = await readArchive(bytes)
+
+    expect(result.refusal).toBeNull()
+    expect(result.entries).toHaveLength(0)
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['encrypted_entry', 'encrypted_entry'])
+    expect(result.note).toContain('Every entry')
   })
 })
 
@@ -377,11 +451,12 @@ describe('readArchive: damaged and lying archives', () => {
     expect(result.refusal?.code).toBe('declared_size_understated')
   })
 
-  it('refuses content that fails the stored checksum', async () => {
+  it('skips content that fails the stored checksum', async () => {
     const bytes = buildZip([{ name: 'src/a.js', content: 'export const a = 1\n', crcOverride: 1234 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('crc_mismatch')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['src/a.js', 'crc_mismatch']])
     expect(result.entries).toHaveLength(0)
   })
 
@@ -392,12 +467,13 @@ describe('readArchive: damaged and lying archives', () => {
     expect(result.refusal?.code).toBe('corrupt_local_header')
   })
 
-  it('refuses an unsupported compression method', async () => {
+  it('skips an entry whose compression method no decoder ships for', async () => {
     const bytes = buildZip([{ name: 'src/a.js', content: 'x\n', method: 14 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('unsupported_compression')
-    expect(result.refusal?.message).toMatch(/14/)
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['unsupported_compression'])
+    expect(result.skipped[0].message).toMatch(/14/)
   })
 
   it('refuses an absurdly long entry name', async () => {
@@ -426,12 +502,13 @@ describe('readArchive: damaged and lying archives', () => {
 })
 
 describe('readArchive: modest zip bombs stay inside the caps', () => {
-  it('refuses an honest bomb on its declared ratio before inflating anything', async () => {
+  it('skips an honest bomb on its declared ratio before inflating anything', async () => {
     const body = 'A'.repeat(2 * 1024 * 1024)
     const bytes = buildZip([{ name: 'notes.txt', content: body, method: 8 }])
     const result = await readArchive(bytes)
 
-    expect(result.refusal?.code).toBe('declared_ratio_exceeded')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => entry.code)).toEqual(['declared_ratio_exceeded'])
     expect(result.stats.producedBytes).toBe(0)
     expect(result.stats.peakEntryBytes).toBe(0)
   })

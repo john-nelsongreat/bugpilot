@@ -213,10 +213,11 @@ describe('readTar: hostile headers', () => {
     expect(result.refusal?.code).toBe('duplicate_name')
   })
 
-  it('refuses a nested archive inside the tar', async () => {
+  it('skips a nested archive inside the tar', async () => {
     const inner = gzipSync(encoder.encode('not really a zip but named like one'))
     const result = await readTar(buildTar([{ name: 'payloads/inner.zip', content: inner }]))
-    expect(result.refusal?.code).toBe('nested_archive')
+    expect(result.refusal).toBeNull()
+    expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['payloads/inner.zip', 'nested_archive']])
   })
 
   it('refuses a name longer than the reader will handle', async () => {

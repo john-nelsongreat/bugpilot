@@ -130,7 +130,8 @@ export async function readContainer(
     return { ...withNoRetention(refusalFor(code, detection.refusalSubject), createRun(options).stats), format: null, note, payloadBytes: 0 }
   }
   if (detection.format === 'zip') {
-    return { ...(await readArchive(bytes, options)), format: 'zip', note, payloadBytes: bytes.length }
+    const result = await readArchive(bytes, options)
+    return { ...result, format: 'zip', note: result.note ?? note, payloadBytes: bytes.length }
   }
   if (detection.format === 'tar') {
     return { ...(await readTar(bytes, options)), format: 'tar', note, payloadBytes: bytes.length }
@@ -177,7 +178,17 @@ export async function readContainer(
     const code = inner.refusalCode ?? 'unsupported_format'
     return { ...withNoRetention(refusalFor(code, inner.refusalSubject), inflated.stats), format: 'gzip', note, payloadBytes: 0 }
   }
-  return { ...withNoRetention(refusalFor('nested_archive', name), inflated.stats), format: 'gzip', note, payloadBytes: 0 }
+  // The inner zip or gzip is skipped with a reason instead of costing the upload: the inflate work
+  // stays in the stats, and nothing from inside the inner archive is read or kept.
+  return {
+    refusal: null,
+    entries: [],
+    skipped: [{ name: innerName, code: 'nested_archive' as const, message: archiveReasonMessage('nested_archive', innerName) }],
+    stats: { ...inflated.stats, entries: 0, skipped: 1 },
+    format: 'gzip',
+    note,
+    payloadBytes: 0,
+  }
 }
 
 /**
@@ -243,7 +254,8 @@ export async function readContainerSource(
     }
   }
   if (detection.format === 'zip') {
-    return { ...(await readArchiveSource(source, options)), format: 'zip', note, payloadBytes: source.size }
+    const result = await readArchiveSource(source, options)
+    return { ...result, format: 'zip', note: result.note ?? note, payloadBytes: source.size }
   }
   // The whole-file read is where a cancel lands for the sequential formats; a source that throws
   // `AbortError` is the same stop as one that sees the signal on its next check.
