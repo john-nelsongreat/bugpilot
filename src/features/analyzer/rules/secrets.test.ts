@@ -234,3 +234,89 @@ describe('secret rule: credential assignment', () => {
     expect(hits(id, 'src/auth.js', 'if (password === expected) { return true }\n')).toHaveLength(0)
   })
 })
+
+describe('secret rule: credential assignment identifier shapes', () => {
+  const id = 'bugpilot/secret/credential-assignment'
+  const secret = ['Zx9Qm2Lp', '7Rt4Vb8N'].join('')
+
+  const shapes: Array<[string, string, string]> = [
+    ['a prefixed SCREAMING snake key in Python', 'src/config.py', `LEDGER_API_KEY = "${secret}"\n`],
+    ['a prefixed snake key in Python', 'src/db.py', `db_password = "${secret}"\n`],
+    ['a suffixed snake key in Python', 'src/db.py', `password_db = "${secret}"\n`],
+    ['a SCREAMING key in JavaScript', 'src/config.js', `const AUTH_TOKEN = "${secret}"\n`],
+    ['a camelCase key in TypeScript', 'src/api.ts', `const clientSecret = "${secret}"\n`],
+    ['an apiKey key in JavaScript', 'src/api.js', `const apiKey = "${secret}"\n`],
+    ['an object literal key in JavaScript', 'src/api.js', `const cfg = { db_password: "${secret}" }\n`],
+    ['a property assignment in TypeScript', 'src/db.ts', `this.password = "${secret}"\n`],
+    ['a field in Java', 'src/Config.java', `private static final String SECRET_KEY_BASE = "${secret}";\n`],
+    ['a const in C#', 'src/Config.cs', `public const string ApiKey = "${secret}";\n`],
+    ['a var in Go', 'src/main.go', `var dbPassword = "${secret}"\n`],
+    ['a short declaration in Go', 'src/main.go', `clientSecret := "${secret}"\n`],
+    ['a constant in Ruby', 'src/config.rb', `API_KEY = "${secret}"\n`],
+    ['an ivar in Ruby', 'src/config.rb', `@api_key = "${secret}"\n`],
+    ['a dollar variable in PHP', 'src/config.php', `$apiKey = "${secret}";\n`],
+    ['a const in PHP', 'src/config.php', `const LEDGER_API_KEY = "${secret}";\n`],
+    ['a shell export', 'deploy.sh', `export API_KEY="${secret}"\n`],
+    ['a quoted YAML key', 'config.yaml', `db_password: "${secret}"\n`],
+    ['a quoted JSON key', 'config.json', `{ "clientSecret": "${secret}" }\n`],
+    ['an unquoted .env key', '.env', `AUTH_TOKEN=${secret}\n`],
+    ['a SCREAMING .env key', '.env', `LEDGER_API_KEY=${secret}\n`],
+    ['a dotted properties key', 'app.properties', `db.password=${secret}\n`],
+    ['a camelCase properties key', 'app.properties', `apiKey=${secret}\n`],
+  ]
+
+  for (const [label, path, text] of shapes) {
+    it(`finds ${label}`, () => {
+      const [hit] = hits(id, path, text)
+
+      expect(hit).toBeDefined()
+      expect(hit.message).toMatch(/credential-like name|literal secret/)
+      expect(hit.evidence[0].quote).not.toContain(secret)
+    })
+  }
+})
+
+describe('secret rule: credential assignment false-positive guards', () => {
+  const id = 'bugpilot/secret/credential-assignment'
+  const secret = ['Zx9Qm2Lp', '7Rt4Vb8N'].join('')
+
+  it('does not fire on label, limit, header or fixture names', () => {
+    expect(hits(id, 'src/form.py', `password_field_label = "${secret}"\n`)).toHaveLength(0)
+    expect(hits(id, 'src/form.js', `const api_key_header_name = "${secret}"\n`)).toHaveLength(0)
+    expect(hits(id, 'src/santa.py', `secret_santa = "${secret}"\n`)).toHaveLength(0)
+    expect(hits(id, 'src/config.py', `PASSWORD_MIN_LENGTH = "${secret}"\n`)).toHaveLength(0)
+    expect(hits(id, 'src/config.js', `const SECRET_KEY_BASE_HEADER = "${secret}"\n`)).toHaveLength(0)
+  })
+
+  it('does not fire on words that merely contain a credential fragment', () => {
+    expect(hits(id, 'src/office.py', `secretary = "${secret}"\n`)).toHaveLength(0)
+    expect(hits(id, 'src/auth.py', `passwordless = "${secret}"\n`)).toHaveLength(0)
+  })
+
+  it('does not fire on function, class or test names', () => {
+    expect(hits(id, 'src/api.py', 'def refresh_api_key():\n    return None\n')).toHaveLength(0)
+    expect(hits(id, 'src/api.js', 'class ApiKeyStore {\n  constructor() {}\n}\n')).toHaveLength(0)
+    expect(hits(id, 'src/api.py', 'def test_api_key_rotation():\n    assert True\n')).toHaveLength(0)
+  })
+
+  it('does not fire on docstring prose', () => {
+    expect(hits(id, 'src/api.py', '"""Rotate the api_key monthly."""\n')).toHaveLength(0)
+  })
+
+  it('does not fire on environment lookups', () => {
+    expect(hits(id, 'src/auth.py', 'password = os.environ.get("PASSWORD")\n')).toHaveLength(0)
+    expect(hits(id, 'src/auth.js', 'const apiKey = process.env.API_KEY\n')).toHaveLength(0)
+    expect(hits(id, '.env', `AUTH_TOKEN=\${AUTH_TOKEN}\n`)).toHaveLength(0)
+  })
+
+  it('does not fire on empty or placeholder values', () => {
+    expect(hits(id, 'src/auth.py', 'password = ""\n')).toHaveLength(0)
+    expect(hits(id, 'src/auth.py', 'password = "changeme"\n')).toHaveLength(0)
+    expect(hits(id, '.env', 'PASSWORD=your-password-here\n')).toHaveLength(0)
+  })
+
+  it('does not fire on config lines that name hosts or versions', () => {
+    expect(hits(id, 'app.properties', 'database.host=db.internal.example.com\n')).toHaveLength(0)
+    expect(hits(id, '.env', 'BUILD_VERSION=1.2.3.4.5.6.7\n')).toHaveLength(0)
+  })
+})

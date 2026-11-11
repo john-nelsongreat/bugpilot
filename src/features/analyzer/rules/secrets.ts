@@ -56,9 +56,52 @@ const PRIVATE_KEY_HEADER = /-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED |PGP 
 const CONNECTION_STRING =
   /\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|rediss|amqp|amqps|mssql):\/\/([^\s:/@]+):([^\s@/]{3,})@([^\s"'<>)]+)/gi
 
-const CREDENTIAL_KEY = '(?:password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret)'
-const QUOTED_ASSIGNMENT = new RegExp(`\\b${CREDENTIAL_KEY}\\b["']?\\s*[:=]\\s*(["'])([^"'\\n]{8,})\\1`, 'gi')
-const ENV_ASSIGNMENT = new RegExp(`^[ \\t]*(?:export\\s+)?${CREDENTIAL_KEY}[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
+const CREDENTIAL_KEY = '(?:password|passwd|pwd|secret|api[ _-]?key|apikey|access[ _-]?token|auth[ _-]?token|client[ _-]?secret)'
+const CREDENTIAL_KEY_RE = new RegExp(`\\b${CREDENTIAL_KEY}\\b`, 'i')
+
+// A key may sit inside a longer identifier (LEDGER_API_KEY, db_password, clientSecret,
+// SECRET_KEY_BASE), so boundaries cannot be word boundaries. The identifier is captured
+// whole and checked below: it must contain a credential key word and must not be a
+// label-like name (password_field_label, PASSWORD_MIN_LENGTH, secret_santa, header names).
+const QUOTED_ASSIGNMENT =
+  new RegExp(`(?:^|[^A-Za-z0-9_$])(["']?)([A-Za-z_$][A-Za-z0-9_$]*)(["']?)[ \\t]*[:=][= \\t]*(["'])([^"'\\n]{8,})\\4`, 'gi')
+const ENV_ASSIGNMENT =
+  new RegExp(`^[ \\t]*(?:export[ \\t]+)?([A-Za-z_$][A-Za-z0-9_$.]*)[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
+
+// Segments that turn a credential-shaped name into a label, a limit or a fixture name.
+const NON_CREDENTIAL_SEGMENTS = new Set([
+  'field', 'label', 'header', 'name', 'santa', 'length', 'min', 'max', 'test',
+  'demo', 'example', 'sample', 'dummy', 'placeholder', 'default', 'schema',
+  'pattern', 'format', 'prefix', 'suffix', 'expected',
+])
+
+function identifierSegments(name: string): string[] {
+  return name
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(' ')
+    .map((part) => part.toLowerCase())
+    .filter(Boolean)
+}
+
+function isCredentialIdentifier(name: string): boolean {
+  const segments = identifierSegments(name)
+  // Word boundaries treat '_' as a word character, so LEDGER_API_KEY needs the
+  // segment-joined view; camelCase names like apiKey need the raw view.
+  if (!CREDENTIAL_KEY_RE.test(name) && !CREDENTIAL_KEY_RE.test(segments.join(' '))) return false
+  return !segments.some((segment) => NON_CREDENTIAL_SEGMENTS.has(segment))
+}
+
+// A match that sits inside a string literal or template literal is prose, not an
+// assignment. JSON-style keys ("api_key": "value") are the one quoted shape allowed.
+function insideStringContext(text: string, identifierAt: number, quoteBefore: string, quoteAfter: string): boolean {
+  if (quoteBefore && quoteAfter) return false
+  const lineStart = text.lastIndexOf('\n', identifierAt - 1) + 1
+  const prefix = text.slice(lineStart, identifierAt)
+  const quoteCount = (prefix.match(/["']/g) ?? []).length + (quoteBefore ? 1 : 0)
+  const backtickCount = (prefix.match(/`/g) ?? []).length
+  return quoteCount % 2 === 1 || backtickCount % 2 === 1
+}
 
 function isConfigLike(file: RuleFile): boolean {
   return (
@@ -297,17 +340,21 @@ const assignmentRule: AnalyzerRule = {
     QUOTED_ASSIGNMENT.lastIndex = 0
     for (const match of file.text.matchAll(QUOTED_ASSIGNMENT)) {
       if (hits.length >= MAX_RULE_HITS) break
-      const value = match[2]
+      const name = match[2]
+      const value = match[5]
       if (value.length < 8 || isPlaceholderValue(value)) continue
+      if (!isCredentialIdentifier(name)) continue
+      const full = match[0]
+      const identifierAt = (match.index ?? 0) + full.indexOf(name)
+      if (insideStringContext(file.text, identifierAt, match[1], match[3])) continue
       const entropy = shannonEntropy(value)
       if (entropy < 3) continue
-      const full = match[0]
-      const index = match.index ?? 0
+      const index = identifierAt
       const valueAt = full.lastIndexOf(value)
       const redacted = `${full.slice(0, valueAt)}${redactSecret(value)}${full.slice(valueAt + value.length)}`
       const lineIndex = lineIndexOf(file, index)
       hits.push({
-        range: rangeFromOffsets(file.lineStarts, index, index + full.length),
+        range: rangeFromOffsets(file.lineStarts, index, index + full.length - full.indexOf(name)),
         message: 'A credential-like name is assigned a literal value.',
         explanation:
           'The assignment gives a password, secret, token or API key a quoted literal value. Values like this end up in source control, screenshots and build logs. A lookup such as an environment variable or a vault read is not reported.',
@@ -331,17 +378,19 @@ const assignmentRule: AnalyzerRule = {
       ENV_ASSIGNMENT.lastIndex = 0
       for (const match of file.text.matchAll(ENV_ASSIGNMENT)) {
         if (hits.length >= MAX_RULE_HITS) break
-        const value = match[1]
+        const name = match[1]
+        const value = match[2]
         if (value.length < 12 || isPlaceholderValue(value)) continue
+        if (!isCredentialIdentifier(name)) continue
         const entropy = shannonEntropy(value)
         if (entropy < 3.2) continue
         const full = match[0]
-        const index = match.index ?? 0
+        const index = (match.index ?? 0) + full.indexOf(name)
         const valueAt = full.lastIndexOf(value)
         const redacted = `${full.slice(0, valueAt)}${redactSecret(value)}${full.slice(valueAt + value.length)}`
         const lineIndex = lineIndexOf(file, index)
         hits.push({
-          range: rangeFromOffsets(file.lineStarts, index, index + full.length),
+          range: rangeFromOffsets(file.lineStarts, index, index + full.length - full.indexOf(name)),
           message: 'A config value with a credential-like name is a literal secret.',
           explanation:
             'A .env-style line assigns a long literal to a password, secret, token or API key. Environment files are frequently committed by accident.',
