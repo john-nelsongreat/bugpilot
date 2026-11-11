@@ -1050,8 +1050,8 @@ export function AnalyzePage({
                 listed.
               </li>
               <li>
-                Encrypted entries, nested archives, symbolic links, unsafe paths, overlapping
-                entries and duplicate names are refused.
+                Unsafe paths, overlapping entries and duplicate names are refused; encrypted
+                entries, nested archives and symbolic links are skipped with a reason.
               </li>
               <li>
                 Binary files, empty files and dependency folders such as node_modules, .git or dist

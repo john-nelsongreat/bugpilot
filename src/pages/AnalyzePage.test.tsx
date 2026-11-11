@@ -183,6 +183,12 @@ describe('Analyze page', () => {
     expect(screen.getByText(/Local analysis only/)).toBeVisible()
     expect(screen.getByText(/Zip up to 2 GiB/)).toBeVisible()
     expect(screen.getByText(/analyses up to 20,000 files/)).toBeVisible()
+    expect(
+      screen.getByText(/unsafe paths, overlapping entries and duplicate names are refused/i),
+    ).toBeVisible()
+    expect(
+      screen.getByText(/encrypted entries, nested archives and symbolic links are skipped/i),
+    ).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose files' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Choose a folder' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'No files checked yet' })).toBeVisible()

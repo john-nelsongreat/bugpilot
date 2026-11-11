@@ -1566,6 +1566,13 @@ cp analyze-sample.tar.gz mislabeled.zip
   - Expected: one analysed file named `notes.txt`, with the insecure-http URL (Low) and TODO marker (Low). The coverage panel says the upload was a gzip and shows one file. The file's text is read after inflating, never shown as an archive.
 - [ ] Upload `mislabeled.zip`, then download `report.md` and `report.json`.
   - Expected: the analysis still runs, because the signature decides. No refusal. The downloaded `report.md` (under **Limitations**) and `report.json` (`limitations`) include a sentence saying the file is named `.zip` but its contents are a gzip archive, and that BugPilot works out the format from the contents, not the name.
+- [ ] Create `prefixed-keys.py` in the scratch folder with two invented assignments, each value at least 16 mixed-case letters and digits made up on the spot (never a real credential):
+  ```python
+  myApiKey = "<invented value one>"
+  prod_DB_PASSWORD = "<invented value two>"
+  ```
+  Upload it with **Choose files**.
+  - Expected: two Critical **Hard-coded credential assignment** findings, one per line, each with redacted evidence (first two and last two characters only). The key-name matcher finds the credential word inside a longer identifier — `myApiKey` (camelCase) and `prod_DB_PASSWORD` (prefixed snake_case) — which the old whole-word match missed. A comment line that merely mentions `api_key` in prose is still **not** flagged.
 - [ ] Upload `analyze-sample.tar` renamed to `analyze-sample.gz` (or the gzip renamed to `.tar`), then download a report.
   - Expected: the reader opens the format its bytes really are and adds the same kind of naming note to the downloaded report's limitations; nothing is refused just because the suffix is wrong.
 - [ ] Drag a loose `.js` file and then the whole folder onto the drop area.
@@ -1594,6 +1601,8 @@ Use a third scratch folder outside the repository for these samples. Invent ever
   - Expected: the output row produces only credential findings, with the message **A credential-shaped value appears in this cell’s stored output.**, empty evidence, no fix checkbox, and the limitation that stored output is never quoted or kept. Neither the stored text nor any part of it appears anywhere on the page or in either export.
   - Expected: a code-cell finding that would normally offer a fix has no checkbox and says the change must be made in Jupyter; the clean export contains no notebook cell.
 - [ ] Upload a broken notebook: the same JSON with a missing comma. Expected: one JSON syntax finding, no quoted text, and a note saying BugPilot read the notebook as JSON only and never edits it.
+- [ ] Add a third code cell to `analysis.ipynb` whose stored output is an **error** record: set `output_type` to `error`, put a made-up credential-shaped string in `evalue`, and give `traceback` one or two invented lines (ANSI colour escapes inside them are fine). Upload again.
+  - Expected: the coverage panel lists the error output as its own row (`analysis.ipynb#cell-3.output-1`), and that row produces the same credential finding — message **A credential-shaped value appears in this cell's stored output.**, empty evidence, no fix checkbox. The `ename`, `evalue` and traceback text never appear on the page or in either export, exactly like the stream output above. (Stored outputs cover stream text, `execute_result`/`display_data` entries and error outputs; every text-bearing form is scanned, and none is ever shown or retained.)
 - [ ] Create a folder `sensitive-sample` containing a `.env` file with an invented password, an `id_rsa` file (contents can be any text), a `server.p12` file (any bytes), `package-lock.json` (valid JSON), `bundle.min.js` (one file with a long minified line), `node_modules/.env` with another invented value, and `src/app.js` with `const total = ;`.
   - Expected: `.env` produces the High `bugpilot/sensitive/env-file` finding, `id_rsa` the Critical `bugpilot/sensitive/private-key-name` finding, and `server.p12` the High `bugpilot/sensitive/keystore` finding. None of them quotes the file, and all carry a manual-only "remove, add to .gitignore, rotate" direction.
   - Expected: `package-lock.json` and `bundle.min.js` are **Skipped** with a generated-file reason naming the lockfile and the minified bundle. `node_modules/.env` is **Skipped** as a vendored folder yet still produces its High sensitive-name finding, because a name scan runs on skipped files too.
@@ -1617,6 +1626,15 @@ The deep pass is a second run over the same upload. Keep DevTools open with the 
 - `api.php` — a SQL string built with `.` concatenation from a `$_GET` value, passed straight into `$conn->query(...)`.
 - `queries.py` — the same shape in Python: `cursor.execute("SELECT ... " + user_id)`, where the AST rule and Ruff's S608 both have an opinion.
 - `cond.c` — `if (x = 0)` (an assignment inside a condition).
+- `broken.c` — complete functions on top (`int add(int a, int b) { return a + b; }`), then a `main` whose `printf` opening parenthesis is never closed and the rest of the body is intact:
+  ```c
+  int main(void) {
+      printf("sum: %d\n",
+              add(2, 3);
+      return 0;
+  }
+  ```
+  The syntax-error files are meant to be broken; do not repair them.
 - `build.sh` — a script with a missing quote at the end.
 - `page.html` — an `<a>` whose `href="` quote is never closed, which the HTML grammar marks as an error. (A page whose only mistake is *unclosed tags* is legal to that grammar and produces no finding; the README says so rather than pretending otherwise.)
 - `theme.css` — a declaration missing its closing brace.
@@ -1643,6 +1661,7 @@ The deep pass is a second run over the same upload. Keep DevTools open with the 
   - `imports.py`: pattern-tier findings that name the Ruff codes, e.g. `(F401)` for the unused import and `(F841)` for the unread assignment.
   - `pw.py`: a Critical finding for a possible hardcoded password. Expected: neither the message nor the evidence quote contains the value you typed.
   - `Service.java`: the empty-catch finding; `main.go`: the unreachable-code finding; `api.php`: the SQL-concatenation finding; `cond.c`: the assignment-in-condition finding. Each names its `bugpilot/ast/…` rule and its tier.
+  - `broken.c`: exactly one High syntax finding — **Missing ")"** at the line where the grammar wanted the closer — whose message carries the second location: **The block that is missing its closer opened at line N**, naming the `printf(` line that opened it. The complete `add()` function above it produces **no** `bugpilot/ast/*` findings: the parser cannot trust the tree inside a declaration that contains an error node, so the AST rules stay silent there instead of guessing. This is the fixed cascade — before slice D1 a broken C file could raise pattern-tree findings on every function the damaged tree displaced.
   - `queries.py`: the same SQL-concatenation rule, and where Ruff reports the same line the two are merged into one finding. The `Service.java` row also carries the line "1 pattern match(es) on this file were replaced by the syntax-tree result for the same line." — that is the de-duplication note, not an error.
   - `build.sh`, `page.html`, `theme.css`: a syntax finding each, at the line the grammar points at. Spot-check one: the line number in the finding matches the broken line in the file, and the evidence is that line.
   - `config.yaml`: **no** syntax finding, and an explicit note in the coverage panel instead — "The yaml grammar reported N construct(s) it could not match, starting at line 2 … recorded as missing coverage instead of as a bug." A grammar that also rejects valid files must not be allowed to raise a bug report.
@@ -1802,15 +1821,18 @@ write('hostile-huge.tar', overTar)
 // path is the same one hostile-huge.tar exercises and is covered by the automated boundary tests.
 // To check it by hand, pad any valid zip past 2147483648 bytes (for example
 // `fsutil file seteof big.zip 2148532224`) and upload that; expect the byte-ceiling refusal below.
+// A self-extracting stub in front of the first local header; the reader must find the index
+// behind it and accept the zip, the way real Windows SFX installers are laid out.
+write('sfx-stub.zip', concat(strToU8('MZ\x90\x00' + 'this is a self-extracting stub, not part of the zip\n'.repeat(20)), zipSync({ 'src/app.js': strToU8('See http://insecure-demo.dev/docs\n') })))
 console.log(out)
 ```
 
 Run each upload in a fresh tab state (click **Clear results** between attempts) and watch the Console and the page for freezing.
 
-- [ ] `hostile-bomb.zip`: expected **Upload refused**, with **An entry claims to expand far more than a normal text file does, so BugPilot refused it before unpacking anything.** and **Nothing was analysed and nothing was kept.**
-- [ ] `gzip-bomb.txt.gz`: expected **Upload refused**, saying an entry expanded far more than its own header admitted while it was being unpacked. The refusal happens before the 8 MiB is held.
+- [ ] `hostile-bomb.zip`: expected **Analysis complete. 0 findings in 0 analysed files.**, with the entry skipped — **Skipped: "bomb.txt" claims to expand far more than a normal text file does, so BugPilot skipped it without unpacking it.** The declared-ratio check now drops the one entry and keeps going; the 8 MiB body is never inflated, so memory does not climb.
+- [ ] `gzip-bomb.txt.gz`: expected **Upload refused**, saying an entry expanded far more than its own header admitted while it was being unpacked. The refusal happens before the 8 MiB is held. (A gzip stream has no per-entry index to skip, so its ratio breach still stops the read.)
 - [ ] `hostile-traversal.zip` and `hostile-traversal.tar`: expected **Upload refused**, with a message saying a name points out of the archive with `..`.
-- [ ] `hostile-nested.zip`: expected **Upload refused**, with **The entry "inner.zip" is itself an archive. BugPilot does not open archives inside archives, so the upload is refused.**
+- [ ] `hostile-nested.zip`: expected **Analysis complete. 0 findings in 0 analysed files.**, with the entry skipped — **Skipped: "inner.zip" is itself an archive. BugPilot does not open archives inside archives, so it skipped this entry and kept going.**
 - [ ] `hostile-many.zip` (20,001 tiny text entries): expected **accepted as a partial report**, not refused. The parsed-index cap is now 250,000 and the analysed cap is 20,000, so the first 20,000 files are analysed and the last one is named **not reached**; the banner reads **Partial analysis — continue to check the rest** with **BugPilot reached its cap of 20000 analysed files in this pass…** and offers **Continue analysis**. Pressing it reads the remaining file and the merged report covers all 20,001. Confirm the page stayed responsive while counting. (To see the hard refusal instead, the parsed-index cap of 250,000 must be exceeded; that shape is covered by the automated boundary tests.)
 - [ ] `hostile-truncated.tar`: expected **Upload refused**, saying the archive is cut off inside `cut.txt` and that nothing was read from it.
 - [ ] `hostile-truncated.tar.gz`: expected **Upload refused**, saying the compressed data is damaged or incomplete and that nothing was unpacked.
@@ -1820,6 +1842,8 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
 - [ ] The zip ceiling is now **2 GiB** (2147483648 bytes), too large to generate by hand here. The byte-ceiling path is the same one `hostile-huge.tar` exercises and is covered by the automated boundary tests. To check it by hand, pad any valid zip past the ceiling (for example `fsutil file seteof big.zip 2148532224`) and upload that: expected the same byte-ceiling refusal naming **2148532224 bytes**, immediately, before the index is read. Skip this one if the machine cannot spare the space.
 - [ ] Upload `hostile-overlap.zip`. Expected: **Upload refused**, with **The entries "b.txt" and another entry point at overlapping bytes. Reading both would let one compressed range count twice, so the archive is refused.** Nothing was unpacked: the reader refuses at the index check, before any entry is inflated, so the classic overlapping-entries bomb costs one bounded index read.
 - [ ] Take a small valid `.zip` whose entries do **not** use a data descriptor (a stored or normally-deflated entry with bit 3 clear), open it in a hex editor, and change one size byte in an entry's **local** header without touching the index. Expected: **Upload refused**, naming that entry and saying the local header disagrees with the archive index about its name, sizes, checksum or compression. (An entry with bit 3 set defers its sizes to a trailing data descriptor and takes its sizes from the index instead, so a zeroed local size there is legitimate, not a disagreement — see the data-descriptor row in the large-uploads section.)
+- [ ] Upload `sfx-stub.zip` (a valid zip with a ~900-byte DOS-style stub in front of the first local header, the way a Windows self-extracting installer is laid out).
+  - Expected: **accepted and analysed** like an ordinary zip — the reader finds the index behind the stub, the prefix is derived from where the central directory really is, and `src/app.js` produces its usual insecure-`http://` Low finding. Nothing is refused for the stub; the format is still decided from the bytes.
 - [ ] While each refusal is processed, the page stays responsive: the theme toggle still responds, the progress/limit text does not freeze, and no browser tab warning about an unresponsive page appears. Memory in DevTools does not keep climbing after the refusal.
 - [ ] Upload `hostile-bidi.zip` and open the results.
   - Expected: every hostile name is shown literally, never interpreted: `src/invoice\u202Egnp.js`, `src/hidden\u200Bpart.js`, the `<img …>` name as text rather than an element, `src/[click](x)*.js`, and the long `deep/…` name shortened to at most 72 characters, ending in `…`. Hovering a shortened name shows the full name in the browser tooltip.
@@ -1830,6 +1854,17 @@ Run each upload in a fresh tab state (click **Clear results** between attempts) 
   - Expected: **Clean export blocked** before any file is offered, because the path contains an invisible character. The message names `src/invoice\u202Egnp.js`, says Git cannot apply a patch with that path safely, and offers **Download report only**. No patch, zip or changelog is produced.
 - [ ] Upload `hostile-newline.zip`, tick the `http://` → `https://` change, open the review, and build the clean export.
   - Expected: **Clean export blocked** before any file is offered, because the path contains a line break. The message names `src/a\u000Ab.js`, says Git cannot apply a patch with that path safely, and offers **Download report only**. No patch, zip or changelog is produced.
+- [ ] Create `trojan.js` in a scratch folder with a real bidi override inside a string (this one-liner writes the real U+2066 byte, not an escape):
+  ```bash
+  node -e "require('fs').writeFileSync('trojan.js', 'let access_level = \"user\";\nif (access_level != \"user\u2066\") {\n  console.log(\"admin\");\n}\n')"
+  ```
+  Upload it with **Choose files**.
+  - Expected: one High **Bidirectional control character** finding (`bugpilot/generic/bidi-control-character`). The message names the escape `\u2066`; the raw character never appears on the page, in the coverage panel or in either export, and the evidence line shows the escape, not the raw byte.
+  - Expected: add a zero-width space inside an identifier — `node -e "require('fs').appendFileSync('trojan.js', 'const secret\u200Bkey = \"x\";\n')"` — and upload again: a Medium **Zero-width character in an identifier or string** finding (`bugpilot/generic/zero-width-character`) whose message names `\u200B`. A ZWJ inside an emoji sequence (`\u{1F469}\u200D\u{1F4BB}`) and the RLM/LRM marks U+200E/U+200F are **not** flagged.
+  - Expected (lookalike): a separate `.txt` file with ordinary Hebrew or Arabic prose (letters only, no control characters) produces **no** bidi finding.
+  - Expected: the same `user\u2066` string pasted into a `.md` or `.txt` file is reported **Low** (prose-like file), not High.
+- [ ] Create `mixed-endings.txt` whose first line ends in LF and second in CRLF — `node -e "require('fs').writeFileSync('mixed-endings.txt', 'first line\nsecond line\r\n')"` — and upload it with **Choose files**.
+  - Expected: one Low **Mixed CRLF and LF line endings** note (`bugpilot/generic/mixed-line-endings`), listed under **Notes**, outside the headline severity counts, and present in both exports.
 - [ ] Upload `large-ok.zip` (about 19 KB on disk; four files of 1.5 MiB each, 6 MiB in total).
   - Expected: the run completes; all four files are analysed (none is skipped for size), each gets a Low large-file finding, and there is no refusal.
 - [ ] Extract `large-ok.zip` into a scratch folder, add an extra `.txt` file over 2 MiB, and upload that folder.
