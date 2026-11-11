@@ -224,3 +224,106 @@ describe('tree-sitter syntax findings', () => {
     expect(eofHit.message).toContain('near "end of file"')
   })
 })
+
+describe('second location: the block the parser could not close', () => {
+  it('names the line that opened the unclosed delimiter in an ERROR finding', () => {
+    const text = 'x = (\ny = 2\ndef broken(:\n'
+    const root = node({
+      text: 'def broken(:',
+      error: true,
+      row: 2,
+      column: 0,
+      startIndex: 11,
+      endIndex: 23,
+    })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'python' }).hits
+    expect(hit.message).toBe(
+      'Syntax error near "def" at line 3. The block that could not be closed opened at line 1.',
+    )
+    expect(hit.evidence).toHaveLength(2)
+    expect(hit.evidence[0].label).toBe('Line 3')
+    expect(hit.evidence[1].label).toBe('Line 1')
+    expect(hit.evidence[1].quote).toContain('x = (')
+    expect(hit.fix?.explanation).toContain(
+      'Add the missing closing delimiter before line 3; the block opened at line 1.',
+    )
+    expect(hit.limitations.join(' ')).toContain('own delimiter scan')
+    // The original location stays the primary one.
+    expect(hit.range.startLine).toBe(3)
+  })
+
+  it('names the opener for a MISSING node too', () => {
+    const text = 'if (x {\n  y\nz = 1\n'
+    const root = node({
+      type: 'MISSING "}"',
+      text: 'MISSING "}"',
+      missing: true,
+      row: 1,
+      column: 2,
+      startIndex: 10,
+      endIndex: 10,
+    })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'c' }).hits
+    expect(hit.message).toBe(
+      'Missing "}" at line 2, column 3. The block that is missing its closer opened at line 1.',
+    )
+    expect(hit.evidence[1].label).toBe('Line 1')
+    expect(hit.evidence[1].quote).toContain('if (x {')
+    expect(hit.fix?.explanation).toContain(
+      'Add the missing closing delimiter before line 2; the block opened at line 1.',
+    )
+  })
+
+  it('stays silent when every delimiter is balanced', () => {
+    const text = 'x = (1 + 2)\ny = 2\nfunc broken(:\n'
+    const root = node({ text: 'func broken(:', error: true, row: 2, startIndex: 15, endIndex: 27 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'python' }).hits
+    expect(hit.message).not.toContain('opened at')
+    expect(hit.evidence).toHaveLength(1)
+    expect(hit.fix?.explanation).toContain('Compare this line with the language grammar')
+  })
+
+  it('does not repeat the finding line as a second location', () => {
+    const text = 'x = ( y = 2\n'
+    const root = node({ text: 'y = 2', error: true, row: 0, column: 6, startIndex: 6, endIndex: 11 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'python' }).hits
+    expect(hit.message).not.toContain('opened at')
+    expect(hit.evidence).toHaveLength(1)
+  })
+
+  it('ignores delimiters inside strings', () => {
+    const text = 's = "("\nx = 1\ndef broken(:\n'
+    const root = node({ text: 'def broken(:', error: true, row: 2, startIndex: 13, endIndex: 25 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'python' }).hits
+    expect(hit.message).not.toContain('opened at')
+  })
+
+  it('ignores delimiters inside block comments and finds the real opener', () => {
+    const text = '/* } */\nint f(void) {\n  int x = 1;\nint broken(void) {\n'
+    const root = node({ text: 'int broken(void) {', error: true, row: 3, startIndex: 34, endIndex: 52 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'c' }).hits
+    expect(hit.message).toContain('opened at line 2')
+    expect(hit.evidence[1].quote).toContain('int f(void) {')
+  })
+
+  it('reports the ruby delimiter when `end` cannot close it', () => {
+    const text =
+      'def normalise_region(text)\n  text.downcase(\nend\n\ndef evaluate_region\n  text.strip\nend\n'
+    const root = node({ text: 'def evaluate_region', error: true, row: 4, startIndex: 49, endIndex: 67 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'ruby' }).hits
+    expect(hit.message).toContain('Syntax error near "def" at line 5')
+    expect(hit.message).toContain('opened at line 2')
+    expect(hit.evidence[1].label).toBe('Line 2')
+    expect(hit.evidence[1].quote).toContain('text.downcase(')
+    expect(hit.fix?.explanation).toContain('before line 5; the block opened at line 2')
+  })
+
+  it('redacts a credential on the opened-at line', () => {
+    const text = `password = "${FAKE_GITHUB}"  (\ndef broken(:\n`
+    const root = node({ text: 'def broken(:', error: true, row: 1, startIndex: 61, endIndex: 73 })
+    const [hit] = scanSyntax({ file: ruleFile(text), root, grammar: 'python' }).hits
+    expect(hit.evidence).toHaveLength(2)
+    expect(hit.evidence[1].quote).not.toContain(FAKE_GITHUB)
+    expect(hit.evidence[1].quote).toContain('redacted')
+  })
+})

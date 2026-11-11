@@ -198,6 +198,69 @@ describe('syntax findings against the shipped grammars', () => {
     expect(hit.message).toBe('Missing ")" at line 1, column 7.')
   })
 
+  it('names the opened-at line when a ruby call swallows the following defs', () => {
+    // The cascade shape from the campaign: `text.downcase(` never closes, the parser
+    // consumes the next `end`, and the reported error lands on a later `def`.
+    const code = [
+      'def normalise_region(text)',
+      '  text.downcase(',
+      'end',
+      '',
+      'def resolve_region(supplied)',
+      '  candidate = supplied',
+      'end',
+      '',
+      'def evaluate_region(expression)',
+      '  expression.strip',
+      'end',
+      '',
+    ].join('\n')
+    const sample: Sample = { grammar: 'ruby', name: 'cascade.rb', language: 'ruby', valid: code, broken: code }
+    const result = scan(sample, code)
+    expect(result.hits).toHaveLength(1)
+    const [hit] = result.hits
+    expect(hit.ruleId).toBe('tree-sitter/syntax-error')
+    expect(hit.message).toBe(
+      'Syntax error near "def" at line 9. The block that could not be closed opened at line 2.',
+    )
+    expect(hit.evidence).toHaveLength(2)
+    expect(hit.evidence[0].lineNumber).toBe(9)
+    expect(hit.evidence[1].lineNumber).toBe(2)
+    expect(hit.evidence[1].quote).toContain('text.downcase(')
+    expect(hit.fix?.explanation).toBe(
+      'Add the missing closing delimiter before line 9; the block opened at line 2.',
+    )
+    expect(hit.limitations.join(' ')).toContain('own delimiter scan')
+  })
+
+  it('keeps the finding when the file really is invalid, like C-style try in swift', () => {
+    // The campaign generator wrote `try {` / `} catch {`, which is not Swift. That is a
+    // true error in the file, not a grammar limitation, so the finding stays at full
+    // strength; the generic cascade hint still names the block that was open when the
+    // parser hit `catch`.
+    const code = [
+      'func parseRows(_ text: String) throws -> String {',
+      '    try {',
+      '        return text.trimmingCharacters(in: .whitespaces)',
+      '    } catch {',
+      '        return ""',
+      '    }',
+      '}',
+      '',
+    ].join('\n')
+    const sample: Sample = { grammar: 'swift', name: 'LedgerTotals.swift', language: 'swift', valid: code, broken: code }
+    const result = scan(sample, code)
+    expect(result.hits).toHaveLength(1)
+    const [hit] = result.hits
+    expect(hit.ruleId).toBe('tree-sitter/syntax-error')
+    expect(hit.message).toBe(
+      'Syntax error near "catch" at line 4. The block that could not be closed opened at line 1.',
+    )
+    expect(hit.confidence.level).toBe('medium')
+    expect(hit.evidence[1].lineNumber).toBe(1)
+    expect(hit.evidence[1].quote).toContain('func parseRows')
+  })
+
   it('does not invent a finding for a grammar that accepted the mistake', () => {
     // Honest limits: HTML allows an unclosed <p>, and the SQL grammar accepts this text.
     for (const grammar of ['html', 'sql'] as GrammarId[]) {
