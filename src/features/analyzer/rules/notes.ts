@@ -2,7 +2,8 @@ import type { AnalyzerFinding } from '../types'
 
 /**
  * The housekeeping rules whose findings are honest but rarely urgent: a todo left in the code, a
- * line that runs long, a file that grew too big, a plain http:// link, mixed indentation. The UI
+ * line that runs long, a file that grew too big, a plain http:// link, mixed indentation, mixed
+ * line endings. The UI
  * keeps them out of the headline counts and shows them in a collapsed group so a noisy upload
  * cannot bury the real findings; the exports keep them listed like every other rule.
  */
@@ -12,6 +13,7 @@ export const NOTE_RULE_IDS: readonly string[] = [
   'bugpilot/generic/large-file',
   'bugpilot/generic/insecure-http-url',
   'bugpilot/generic/mixed-indentation',
+  'bugpilot/generic/mixed-line-endings',
 ]
 
 const NOTE_RULE_SET: ReadonlySet<string> = new Set(NOTE_RULE_IDS)

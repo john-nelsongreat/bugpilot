@@ -23,8 +23,8 @@ function finding(ruleId: string, file: string): AnalyzerFinding {
 }
 
 describe('note rules', () => {
-  it('names five rules, and every one of them is registered', () => {
-    expect(NOTE_RULE_IDS).toHaveLength(5)
+  it('names six rules, and every one of them is registered', () => {
+    expect(NOTE_RULE_IDS).toHaveLength(6)
     const registered = new Set(ANALYZER_RULES.map((rule) => rule.id))
     for (const id of NOTE_RULE_IDS) {
       expect(registered.has(id), `${id} is registered`).toBe(true)

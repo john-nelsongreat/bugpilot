@@ -200,3 +200,38 @@ describe('generic rule: http URL', () => {
     expect(hits(id, 'src/urls.js', text)).toHaveLength(10)
   })
 })
+
+describe('generic rule: mixed line endings', () => {
+  const id = 'bugpilot/generic/mixed-line-endings'
+
+  it('reports a file that mixes CRLF and bare LF endings, pointing at the first change', () => {
+    const text = 'a = 1\r\nb = 2\nc = 3\r\n'
+    const [hit] = hits(id, 'src/app.py', text)
+
+    expect(hit.message).toMatch(/2 line\(s\) with CRLF and 1 line\(s\) with a bare LF/)
+    expect(hit.range.startLine).toBe(2)
+    expect(hit.severity ?? 'Low').toBe('Low')
+  })
+
+  it('reports the mirror mix with the counts swapped', () => {
+    const text = 'a = 1\nb = 2\r\nc = 3\n'
+    const [hit] = hits(id, 'src/app.py', text)
+
+    expect(hit.message).toMatch(/1 line\(s\) with CRLF and 2 line\(s\) with a bare LF/)
+    expect(hit.range.startLine).toBe(2)
+  })
+
+  it('does not fire on uniform CRLF, uniform LF or a single unterminated line', () => {
+    expect(hits(id, 'src/app.py', 'a = 1\r\nb = 2\r\n')).toHaveLength(0)
+    expect(hits(id, 'src/app.py', 'a = 1\nb = 2\n')).toHaveLength(0)
+    expect(hits(id, 'src/app.py', 'a = 1')).toHaveLength(0)
+  })
+
+  it('does not fire on CR-only old-Mac endings', () => {
+    expect(hits(id, 'src/app.py', 'a = 1\rb = 2\r')).toHaveLength(0)
+  })
+
+  it('does not fire when the file holds binary bytes', () => {
+    expect(hits(id, 'src/app.py', 'a = 1\r\n\u0000b = 2\n')).toHaveLength(0)
+  })
+})

@@ -2,12 +2,14 @@ import type { SourceLanguage } from '../archive/classify'
 import { genericRules } from './generic'
 import { jsonSyntaxRule } from './json'
 import { secretRules } from './secrets'
+import { trojanSourceRules } from './trojanSource'
 import type { AnalyzerRule } from './types'
 
 export const ANALYZER_RULES: readonly AnalyzerRule[] = [
   ...genericRules,
   ...secretRules,
   jsonSyntaxRule,
+  ...trojanSourceRules,
 ]
 
 /** Synthesized by the TypeScript worker; kept here so the report and the UI share one id. */

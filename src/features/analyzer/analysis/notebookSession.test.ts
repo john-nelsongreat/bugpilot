@@ -289,3 +289,70 @@ describe('a run over a Jupyter notebook', () => {
     expect(result.report?.limitations.join('\n')).toMatch(/notebook output.*not.*scanned/i)
   })
 })
+
+/**
+ * The credential rules must see stored output in every text-bearing form a notebook can hold.
+ * The secret is assembled at runtime so no committed fixture holds a credential-shaped literal.
+ */
+describe('stored output reaches the credential rules in every text form', () => {
+  const AWS_KEY = ['AK', 'IA'].join('') + ['A1B2', 'C3D4', 'E5F6', 'G7H8'].join('')
+  const ANSI_RED = '\u001b[31m'
+  const ANSI_RESET = '\u001b[0m'
+
+  function outputNotebook(): ArchiveEntry {
+    const cells = [
+      { cell_type: 'code', execution_count: 1, metadata: {}, source: ['import os\n'], outputs: [{ output_type: 'stream', name: 'stdout', text: ['deployed token: ', AWS_KEY, '\n'] }] },
+      { cell_type: 'code', execution_count: 2, metadata: {}, source: ['print(1)\n'], outputs: [{ output_type: 'execute_result', execution_count: 2, metadata: {}, data: { 'text/plain': [AWS_KEY] } }] },
+      { cell_type: 'code', execution_count: 3, metadata: {}, source: ['print(2)\n'], outputs: [{ output_type: 'display_data', metadata: {}, data: { 'application/json': ['{"access_key_id": "', AWS_KEY, '"}'] } }] },
+      { cell_type: 'code', execution_count: 4, metadata: {}, source: ['print(3)\n'], outputs: [{ output_type: 'error', ename: 'RuntimeError', evalue: ['boom ', AWS_KEY], traceback: ['Traceback (most recent call last)\n'] }] },
+      { cell_type: 'code', execution_count: 5, metadata: {}, source: ['print(4)\n'], outputs: [{ output_type: 'stream', name: 'stdout', text: [ANSI_RED, AWS_KEY, ANSI_RESET, '\n'] }] },
+    ]
+    const text = JSON.stringify({
+      cells,
+      metadata: { kernelspec: { name: 'python' } },
+      nbformat: 4,
+      nbformat_minor: 5,
+    })
+    return entry('nb.ipynb', text)
+  }
+
+  async function run(notebook: ArchiveEntry) {
+    const analyzer: AnalyzerClient = {
+      async analyze(entries) {
+        const batch = analyzeEntries(entries)
+        return { files: batch.files, cancelled: false, error: null }
+      },
+    }
+    const readLoose = async (): Promise<ArchiveReadResult> => ({
+      refusal: null,
+      entries: [notebook],
+      skipped: [],
+      stats: STATS,
+    })
+    return analyzeUpload({ kind: 'files', sources: [notebook] as unknown as IntakeSource[] }, { archiveBytes: 40 }, { readLoose, analyzer })
+  }
+
+  it('finds the credential in every output form, including an ANSI-coloured stream', async () => {
+    const result = await run(outputNotebook())
+
+    expect(result.status).toBe('completed')
+    const outputFindings = (result.report?.findings ?? []).filter((item) => item.file.includes('.output-'))
+    expect(outputFindings.map((item) => [item.file, item.ruleId])).toEqual([
+      ['nb.ipynb#cell-1.output-1', 'bugpilot/secret/aws-access-key'],
+      ['nb.ipynb#cell-2.output-1', 'bugpilot/secret/aws-access-key'],
+      ['nb.ipynb#cell-3.output-1', 'bugpilot/secret/aws-access-key'],
+      ['nb.ipynb#cell-4.output-1', 'bugpilot/secret/aws-access-key'],
+      ['nb.ipynb#cell-5.output-1', 'bugpilot/secret/aws-access-key'],
+    ])
+  })
+
+  it('still shows no output text and keeps no output sources', async () => {
+    const result = await run(outputNotebook())
+
+    const outputFindings = (result.report?.findings ?? []).filter((item) => item.file.includes('.output-'))
+    expect(outputFindings.every((item) => item.evidence.length === 0)).toBe(true)
+    expect(JSON.stringify(result.report)).not.toContain(AWS_KEY)
+    expect(result.sources?.some((item) => item.name.includes('.output-'))).toBe(false)
+    expect(result.sources?.some((item) => item.text.includes(AWS_KEY))).toBe(false)
+  })
+})

@@ -168,3 +168,52 @@ describe('reading a Jupyter notebook', () => {
     expect(expanded.skipped[0]?.message).toMatch(/50-entry ceiling/)
   })
 })
+
+describe('collecting every text-bearing output form', () => {
+  function outputsOf(outputs: unknown[]): string[] {
+    const read = readNotebook('nb.ipynb', notebook([codeCell(['print(1)\n'], outputs)]))
+    expect(read.ok).toBe(true)
+    if (read.ok === false) return []
+    return read.outputs.map((output) => output.text)
+  }
+
+  it('collects stream text given as a single string', () => {
+    expect(outputsOf([{ output_type: 'stream', name: 'stdout', text: 'one line\n' }])).toEqual(['one line\n'])
+  })
+
+  it('collects text from every display-data mime type a credential rule reads', () => {
+    expect(
+      outputsOf([
+        { output_type: 'execute_result', execution_count: 1, metadata: {}, data: { 'text/html': ['<b>ok</b>'] } },
+        { output_type: 'execute_result', execution_count: 1, metadata: {}, data: { 'application/json': ['{"a":1}'] } },
+        { output_type: 'display_data', metadata: {}, data: { 'application/javascript': 'const x = 1;' } },
+      ]),
+    ).toEqual(['<b>ok</b>', '{"a":1}', 'const x = 1;'])
+  })
+
+  it('collects error name, value and traceback', () => {
+    expect(
+      outputsOf([
+        {
+          output_type: 'error',
+          ename: 'ValueError',
+          evalue: 'bad value',
+          traceback: ['\u001b[31mTraceback line one\n', 'Traceback line two\n'],
+        },
+      ]),
+    ).toEqual(['Traceback line one\nTraceback line two\n\nValueError\nbad value'])
+  })
+
+  it('strips ANSI control sequences so a coloured value is still scanned', () => {
+    expect(outputsOf([{ output_type: 'stream', name: 'stdout', text: ['\u001b[31mvalue\u001b[0m\n'] }])).toEqual(['value\n'])
+  })
+
+  it('ignores binary payloads such as images', () => {
+    expect(
+      outputsOf([
+        { output_type: 'display_data', metadata: {}, data: { 'image/png': 'iVBORw0KGgoAAAANSUhEUg==' } },
+        { output_type: 'execute_result', execution_count: 1, metadata: {}, data: { 'text/plain': '7' } },
+      ]),
+    ).toEqual(['7'])
+  })
+})

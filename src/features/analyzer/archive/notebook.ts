@@ -23,7 +23,26 @@ export const NOTEBOOK_MAX_DEPTH = 64
 export const NOTEBOOK_MAX_CELLS = 1_000
 
 const NOTEBOOK_MAX_OUTPUT_BYTES = 512 * 1024
-const TEXT_OUTPUT_KEYS = ['text/plain', 'text/html', 'text/markdown', 'text/latex'] as const
+const TEXT_OUTPUT_KEYS = [
+  'text/plain',
+  'text/html',
+  'text/markdown',
+  'text/latex',
+  'application/json',
+  'application/javascript',
+] as const
+
+/**
+ * Control sequences a terminal inserted into captured output. A credential rule runs on plain
+ * text, and an ANSI colour code glued to the front of a value must not hide the value from it.
+ */
+const ANSI_ESCAPE =
+  // eslint-disable-next-line no-control-regex
+  /\u001b(?:\[[0-9;:?<=>]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\))/g
+
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE, '')
+}
 
 const KERNEL_LANGUAGES: readonly { marker: string; language: SourceLanguage }[] = [
   { marker: 'python', language: 'python' },
@@ -128,20 +147,35 @@ function joinSource(value: unknown): string {
 
 /**
  * Only the text a kernel stored is collected, one item per stored output so a finding can name both
- * the cell and the output. Image and other binary payloads are base64 noise with no line a credential
- * rule can match, so they are not read at all.
+ * the cell and the output. Stream text, rich display data, and the message fields of error outputs
+ * are all read; image and other binary payloads are base64 noise with no line a credential rule can
+ * match, so they are not read at all. ANSI control sequences are stripped so a colour code glued to
+ * a value cannot hide it from the credential rules.
  */
 function outputTexts(outputs: unknown): { index: number; text: string }[] {
   if (!Array.isArray(outputs)) return []
   const collected: { index: number; text: string }[] = []
   outputs.forEach((output, index) => {
     if (typeof output !== 'object' || output === null) return
-    const record = output as { text?: unknown; data?: unknown; traceback?: unknown }
+    const record = output as {
+      text?: unknown
+      data?: unknown
+      traceback?: unknown
+      ename?: unknown
+      evalue?: unknown
+    }
     const parts: string[] = []
     const text = joinSource(record.text)
     if (text !== '') parts.push(text)
-    const traceback = Array.isArray(record.traceback) ? record.traceback.filter((line) => typeof line === 'string').join('\n') : ''
+    // Traceback lines carry their own terminators, so they are concatenated, not re-joined.
+    const traceback = Array.isArray(record.traceback)
+      ? record.traceback.filter((line) => typeof line === 'string').join('')
+      : ''
     if (traceback !== '') parts.push(traceback)
+    for (const value of [record.ename, record.evalue]) {
+      const joined = joinSource(value)
+      if (joined !== '') parts.push(joined)
+    }
     if (typeof record.data === 'object' && record.data !== null) {
       const data = record.data as Record<string, unknown>
       for (const key of TEXT_OUTPUT_KEYS) {
@@ -149,7 +183,7 @@ function outputTexts(outputs: unknown): { index: number; text: string }[] {
         if (value !== '') parts.push(value)
       }
     }
-    const joined = parts.join('\n')
+    const joined = stripAnsi(parts.join('\n'))
     if (joined !== '') collected.push({ index, text: joined })
   })
   return collected

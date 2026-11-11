@@ -484,10 +484,68 @@ const insecureHttpRule: AnalyzerRule = {
   },
 }
 
+const mixedLineEndingsRule: AnalyzerRule = {
+  id: 'bugpilot/generic/mixed-line-endings',
+  title: 'Mixed CRLF and LF line endings',
+  tier: 'pattern',
+  severity: 'Low',
+  languages: ALL_TEXT_LANGUAGES_WITH_FALLBACKS,
+  description: 'Finds text files that end some lines with CRLF and others with a bare LF.',
+  check: (file) => {
+    // A binary payload never reaches the rules, but a cheap guard keeps the count honest anyway.
+    if (file.text.includes('\u0000')) return []
+    let crlfLines = 0
+    let bareLfLines = 0
+    let firstChange = -1
+    for (let index = 0; index < file.lines.length; index += 1) {
+      const line = file.lines[index]
+      // Splitting always leaves an empty final element after a trailing \n, and a final line with
+      // no terminator has no ending to judge.
+      if (index === file.lines.length - 1 && (line === '' || !file.text.endsWith('\n'))) continue
+      const isCrlf = line.endsWith('\r')
+      if (isCrlf) crlfLines += 1
+      else bareLfLines += 1
+      if (crlfLines > 0 && bareLfLines > 0 && firstChange === -1) firstChange = index
+    }
+    if (firstChange === -1) return []
+    return [
+      {
+        range: rangeForLine(firstChange, file.lines[firstChange]),
+        message: `This file ends ${crlfLines} line(s) with CRLF and ${bareLfLines} line(s) with a bare LF.`,
+        explanation:
+          'The file mixes Windows-style and Unix-style line endings. The first style change is on the quoted line. Mixed endings make every diff noisier and can break tools that treat the file as a whole; a file that uses one style everywhere is not reported.',
+        confidence: {
+          level: 'high',
+          reason: 'The line terminators are measured directly from the bytes that were read.',
+        },
+        evidence: evidenceFor(file, firstChange),
+        fix: {
+          explanation:
+            'Choose the line-ending style the project already uses (usually declared in .gitattributes or .editorconfig) and normalise the file to it in one commit.',
+          whereItMayApply: 'Line terminators throughout the file, not the content of any line.',
+          exampleCode: '',
+          riskClass: 'needs-review',
+          riskReason: 'Rewriting terminators rewrites every line of the diff, so the change must land alone to stay reviewable.',
+        },
+        verificationSteps: [
+          'Check .gitattributes or .editorconfig for the project style.',
+          'Normalise the file to that style and review the diff, which should show no content change.',
+          'Run the tests and linter for the file.',
+        ],
+        limitations: [
+          'Only CRLF mixed with bare LF is reported; files that use one style everywhere, or CR-only old-Mac endings, are not flagged.',
+          'Generated and binary files never reach this rule.',
+        ],
+      },
+    ]
+  },
+}
+
 export const genericRules: readonly AnalyzerRule[] = [
   mergeConflictRule,
   todoRule,
   mixedIndentationRule,
+  mixedLineEndingsRule,
   longLineRule,
   largeFileRule,
   emptyCatchRule,
