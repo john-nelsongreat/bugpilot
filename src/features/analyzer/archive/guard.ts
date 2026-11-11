@@ -297,37 +297,45 @@ function applyExtraFields(record: CentralRecord, extra: Uint8Array): Uint8Array 
 }
 
 /**
- * The zip64 end record, reached through the twenty-byte locator that sits in front of the
- * ordinary one. Returns null when no locator is there, which is the archive everyone expects.
- * Every number here decides where the index is read from, so each is bounded before it is used.
+ * The zip64 end record is found by position, not by the locator's offset field: in a
+ * self-extracting archive that field is relative to the start of the zip part rather than the
+ * file, and the stub length is not known until the prefix is derived. The record always ends
+ * exactly where the locator begins, so a bounded scan backward from the locator finds it, and a
+ * candidate only counts when its own declared size lands exactly on that boundary. Returns null
+ * when no record is there, which is the archive everyone expects.
  */
-async function readZip64EndRecord(
-  source: ByteSource,
-  tail: Uint8Array,
-  tailStart: number,
-  eocd: number,
-  signal?: AbortSignal,
-): Promise<{ centralSize: number; centralOffset: number } | null> {
-  const locatorStart = eocd - ZIP64_LOCATOR_SIZE
-  if (locatorStart < 0) return null
-  const locatorRel = locatorStart - tailStart
-  const locator = locatorRel >= 0 && locatorRel + ZIP64_LOCATOR_SIZE <= tail.length
-    ? tail.subarray(locatorRel, locatorRel + ZIP64_LOCATOR_SIZE)
-    : await source.read(locatorStart, eocd, signal)
-  const head = viewOf(locator)
-  if (head.getUint32(0, true) !== SIG_ZIP64_LOCATOR) return null
-  // A locator or a record that names a second volume describes a split archive. BugPilot reads
-  // one file and says so plainly rather than guessing which volume it was given.
-  if (head.getUint32(4, true) !== 0 || head.getUint32(16, true) !== 1) refuse('multi_disk_not_supported')
-  const recordStart = readU64(head, 8, '')
-  if (recordStart + ZIP64_EOCD_MIN_SIZE > locatorStart) refuse('corrupt_central_directory')
-  const record = viewOf(await source.read(recordStart, recordStart + ZIP64_EOCD_MIN_SIZE, signal))
-  if (record.getUint32(0, true) !== SIG_ZIP64_EOCD) refuse('corrupt_central_directory')
-  const recordSize = readU64(record, 4, '')
-  if (recordSize < ZIP64_EOCD_MIN_SIZE - 12) refuse('corrupt_central_directory')
-  if (recordStart + 12 + recordSize > locatorStart) refuse('corrupt_central_directory')
-  if (record.getUint32(16, true) !== 0 || record.getUint32(20, true) !== 0) refuse('multi_disk_not_supported')
-  return { centralSize: readU64(record, 40, ''), centralOffset: readU64(record, 48, '') }
+const ZIP64_END_SCAN_WINDOW = 64 * 1024
+
+interface Zip64EndInfo {
+  recordStart: number
+  recordSize: number
+  centralSize: number
+  centralOffset: number
+}
+
+async function findZip64EndRecord(source: ByteSource, locatorStart: number, signal?: AbortSignal): Promise<Zip64EndInfo | null> {
+  const bytes = await source.read(Math.max(0, locatorStart - ZIP64_END_SCAN_WINDOW), locatorStart, signal)
+  const view = viewOf(bytes)
+  for (let pos = bytes.length - ZIP64_EOCD_MIN_SIZE; pos >= 0; pos -= 1) {
+    if (view.getUint32(pos, true) !== SIG_ZIP64_EOCD) continue
+    // A size that cannot survive as a JS integer, or one smaller than the fixed part, cannot be a
+    // real record: the scan steps over it rather than trusting it.
+    const wide = view.getBigUint64(pos + 4, true)
+    if (wide > BigInt(Number.MAX_SAFE_INTEGER)) continue
+    const recordSize = Number(wide)
+    if (recordSize < ZIP64_EOCD_MIN_SIZE - 12) continue
+    if (pos + 12 + recordSize !== bytes.length) continue
+    // A record that names a second volume describes a split archive. BugPilot reads one file and
+    // says so plainly rather than guessing which volume it was given.
+    if (view.getUint32(pos + 16, true) !== 0 || view.getUint32(pos + 20, true) !== 0) refuse('multi_disk_not_supported')
+    return {
+      recordStart: (locatorStart - bytes.length) + pos,
+      recordSize,
+      centralSize: readU64(view, pos + 40, ''),
+      centralOffset: readU64(view, pos + 48, ''),
+    }
+  }
+  return null
 }
 
 async function walkCentralDirectory(
@@ -675,21 +683,53 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
     // A zip64 archive keeps its real index position in a second end record, reached through the
     // twenty-byte locator that sits in front of the ordinary one. The ordinary record's all-ones
     // fields only promise that number, so a promise with no locator behind it is a lie.
-    if (marked || eocd >= ZIP64_LOCATOR_SIZE) {
-      const zip64 = await readZip64EndRecord(source, tail, tailStart, eocd, run.signal)
-      if (zip64 === null) {
-        if (marked) refuse('corrupt_central_directory')
-      } else {
-        if (centralSize === UINT32_MAX) centralSize = zip64.centralSize
-        else if (centralSize !== zip64.centralSize) refuse('corrupt_central_directory')
-        if (centralOffset === UINT32_MAX) centralOffset = zip64.centralOffset
-        else if (centralOffset !== zip64.centralOffset) refuse('corrupt_central_directory')
+    let zip64: Zip64EndInfo | null = null
+    let locatorRecordOffset: number | null = null
+    if (eocd >= ZIP64_LOCATOR_SIZE) {
+      const locatorStart = eocd - ZIP64_LOCATOR_SIZE
+      const locatorRel = locatorStart - tailStart
+      const locator = locatorRel >= 0 && locatorRel + ZIP64_LOCATOR_SIZE <= tail.length
+        ? tail.subarray(locatorRel, locatorRel + ZIP64_LOCATOR_SIZE)
+        : await source.read(locatorStart, eocd, run.signal)
+      const locatorView = viewOf(locator)
+      if (locatorView.getUint32(0, true) === SIG_ZIP64_LOCATOR) {
+        if (locatorView.getUint32(4, true) !== 0 || locatorView.getUint32(16, true) !== 1) {
+          refuse('multi_disk_not_supported')
+        }
+        locatorRecordOffset = readU64(locatorView, 8, '')
+        zip64 = await findZip64EndRecord(source, locatorStart, run.signal)
+        if (zip64 === null && marked) refuse('corrupt_central_directory')
+      } else if (marked) {
+        refuse('corrupt_central_directory')
       }
+    } else if (marked) {
+      refuse('corrupt_central_directory')
+    }
+    if (zip64 !== null) {
+      if (centralSize === UINT32_MAX) centralSize = zip64.centralSize
+      else if (centralSize !== zip64.centralSize) refuse('corrupt_central_directory')
+      if (centralOffset === UINT32_MAX) centralOffset = zip64.centralOffset
+      else if (centralOffset !== zip64.centralOffset) refuse('corrupt_central_directory')
     }
     if (centralSize === UINT32_MAX || centralOffset === UINT32_MAX) refuse('corrupt_central_directory')
-    if (centralOffset + centralSize > eocd) refuse('corrupt_central_directory')
 
-    records = await walkCentralDirectory(source, centralOffset, centralSize, run)
+    // A self-extracting stub in front of the zip leaves every stored offset relative to the start
+    // of the zip part rather than the file. The difference is derived from the end records, never
+    // trusted: the index really ends where the end records begin, the declared offset is what the
+    // index claims, and the prefix is their difference. Every offset is then shifted by it and
+    // re-validated by signature, so a prefix that does not hold for every structure is refused.
+    const cdEnd = zip64 !== null ? zip64.recordStart : eocd
+    const prefix = cdEnd - centralSize - centralOffset
+    if (prefix < 0) refuse('corrupt_central_directory')
+    if (zip64 !== null && locatorRecordOffset !== null && locatorRecordOffset + prefix !== zip64.recordStart) {
+      refuse('corrupt_central_directory')
+    }
+    const cdStart = centralOffset + prefix
+
+    records = await walkCentralDirectory(source, cdStart, centralSize, run)
+    // Zip64 extras and every other stored offset were settled above, all of them zip-relative in a
+    // self-extracting archive; the derived prefix turns them back into file positions.
+    if (prefix !== 0) for (const record of records) record.localHeaderOffset += prefix
     reportProgress(run, 'walk')
 
     const seen = new Set<string>()
@@ -738,7 +778,7 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
     for (const record of candidates) {
       await breathe(run)
       try {
-        planned.push(await validateLocalHeader(source, record, centralOffset, run.signal))
+        planned.push(await validateLocalHeader(source, record, cdStart, run.signal))
       } catch (error) {
         // An entry whose own header or descriptor does not add up is dropped with a reason.
         if (error instanceof SkipSingle) {
@@ -754,7 +794,7 @@ async function readArchiveFromSource(source: ByteSource, options: ReadOptions = 
       }
     }
 
-    checkRanges(planned, centralOffset)
+    checkRanges(planned, cdStart)
 
     let stoppedCode: PartialStopCode | null = null
     let stoppedSubject: string | number = ''

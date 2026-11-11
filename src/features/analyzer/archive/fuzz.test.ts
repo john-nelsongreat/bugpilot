@@ -91,6 +91,15 @@ const TAR_BASE = buildTar([
   { name: 'src/b.py', content: 'print(1)\n' },
 ])
 const TAR_GZ_BASE = gzipSync(TAR_BASE)
+// Entries the reader skips from the index (nested archive, symlink, encrypted) beside ordinary
+// ones: mutating this base guards the per-entry skip policy and the all-encrypted note.
+const ZIP_SKIPS_BASE = buildZip([
+  { name: 'src/a.js', content: 'const a = 1\n' },
+  { name: 'bundles/inner.zip', content: ZIP_BASE, method: 8 },
+  { name: 'src/b.py', content: 'print(1)\n' },
+  { name: 'link.js', content: '/etc/passwd', symlink: true },
+  { name: 'locked.js', content: 'secret', encrypted: true },
+])
 
 function checkInvariants(result: ContainerReadResult): void {
   const limits = DEFAULT_ARCHIVE_LIMITS
@@ -112,13 +121,23 @@ function checkInvariants(result: ContainerReadResult): void {
   expect(entryBytes).toBeLessThanOrEqual(limits.maxTotalUncompressedBytes)
 }
 
+// A self-extracting stub in front of a zip whose offsets are relative to the zip part: mutating
+// this base guards the prefix derivation and the shifted-offset validation.
+const SFX_STUB = new TextEncoder().encode('MZ\x90\x00' + 'self-extracting stub padding\n'.repeat(24))
+const ZIP_SFX_BASE = buildZip(
+  [{ name: 'src/a.js', content: 'const a = 1\n' }, { name: 'src/b.py', content: 'print(1)\n' }],
+  { prepend: SFX_STUB, zipRelativeOffsets: true },
+)
+
 describe('seeded mutation fuzz', () => {
   it.each([
     ['zip', ZIP_BASE, 'upload.zip'],
     ['zip-descriptors', ZIP_DESCRIPTOR_BASE, 'upload.zip'],
     ['zip-zip64', ZIP_ZIP64_BASE, 'upload.zip'],
+    ['zip-skips', ZIP_SKIPS_BASE, 'upload.zip'],
     ['tar', TAR_BASE, 'upload.tar'],
     ['tar.gz', TAR_GZ_BASE, 'upload.tar.gz'],
+    ['zip-sfx', ZIP_SFX_BASE, 'upload.zip'],
   ] as const)('survives %s mutations without throwing or exceeding a ceiling', async (format, base, name) => {
     const random = prng(SEED)
     let successful = 0

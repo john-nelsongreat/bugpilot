@@ -112,6 +112,11 @@ export interface ZipBuildOptions {
   truncateTo?: number
   /** Prefix junk, e.g. a self-extracting stub. */
   prepend?: Uint8Array
+  /**
+   * Store every computed offset relative to the start of the zip part, the way self-extracting
+   * writers do; only meaningful together with `prepend`. Explicit overrides are written verbatim.
+   */
+  zipRelativeOffsets?: boolean
   /** Emit a ZIP64 end-of-central-directory record. */
   zip64?: boolean
   /** `sparse` stores only the marked fields, as the specification says; `dense` always stores all. */
@@ -270,6 +275,7 @@ function extraUnicodePath(spec: ZipEntrySpec, nameBytes: Uint8Array): Uint8Array
 export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {}): Uint8Array {
   parts.length = 0
   if (options.prepend) pushBytes(options.prepend)
+  const offsetBase = options.zipRelativeOffsets === true ? (options.prepend?.length ?? 0) : 0
 
   const records: Uint8Array[] = []
   const sizes: number[] = []
@@ -336,7 +342,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
       const zip64Extra = extraZip64(fields, shape, {
         uncompressed,
         compressed: body.bytes.length,
-        offset,
+        offset: offset - offsetBase,
         disk: 0,
       }, spec)
       if (spec.zip64ExtraSizeOverride !== undefined) {
@@ -375,7 +381,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
     putU16(marked('disk') ? 0xffff : 0)
     putU16(0)
     putU32(externalAttrs)
-    putU32(marked('offset') ? 0xffffffff : (spec.localHeaderOffsetOverride ?? offset) >>> 0)
+    putU32(marked('offset') ? 0xffffffff : (spec.localHeaderOffsetOverride ?? offset - offsetBase) >>> 0)
     cd.set(name, p)
     cd.set(extra, p + name.length)
     records.push(cd)
@@ -397,10 +403,10 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
     pushU32(0)
     pushU64(options.zip64EntryCount ?? entries.length)
     pushU64(options.zip64CdSize ?? cdSize)
-    pushU64(options.zip64CdOffset ?? cdOffset)
+    pushU64(options.zip64CdOffset ?? cdOffset - offsetBase)
     pushU32(SIG_ZIP64_LOCATOR)
     pushU32(options.zip64DiskNumber ?? 0)
-    pushU64(options.zip64RecordOffset ?? z64)
+    pushU64(options.zip64RecordOffset ?? z64 - offsetBase)
     pushU32(options.zip64TotalDisks ?? 1)
   }
 
@@ -413,7 +419,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipBuildOptions = {})
     pushU16(useZip64Markers ? 0xffff : (options.declaredEntryCount ?? entries.length) & 0xffff)
     pushU16(useZip64Markers ? 0xffff : (options.declaredEntryCount ?? entries.length) & 0xffff)
     pushU32(useZip64Markers ? 0xffffffff : (options.declaredCdSize ?? cdSize) >>> 0)
-    pushU32(useZip64Markers ? 0xffffffff : (options.declaredCdOffset ?? cdOffset) >>> 0)
+    pushU32(useZip64Markers ? 0xffffffff : (options.declaredCdOffset ?? cdOffset - offsetBase) >>> 0)
     pushU16(comment.length)
     pushBytes(comment)
   }
