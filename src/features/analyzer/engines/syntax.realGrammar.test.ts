@@ -485,6 +485,38 @@ describe('syntax findings against the shipped grammars', () => {
       }
     })
 
+    it('still reports a NESTED missing brace whose outer url() carries // (the unsafe direction)', () => {
+      // babc194 promoted the whole-file balance probe from a wording hint into the thing that
+      // decides whether a finding exists. While CSS inherited C_STYLE's `//` line comment, any
+      // `url(http://…)` / `url(//…)` hid the rest of its line — here the inner `.body {` opener and
+      // its brace — so the scan believed the file balanced, the ERROR region that leaked onto
+      // ordinary CSS was tolerated, and a genuinely unclosed block was suppressed. With the
+      // CSS-correct lexer (no `//`) the scan sees both openers against one closer: unbalanced, so
+      // the leaked region is NOT tolerated and the missing brace is reported at its real line.
+      const nested: [string, string][] = [
+        ['absolute url', '.card { background: url(http://cdn/a.png) no-repeat; .body { color: red\n}\n'],
+        ['protocol-relative url', '.card { background: url(//cdn/a.png) no-repeat; .body { color: red\n}\n'],
+      ]
+      for (const [name, code] of nested) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, name).toHaveLength(1)
+        expect(result.hits[0]?.ruleId, name).toMatch(/^tree-sitter\/(missing-node|syntax-error)$/)
+        // Tolerance was declined — the finding is real, not quietly set aside as dialect.
+        expect(result.notes.join(' '), name).not.toContain('Treated as a CSS dialect')
+        expect(result.understood, name).toBe(true)
+      }
+      // The well-formed counterpart, where every block closes, must stay finding-free.
+      const clean: [string, string][] = [
+        ['absolute url', '.card { background: url(http://cdn/a.png) no-repeat; }\n.body { color: red; }\n'],
+        ['protocol-relative url', '.card { background: url(//cdn/a.png) no-repeat; }\n.body { color: red; }\n'],
+      ]
+      for (const [name, code] of clean) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, name).toEqual([])
+        expect(result.understood, name).toBe(true)
+      }
+    })
+
     it('never lets a brace inside a string or comment fake the balance that gates tolerance', () => {
       // The balance probe is load-bearing: a dialect ERROR region that spills onto ordinary CSS is
       // set aside only when the file has no unfinished delimiter anywhere. If that scan counted a
