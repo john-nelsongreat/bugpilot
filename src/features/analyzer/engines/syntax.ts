@@ -288,7 +288,11 @@ function dialectAtRuleOnLine(input: SyntaxScanInput, row: number): string | null
   return KNOWN_CSS_AT_RULES.has(name) ? null : `@${name}`
 }
 
-function cssDialectAtRule(input: SyntaxScanInput, region: ErrorRegion): string[] | null {
+function cssDialectAtRule(
+  input: SyntaxScanInput,
+  region: ErrorRegion,
+  fileBalanced: () => boolean,
+): string[] | null {
   if (input.grammar !== 'css') return null
   if (region.missing) {
     const token = region.node.type.replace(/^MISSING\s*/, '').trim()
@@ -296,27 +300,43 @@ function cssDialectAtRule(input: SyntaxScanInput, region: ErrorRegion): string[]
   }
   // Tolerate a failure only when *every* line it covers opens with an unknown at-rule. A
   // region that reaches a line which does not is the grammar's confusion spilling into
-  // ordinary CSS — the measured case is a dialect line followed by an unclosed block, where
-  // one ERROR node covers both. Checking line by line keeps that mistake reportable while
-  // still accepting a file that uses several dialect at-rules in a row.
+  // ordinary CSS. Checking line by line keeps that mistake visible while still accepting a
+  // file that uses several dialect at-rules in a row.
   const names = new Set<string>()
+  let crossedOrdinary = false
   for (let row = region.node.startPosition.row; row <= region.node.endPosition.row; row += 1) {
+    const line = input.file.lines[row] ?? ''
+    // A blank line cannot carry the mistake, and a grammar that runs its ERROR region one
+    // statement past the dialect line it gave up on must not lose the tolerance for that.
+    if (line.trim() === '') continue
     const name = dialectAtRuleOnLine(input, row)
-    if (name === null) return null
+    if (name === null) {
+      crossedOrdinary = true
+      continue
+    }
     names.add(name)
+  }
+  if (names.size === 0) return null
+  // A region that reaches ordinary CSS is only set aside when the file has no unfinished
+  // delimiter anywhere in it. That single condition is what keeps the shape that would
+  // otherwise hide a real mistake — a dialect line followed by an unclosed block, which the
+  // grammar wraps in one ERROR node — reportable, while a well-formed Tailwind sheet whose
+  // confusion leaked onto the next selector is not.
+  if (crossedOrdinary || region.node.endPosition.row > region.node.startPosition.row) {
+    if (!fileBalanced()) return null
   }
   return [...names]
 }
 
 function describeCssDialect(names: readonly string[]): string {
+  const one = names.length === 1
   return (
-    `Treated as a CSS dialect, not a syntax error: ${names.join(', ')} ` +
-    (names.length === 1 ? 'is' : 'are') +
-    ' not defined by the CSS standards track, so the bundled CSS grammar has no rule for the line that opens with ' +
-    'them and no finding is claimed there. BugPilot tolerates every unknown at-rule for the same reason, not only ' +
-    'the ones a particular framework uses. Unbalanced braces, broken selectors and truncated files are still ' +
-    'reported, including in this file. A standards-only CSS parser still rejects these lines, so a build step that ' +
-    'is not dialect-aware will fail on them.'
+    `Treated as a CSS dialect, not a syntax error: ${names.join(', ')} ${one ? 'is' : 'are'} not defined by the ` +
+    `CSS standards track, so the bundled CSS grammar has no rule there and no syntax finding is claimed on the ` +
+    `${one ? 'line that opens' : 'lines that open'} with ${one ? 'it' : 'them'}. BugPilot tolerates every unknown ` +
+    'at-rule for the same reason, not only the ones a particular framework uses. Unbalanced braces, broken ' +
+    'selectors and truncated files are still reported, including in this file. A standards-only CSS parser still ' +
+    'rejects these lines, so a build step that is not dialect-aware will fail on them.'
   )
 }
 
@@ -367,8 +387,15 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
   // own merits: a broken selector or an unclosed brace after a `@source` line still reports.
   const dialectNames: string[] = []
   const reported: ErrorRegion[] = []
+  let balanceProbe: boolean | null = null
+  const fileBalanced = () => {
+    if (balanceProbe === null) {
+      balanceProbe = findUnclosedOpener(input.file.text, input.file.text.length, input.grammar) === null
+    }
+    return balanceProbe
+  }
   for (const region of regions) {
-    const dialect = cssDialectAtRule(input, region)
+    const dialect = cssDialectAtRule(input, region, fileBalanced)
     if (dialect) {
       for (const name of dialect) {
         if (!dialectNames.includes(name)) dialectNames.push(name)
