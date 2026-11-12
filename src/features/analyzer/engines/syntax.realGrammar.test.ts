@@ -390,5 +390,45 @@ describe('syntax findings against the shipped grammars', () => {
       expect(result.notes.join(' ')).not.toContain('Treated as a CSS dialect')
       expect(result.notes.join(' ')).toContain('That is usually the grammar, not the code')
     })
+
+    it('tolerates a valid dialect file whose url() carries //, and does not call it a grammar failure', () => {
+      // Regression for the CSS lexer bug: plain CSS has no `//` line comment, yet `//` appears
+      // inside `url(http://…)` and `url(//cdn…)`. When BugPilot's own delimiter scan treated it
+      // as a comment (C_STYLE did), the `url(` opened paren and the braces after it vanished
+      // from the balance probe that decides whether a crossing at-rule region is a harmless
+      // grammar leak, so this well-formed sheet was mislabelled as "the grammar gave up". The
+      // only difference between the two rows is `//`; the protocol-relative control shows what
+      // correct behaviour looks like.
+      const tail =
+        '\n.body { color: red; padding: 0; margin: 0; line-height: 1.5; }\n' +
+        '.footer { display: flex; gap: 1rem; align-items: center; }\n' +
+        '.header { position: sticky; top: 0; z-index: 10; }\n'
+      const control = '@source "x";\n@theme {\n  --a: url(/cdn/a.png);\n  --b: 1;\n}\n' + tail
+      const absolute = '@source "x";\n@theme {\n  --a: url(http://cdn/a.png);\n  --b: 1;\n}\n' + tail
+      const relative = '@source "x";\n@theme {\n  --a: url(//cdn/a.png);\n  --b: 1;\n}\n' + tail
+      for (const code of [control, absolute, relative]) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, code).toEqual([])
+        expect(result.understood, code).toBe(true)
+        expect(result.errorRegions, code).toBeGreaterThan(0)
+        expect(result.notes.join(' '), code).toContain('Treated as a CSS dialect')
+        expect(result.notes.join(' '), code).not.toContain('stopped understanding')
+      }
+    })
+
+    it('still reports a real missing brace in a file whose url() carries //', () => {
+      // The other side of the same mechanism: a brace that genuinely does not close must survive
+      // the corrected scan, whether or not a `url(…//…)` sits on the line.
+      const cases: [string, string][] = [
+        ['protocol-relative', '.a { background: url(//cdn/a.png);\n'],
+        ['absolute', '.a { background: url(http://cdn/a.png);\n'],
+        ['inside an unknown at-rule block', '@theme {\n  --a: url(http://cdn/a.png);\n'],
+      ]
+      for (const [name, code] of cases) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, name).toHaveLength(1)
+        expect(result.hits[0]?.ruleId, name).toMatch(/^tree-sitter\/(missing-node|syntax-error)$/)
+      }
+    })
   })
 })

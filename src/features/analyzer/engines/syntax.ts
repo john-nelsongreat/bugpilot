@@ -109,6 +109,24 @@ const QUOTED_STYLE: LexerConfig = {
   ],
 }
 
+/**
+ * CSS as a lexer, distinct from `C_STYLE`: plain CSS has no `//` line comment, yet `//` appears
+ * routinely inside `url(http://…)` and `url(//cdn…)`. Treating it as a comment (which `C_STYLE`
+ * does) makes the delimiter scan jump to end-of-line there, hiding the rest of that line's
+ * braces and the `)` of the `url(`, so `findUnclosedOpener` reports a balanced file as broken.
+ * That corrupts the whole-file balance probe that decides whether a crossing at-rule region is a
+ * harmless grammar leak or a real unfinished block, and it makes a valid dialect file look
+ * un-understood. Block comments and quoted strings are kept identical to `C_STYLE`.
+ */
+const CSS_STYLE: LexerConfig = {
+  lineComments: [],
+  blockComments: [{ start: '/*', end: '*/' }],
+  strings: [
+    { quote: '"', escape: '\\' },
+    { quote: "'", escape: '\\' },
+  ],
+}
+
 const LEXERS: Partial<Record<GrammarId, LexerConfig>> = {
   c: C_STYLE,
   cpp: C_STYLE,
@@ -118,7 +136,7 @@ const LEXERS: Partial<Record<GrammarId, LexerConfig>> = {
   swift: C_STYLE,
   kotlin: C_STYLE,
   rust: C_STYLE,
-  css: C_STYLE,
+  css: CSS_STYLE,
   php: {
     lineComments: ['//', '#'],
     blockComments: [{ start: '/*', end: '*/' }],
