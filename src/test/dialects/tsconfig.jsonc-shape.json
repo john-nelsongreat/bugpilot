@@ -1,0 +1,8 @@
+{
+  // JSONC on purpose: this is the shape that ships under `.json` in TypeScript tooling.
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+  },
+  "include": ["src/**/*"],
+}

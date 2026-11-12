@@ -1,0 +1,2 @@
+@source "../src/**/*.html";
+.card {{ color: red; }

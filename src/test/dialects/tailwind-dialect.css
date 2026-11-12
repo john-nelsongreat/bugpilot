@@ -1,0 +1,12 @@
+@source "../src/**/*.{html,ts}";
+@source inline("{,sm:,md:}text-white");
+@custom-variant dark (&:where(.dark, .dark *));
+
+.btn {
+  @apply px-4 py-2 rounded;
+  color: red;
+}
+
+@theme {
+  --color-brand: oklch(0.6 0.2 200);
+}

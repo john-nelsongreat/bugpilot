@@ -2117,3 +2117,71 @@ Both rules carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-
   - Repeat in Firefox and in Playwright WebKit (approximates Safari; physical Safari is untested). Expected: the same 0 violations on the deep pass; WebKit's per-`<select>` `style-src-attr` noise is unrelated to the engines and unchanged in count.
 - [ ] Compare the bytes actually moved with the gate's numbers. The gate quotes **build-time gzip sizes** (from `manifest.json`), so a local server that does not compress sends the raw bytes — for the same nine-language upload that is about **14.2 MiB transferred against 4.2 MiB quoted**, and Vercel serves the compressed figure. Expected: on the live site the `Content-Encoding` of an engine asset is `gzip` (or `br`), and the quoted total is the honest download size for a visitor.
 - [ ] If a violation appears, copy the complete console message (directive, blocked URL, and source file) before changing anything. Do not add `'unsafe-inline'`, `'unsafe-eval'`, or a broad external host as the first response. Identify the resource, add only the narrowest source or remove the dependency, then repeat the local checks and this section.
+
+## 18. Dialects that are tolerated, and what that hides (AN-P1)
+
+The four fixtures used here live in `src/test/dialects/` and are pinned by `npm test -- src/features/analyzer/dialectFixtures.test.ts`, so a fixture that stops meaning what this section says fails the suite. Run the deep pass (**Run deep analysis** in the gate) unless an item says otherwise.
+
+### 18.1 JSON with comments, under a `.json` name
+
+- [ ] Upload `src/test/dialects/tsconfig.jsonc-shape.json` and analyse it.
+  - Expected: **no** `bugpilot/syntax/json` finding on that file — no `Invalid JSON` row at all.
+  - Expected: that file's Notes carry this exact sentence:
+    `Treated as JSONC (JSON with comments), not strict JSON: it parses once // or /* */ comments outside strings and a comma before a closing } or ] are allowed. The ``.json`` name offered the candidate and the content confirmed it, so no Invalid JSON finding is reported. A strict JSON parser still rejects this document, so any consumer that is not JSONC-aware will fail on it.`
+  - Expected: the note is one sentence per clause and the second clause begins `The .json name offered the candidate` — the two backticks around `.json` are in the text the rule emits, not Markdown.
+  - The note is the whole point of this item: the finding was dropped **and** said out loud.
+- [ ] Upload `src/test/dialects/json-double-comma.json`.
+  - Expected: exactly **1** High finding whose message starts `Invalid JSON:` and points at line 1. Two commas in a row is not one of the two accepted deviations, so the tolerance must not swallow it.
+  - Expected: **no** JSONC note on this file.
+- [ ] Type `{"a": 1,,}` into the paste box (Snippet) and analyse.
+  - Expected: the same single finding. The name of a snippet is not `.json`, so a `.json`-named file is the only thing that can offer the dialect candidate.
+
+### 18.2 Template markup
+
+- [ ] Upload `src/test/dialects/home.ejs` and run the deep pass.
+  - Expected: **no** syntax finding of any kind on the file — no `tree-sitter/syntax-error`, no `tree-sitter/missing-node`.
+  - Expected: its coverage row reads `Syntax — not run` with this reason:
+    `No syntax engine runs on template files: the bundled HTML and JavaScript grammars cannot read <% %> directives, so the file is recorded as un-checked instead of reported on.`
+  - Expected: the Pattern row still shows as run, and the report says which checks were **not** performed.
+- [ ] Make a local copy of `home.ejs`, add the line `<% const apiKey = "PASTE" %>` and replace `PASTE` with the value this prints:
+  ```powershell
+  node -e "console.log(['AKIA','Q7R2T9','MW4XZ8','B3N6'].join(''))"
+  ```
+  Upload the copy.
+  - Expected: the credential is **still found** inside the `<% %>` tag, at the right line. The template tolerance removes a syntax verdict, not the secret scan.
+  - Do not save the pasted value back into `src/test/dialects/`. No credential-shaped literal belongs in the repository, which is why this item has you assemble it at run time.
+- [ ] Copy `home.ejs` to `page.html` (keep every `<% %>` marker) and upload it.
+  - Expected: the same treatment — recognised as a template by the `<%` sniff, no syntax engine, the reason printed. A `.html` file that carries template directives is not silently handed to the HTML grammar.
+
+### 18.3 CSS at-rules the standard does not define
+
+- [ ] Upload `src/test/dialects/tailwind-dialect.css` and run the deep pass.
+  - Expected: **no** `tree-sitter` syntax finding on the file, even though it uses `@source`, `@source inline(…)`, `@custom-variant`, `@apply` and `@theme`.
+  - Expected: its Notes carry the dialect sentence, which names the at-rules it set aside in alphabetical order and ends with exactly this:
+    `BugPilot tolerates every unknown at-rule for the same reason, not only the ones a particular framework uses. Unbalanced braces, broken selectors and truncated files are still reported, including in this file. A standards-only CSS parser still rejects these lines, so a build step that is not dialect-aware will fail on them.`
+  - Expected: the sentence begins `Treated as a CSS dialect, not a syntax error:` and contains both `@custom-variant` and `@source`.
+- [ ] Upload `src/test/dialects/tailwind-plus-bug.css` — a dialect line with a genuine mistake on the next line.
+  - Expected: exactly **1** syntax finding, `Syntax error near "{" at line 2.`
+  - Expected: the dialect note is **also** present on the same file. Both halves are true and the UI must say both.
+- [ ] Upload `src/test/dialects/unclosed-brace.css`.
+  - Expected: exactly **1** finding, a `tree-sitter/missing-node` row naming the missing `}`.
+  - Expected: **no** dialect note. Nothing in this file opens with `@`, so no dialect excuse is available.
+- [ ] Type `@theme {` into the paste box on its own line, then `--color-a: red;` on the next, and analyse with the deep pass.
+  - Expected: the unclosed block is **reported**. A missing `}`, `)` or `]` closer is never tolerated, even when the line opens with an unknown at-rule.
+
+### 18.4 Macro-heavy C — a limit, not a fix
+
+- [ ] Upload a macro-dense C project (a `cJSON`-style tree with `CJSON_CDECL(…)` calls, or anything built on Unity's `UNITY_TEST_CASE(…)`) and run the deep pass.
+  - Expected **today**: syntax findings are still reported on this code, even where it compiles cleanly. AN-P1 Part 3 measured thresholds 0.10, 0.20 and 0.35 of the file inside `ERROR`/`MISSING` bytes against the pinned corpora and none of them separates valid macro-dense C from a genuine missing brace, so **nothing was suppressed** and no threshold was chosen.
+  - Expected: no code path whitelists cJSON, Unity, or any project or file name. Read the guard in `src/features/analyzer/engines/syntax.ts` to confirm it keys on grammar-visible structure only.
+  - Expected: README → *Dialects that are tolerated, and what that hides* states this row as an open decision, not as shipped behaviour.
+  - If a later run reports that macro-C is now tolerated, re-read this item: the change must come with a measured threshold table, or the suppression is hiding exactly what the precision gate counts.
+
+### 18.5 The docs cannot drift from the code
+
+- [ ] Run:
+  ```bash
+  npm test -- src/features/analyzer/dialectDocs.test.ts src/features/analyzer/dialectFixtures.test.ts
+  ```
+  Expected: 7 + 7 tests pass, 0 fail. `dialectDocs.test.ts` reads `README.md` and asserts every dialect claim against the registry, the template extension list, the CSS standards set and the untrusted-grammar set; `dialectFixtures.test.ts` runs the fixtures in this section through the real grammars.
+  - To see it bite: delete the JSONC row from the README table in a scratch copy and re-run — the suite must fail, not pass on a stale sentence.
