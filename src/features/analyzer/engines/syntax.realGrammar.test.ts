@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import type { SourceLanguage } from '../archive/classify'
 import { makeRuleFile } from '../rules/context'
 import type { GrammarId } from './assets'
-import { scanSyntax, UNTRUSTED_SYNTAX_GRAMMARS, type SyntaxNode } from './syntax'
+import { collectErrorRegions, scanSyntax, UNTRUSTED_SYNTAX_GRAMMARS, type SyntaxNode } from './syntax'
 
 /**
  * Part 2 proved against the real grammars rather than against a hand-written tree: a clean
@@ -140,6 +140,29 @@ function scan(sample: Sample, code: string) {
       root: tree.rootNode as unknown as SyntaxNode,
       grammar: sample.grammar,
     })
+  } finally {
+    tree.delete()
+    parser.delete()
+  }
+}
+
+/**
+ * Raw error regions for the byte-fraction proof below: the widths are read straight off the
+ * tree, so the test demonstrates the structural fact the README claims rather than restating it.
+ */
+function errorRegionsOf(sample: Sample, code: string) {
+  const language = languages.get(sample.grammar)
+  if (!language) throw new Error(`Grammar ${sample.grammar} was not loaded.`)
+  const parser = new Parser()
+  parser.setLanguage(language)
+  const tree = parser.parse(code)
+  if (!tree) throw new Error(`The ${sample.grammar} parser returned no tree.`)
+  try {
+    return collectErrorRegions(tree.rootNode as unknown as SyntaxNode).map((region) => ({
+      missing: region.missing,
+      width: region.node.endIndex - region.node.startIndex,
+      text: region.node.text,
+    }))
   } finally {
     tree.delete()
     parser.delete()
@@ -292,6 +315,37 @@ describe('syntax findings against the shipped grammars', () => {
   })
 
   /**
+   * Part 3 (withdrawn): an earlier threshold idea scored a file by the share of its bytes inside
+   * ERROR/MISSING nodes. That metric is blind to a `MISSING` node by construction — the grammar
+   * inserts one where a token should be but consumes no source, so its span is empty. This test
+   * pins the structural fact from the real tree so the README's macro-C row is reproducible
+   * without the probe that measured it.
+   */
+  it('proves the byte-fraction metric cannot see a zero-width MISSING node', () => {
+    const c = SAMPLES.find((sample) => sample.grammar === 'c')
+    if (!c) throw new Error('c sample missing')
+    // `int main(void) {` with no closing brace: the grammar's only complaint is a MISSING `}`.
+    const regions = errorRegionsOf(c, c.broken)
+    expect(regions.length).toBeGreaterThan(0)
+    expect(regions.every((region) => region.missing)).toBe(true)
+    for (const region of regions) {
+      // A MISSING node occupies no bytes: identical indices, empty text.
+      expect(region.width).toBe(0)
+      expect(region.text).toBe('')
+    }
+    // So its error-byte fraction is 0.0 — indistinguishable from a clean file at any threshold.
+    const covered = regions.reduce((sum, region) => sum + region.width, 0)
+    expect(covered / c.broken.length).toBe(0)
+
+    // Contrast: a genuine ERROR node does occupy bytes, so the metric only ever sees the
+    // grammar's confusion, never the zero-width majority that dominates macro-heavy C.
+    const css = SAMPLES.find((sample) => sample.grammar === 'css')
+    if (!css) throw new Error('css sample missing')
+    const errorRegions = errorRegionsOf(css, '.a{{ color: red; }\n')
+    expect(errorRegions.some((region) => !region.missing && region.width > 0)).toBe(true)
+  })
+
+  /**
    * Part 4: modern CSS ships at-rules the bundled grammar has never heard of. The tolerance is
    * defined by what the standards track does NOT list, not by a table of framework names, so it
    * cannot rot — and every shape below was read off the real parse tree, including the region
@@ -428,6 +482,42 @@ describe('syntax findings against the shipped grammars', () => {
         const result = scan(cssSample(), code)
         expect(result.hits, name).toHaveLength(1)
         expect(result.hits[0]?.ruleId, name).toMatch(/^tree-sitter\/(missing-node|syntax-error)$/)
+      }
+    })
+
+    it('never lets a brace inside a string or comment fake the balance that gates tolerance', () => {
+      // The balance probe is load-bearing: a dialect ERROR region that spills onto ordinary CSS is
+      // set aside only when the file has no unfinished delimiter anywhere. If that scan counted a
+      // `}` inside a string or comment as a real closer, a quoted brace would fake a closed block
+      // and the genuine unclosed `.a {` that follows a `@source` line would be silently tolerated.
+      // A leading valid rule keeps the error region off row 0, so it is the tolerance — not the
+      // whole-file collapse — that decides, and the decoy changes nothing.
+      const cases: [string, string, string][] = [
+        [
+          'a brace inside a string',
+          '.header { color: blue; }\n@source "x";\n.a { content: "}";\n',
+          '.header { color: blue; }\n@source "x";\n.a { color: red;\n',
+        ],
+        [
+          'a brace inside a comment',
+          '.header { color: blue; }\n@source "x";\n.a { /* } */ color: red;\n',
+          '.header { color: blue; }\n@source "x";\n.a { color: red;\n',
+        ],
+      ]
+      const css = cssSample()
+      for (const [name, withDecoy, control] of cases) {
+        const hidden = scan(css, withDecoy)
+        const plain = scan(css, control)
+        // The grammar kept up (a real, local finding) and the unclosed `.a {` reports despite the decoy.
+        expect(hidden.understood, name).toBe(true)
+        expect(hidden.hits, name).toHaveLength(1)
+        expect(hidden.hits[0]?.ruleId, name).toMatch(/^tree-sitter\/(missing-node|syntax-error)$/)
+        // Tolerance was declined: had the scan believed the quoted `}` closed `.a {`, this note would
+        // appear and the finding would vanish.
+        expect(hidden.notes.join(' '), name).not.toContain('Treated as a CSS dialect')
+        // Same verdict with or without the quoted/braced character — the scan is string- and comment-aware.
+        expect(hidden.hits[0]?.ruleId, name).toBe(plain.hits[0]?.ruleId)
+        expect(hidden.hits[0]?.range.startLine, name).toBe(plain.hits[0]?.range.startLine)
       }
     })
   })
