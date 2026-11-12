@@ -103,6 +103,11 @@ export function analyzeFile(entry: ArchiveEntry, options: AnalyzeFileOptions): F
     try {
       const hits = rule.check(ruleFile)
       rulesRan.push(rule.id)
+      if (rule.coverageNotes) {
+        for (const note of rule.coverageNotes(ruleFile)) {
+          if (!notes.includes(note)) notes.push(note)
+        }
+      }
       for (const hit of hits) {
         if (findings.length >= options.limits.maxFindingsPerFile) {
           if (!capNoted) {

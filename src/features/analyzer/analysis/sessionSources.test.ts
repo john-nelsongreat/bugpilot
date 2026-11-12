@@ -41,7 +41,7 @@ const analyzer: AnalyzerClient = {
 
 describe('session sources', () => {
   it('returns the analysed text in memory so fixes can be proposed later', async () => {
-    const entries = [entry('data/config.json', '{"a": 1,}\n')]
+    const entries = [entry('data/config.json', '{"a": 1,,}\n')]
     const result = await analyzeUpload(
       { kind: 'files', sources: [{ path: 'data/config.json', size: 12, read: async () => new Uint8Array() }] },
       { archiveBytes: 12 },

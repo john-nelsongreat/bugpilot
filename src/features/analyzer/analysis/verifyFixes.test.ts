@@ -12,6 +12,7 @@ import { verifyFixCandidates } from './verifyFixes'
 
 const FAKE = ['Zq9', 'vT4k', 'Wm8p', 'Rc2s', 'Ld7N'].join('')
 const CREDENTIAL_RULE = 'bugpilot/secret/credential-assignment'
+const HTTP_RULE = 'bugpilot/generic/insecure-http-url'
 const JSON_RULE = 'bugpilot/syntax/json'
 const TS_RULE = 'bugpilot/typescript/syntax'
 
@@ -58,6 +59,18 @@ function tsClient(result: TsCheckResult): TsSyntaxClient {
   }
 }
 
+/**
+ * A document the JSONC dialect read does NOT rescue: a doubled comma is still a syntax error
+ * after comments and single trailing commas are tolerated, so `bugpilot/syntax/json` genuinely
+ * reports it. Used only by the test whose subject is the verifier's own JSON re-parse guard,
+ * which needs a real finding and a deliberately broken hand-made edit.
+ */
+const TOLERANCE_PROOF = '{"a": 1,,}\n'
+
+function httpSource(): ArchiveEntry {
+  return entry('src/api.js', 'const endpoint = "http://cdn.acme-widgets.com/assets.json"\n')
+}
+
 function tsFinding(message: string): AnalyzerFinding {
   return makeFinding({
     ruleId: TS_RULE,
@@ -96,9 +109,10 @@ function criticalFinding(message: string): AnalyzerFinding {
 
 describe('fix verification', () => {
   it('verifies a fix by re-running the real rules on the changed copy', async () => {
-    const source = entry('data/config.json', '{"a": [1,2,],}\n')
-    const finding = findingFor(source, JSON_RULE)
-    const candidate = proposeFix(finding, source)
+    const source = httpSource()
+    const finding = findingFor(source, HTTP_RULE)
+    const candidate = proposeFix(finding, source) as FixCandidate
+    expect(candidate.ruleId).toBe(HTTP_RULE)
     const seen: string[] = []
 
     const analyzer: AnalyzerClient = {
@@ -107,11 +121,14 @@ describe('fix verification', () => {
         return { files: analyzeEntries(entries).files, cancelled: false, error: null }
       },
     }
-    const outcome = await verifyFixCandidates([candidate as FixCandidate], [source], findingsOf(source), { analyzer })
+    const outcome = await verifyFixCandidates([candidate], [source], findingsOf(source), {
+      analyzer,
+      createTsClient: async () => tsClient(tsResult()),
+    })
 
     expect(outcome.verified).toHaveLength(1)
     expect(outcome.dropped).toHaveLength(0)
-    expect(seen[0]).toContain('__bugpilot_verify__/0/data/config.json')
+    expect(seen[0]).toContain('__bugpilot_verify__/0/src/api.js')
   })
 
   it('drops a fix when the target finding is still reported', async () => {
@@ -216,7 +233,7 @@ describe('fix verification', () => {
   })
 
   it('drops a JSON fix whose result still does not parse', async () => {
-    const source = entry('data/config.json', '{"a": 1,}\n')
+    const source = entry('data/config.json', TOLERANCE_PROOF)
     const finding = findingFor(source, JSON_RULE)
     const candidate: FixCandidate = {
       findingId: finding.id,
@@ -293,8 +310,8 @@ describe('fix verification', () => {
   })
 
   it('drops everything when the verification analysis fails or is cancelled', async () => {
-    const source = entry('data/config.json', '{"a": 1,}\n')
-    const finding = findingFor(source, JSON_RULE)
+    const source = httpSource()
+    const finding = findingFor(source, HTTP_RULE)
     const candidate = proposeFix(finding, source) as FixCandidate
 
     const errored = await verifyFixCandidates([candidate], [source], findingsOf(source), {
@@ -309,8 +326,8 @@ describe('fix verification', () => {
   })
 
   it('drops a candidate whose analysed text is no longer available', async () => {
-    const source = entry('data/config.json', '{"a": 1,}\n')
-    const finding = findingFor(source, JSON_RULE)
+    const source = httpSource()
+    const finding = findingFor(source, HTTP_RULE)
     const candidate = proposeFix(finding, source) as FixCandidate
     const outcome = await verifyFixCandidates([candidate], [], findingsOf(source), { analyzer: realAnalyzer() })
     expect(outcome.dropped[0].reason).toContain('no longer available')

@@ -7,7 +7,7 @@ import type { TsCheckResult, TsSyntaxClient } from '../analysis/typescript/tsCli
 import { prepareFixPlan } from './plan'
 
 const FAKE_AWS = ['AK', 'IA', 'Q7W2', 'E4R6', 'T8Y0', 'U2I4'].join('')
-const JSON_RULE = 'bugpilot/syntax/json'
+const HTTP_RULE = 'bugpilot/generic/insecure-http-url'
 
 function entry(name: string, text: string): ArchiveEntry {
   const detection = detectLanguage(name, text)
@@ -61,9 +61,11 @@ describe('fix plan', () => {
   })
 
   it('reports verification failures through the unavailable map', async () => {
-    const source = entry('data/config.json', '{"a": [1,2,],}\n')
+    // The defect is one whose fixer is reachable from a reported finding; the JSON trailing-comma
+    // fixer is not (see jsonTrailingComma.test.ts), so it cannot be used to drive this path.
+    const source = entry('public/page.html', '<a href="http://cdn.acme-widgets.com/assets.json">files</a>\n')
     const findings = analyzeEntries([source]).files[0].findings
-    const sourceFinding = findings.find((item) => item.ruleId === JSON_RULE)
+    const sourceFinding = findings.find((item) => item.ruleId === HTTP_RULE)
     expect(sourceFinding).toBeDefined()
 
     const analyzer: AnalyzerClient = {

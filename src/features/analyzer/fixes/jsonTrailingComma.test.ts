@@ -26,6 +26,10 @@ function jsonFinding(source: ArchiveEntry) {
   return finding
 }
 
+function jsonFindingCount(source: ArchiveEntry): number {
+  return analyzeEntries([source]).files[0].findings.filter((item) => item.ruleId === JSON_RULE).length
+}
+
 function fakeFinding() {
   return makeFinding({
     ruleId: JSON_RULE,
@@ -45,9 +49,13 @@ function fakeFinding() {
 }
 
 describe('JSON trailing comma fix', () => {
+  // The finding is built directly here rather than taken from the analyzer, because this file's
+  // subject is the candidate generator itself. Since AN-P1 tolerates the JSONC dialect, a document
+  // whose only defect is a trailing comma is no longer reported at all, so the analyzer can never
+  // hand this generator an input it would accept. The reachability pair is pinned below.
   it('removes trailing commas outside strings and produces valid JSON', () => {
     const source = entry('{\n  "name": "widget",\n  "tags": ["a", "b",],\n}\n')
-    const candidate = proposeJsonTrailingCommaFix(jsonFinding(source), source.text, source.name)
+    const candidate = proposeJsonTrailingCommaFix(fakeFinding(), source.text, source.name)
 
     expect(candidate?.riskClass).toBe('safe')
     expect(candidate?.behaviourChange).toBe(false)
@@ -62,7 +70,7 @@ describe('JSON trailing comma fix', () => {
   it('leaves comma-brace text inside strings alone', () => {
     const source = entry('{"text": "a,} b", "list": [1,],}\n')
     expect(trailingCommaOffsets(source.text)).toHaveLength(2)
-    const candidate = proposeJsonTrailingCommaFix(jsonFinding(source), source.text, source.name)
+    const candidate = proposeJsonTrailingCommaFix(fakeFinding(), source.text, source.name)
     const fixed = applyEdits(source.text, candidate?.edits ?? [])
     expect(fixed).toBe('{"text": "a,} b", "list": [1]}\n')
     expect(fixed).toContain('"a,} b"')
@@ -80,9 +88,22 @@ describe('JSON trailing comma fix', () => {
 
   it('is idempotent: the fixed file parses, so nothing is proposed again', () => {
     const source = entry('{"a": [1,2,],}\n')
-    const candidate = proposeJsonTrailingCommaFix(jsonFinding(source), source.text, source.name)
+    const candidate = proposeJsonTrailingCommaFix(fakeFinding(), source.text, source.name)
     const fixed = entry(applyEdits(source.text, candidate?.edits ?? []))
     expect(analyzeEntries([fixed]).files[0].findings.filter((hit) => hit.ruleId === JSON_RULE)).toHaveLength(0)
     expect(proposeJsonTrailingCommaFix(fakeFinding(), fixed.text, fixed.name)).toBeNull()
+  })
+
+  it('records that the generator and the reported finding are disjoint by construction', () => {
+    // Both directions, so the consequence of AN-P1 is pinned in tests instead of prose:
+    // every document this generator can repair is accepted as JSONC and never reported, and
+    // every document the rule still reports is one comma-removal alone cannot fix.
+    const repairable = entry('{\n  "tags": ["a", "b",],\n}\n')
+    expect(jsonFindingCount(repairable)).toBe(0)
+    expect(proposeJsonTrailingCommaFix(fakeFinding(), repairable.text, repairable.name)).not.toBeNull()
+
+    const reported = entry('{"a": 1,,}\n')
+    expect(jsonFindingCount(reported)).toBe(1)
+    expect(proposeJsonTrailingCommaFix(fakeFinding(), reported.text, reported.name)).toBeNull()
   })
 })

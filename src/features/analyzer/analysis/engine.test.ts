@@ -40,7 +40,7 @@ function testRule(id: string, check: (file: RuleFile) => RuleHit[]): AnalyzerRul
 
 describe('analysis engine', () => {
   it('analyses each file with the rules for its language and keeps deterministic ids', () => {
-    const entries = [entry('src/app.js', '// TODO: tidy this up\n'), entry('data/bad.json', '{"a": 1,}')]
+    const entries = [entry('src/app.js', '// TODO: tidy this up\n'), entry('data/bad.json', '{"a": 1,,}')]
     const first = analyzeEntries(entries)
     const second = analyzeEntries(entries)
 
