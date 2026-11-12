@@ -30,6 +30,7 @@ export const ALL_TEXT_LANGUAGES: readonly SourceLanguage[] = [
   'html',
   'css',
   'markdown',
+  'template',
   'text',
   'unknown',
 ]

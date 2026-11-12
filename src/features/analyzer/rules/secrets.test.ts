@@ -320,3 +320,41 @@ describe('secret rule: credential assignment false-positive guards', () => {
     expect(hits(id, '.env', 'BUILD_VERSION=1.2.3.4.5.6.7\n')).toHaveLength(0)
   })
 })
+
+describe('secret rules on template dialects', () => {
+  // Re-labelling a template as `template` must not cost it the pattern tier: the file is
+  // reported as syntax-unchecked, and that is the only change. Both directions are tested,
+  // so a rule list that drops `template` fails here instead of silently losing coverage.
+  const awsId = ['AKIA', 'Q7R2T9', 'MW4XZ8', 'B3N6'].join('')
+  const secret = ['Zx9Qm2Lp', '7Rt4Vb8N'].join('')
+
+  it('still finds a credential shape on the face of a .ejs file', () => {
+    const found = hits('bugpilot/secret/aws-access-key', 'views/keys.ejs', `<p>Your key is ${awsId}</p>\n`)
+    expect(found).toHaveLength(1)
+    expect(found[0].evidence[0].lineNumber).toBe(1)
+  })
+
+  it('still finds an assignment inside a template directive', () => {
+    const body = `<% const api_key = "${secret}" %>\n`
+    expect(hits('bugpilot/secret/credential-assignment', 'views/setup.ejs', body)).toHaveLength(1)
+    expect(hits('bugpilot/secret/credential-assignment', 'views/setup.twig', body)).toHaveLength(1)
+    expect(hits('bugpilot/secret/credential-assignment', 'views/setup.hbs', body)).toHaveLength(1)
+  })
+
+  it('finds the same credential in a .html file that carries a directive', () => {
+    // The name stays .html, the content makes it a template; either way the rule runs.
+    expect(hits('bugpilot/secret/aws-access-key', 'public/home.html', `<p>${awsId}</p>\n<%= x %>\n`)).toHaveLength(
+      1,
+    )
+  })
+
+  it('does not invent a finding on a clean template', () => {
+    const clean = '<!doctype html>\n<html><body><%= user.name %></body></html>\n'
+    expect(hits('bugpilot/secret/aws-access-key', 'views/index.ejs', clean)).toHaveLength(0)
+    expect(hits('bugpilot/secret/credential-assignment', 'views/index.ejs', clean)).toHaveLength(0)
+  })
+
+  it('keeps .html without a directive in the same tier', () => {
+    expect(hits('bugpilot/secret/aws-access-key', 'public/index.html', `<p>${awsId}</p>\n`)).toHaveLength(1)
+  })
+})

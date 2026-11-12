@@ -33,6 +33,7 @@ const LANGUAGES_WITH_INDENTATION_SEMANTICS: readonly SourceLanguage[] = [
 const ALL_TEXT_LANGUAGES_WITH_FALLBACKS: readonly SourceLanguage[] = [
   ...LANGUAGES_WITH_INDENTATION_SEMANTICS,
   'markdown',
+  'template',
   'text',
   'unknown',
 ]

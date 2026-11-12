@@ -23,6 +23,7 @@ export type SourceLanguage =
   | 'xml'
   | 'html'
   | 'css'
+  | 'template'
   | 'markdown'
   | 'text'
   | 'unknown'
@@ -75,6 +76,11 @@ const BY_EXTENSION: Record<string, SourceLanguage> = {
   css: 'css',
   scss: 'css',
   less: 'css',
+  ejs: 'template',
+  erb: 'template',
+  hbs: 'template',
+  mustache: 'template',
+  twig: 'template',
   md: 'markdown',
   mdx: 'markdown',
   markdown: 'markdown',
@@ -113,6 +119,22 @@ const SHEBANG_LANGUAGES: Record<string, SourceLanguage> = {
   ruby: 'ruby',
   php: 'php',
   perl: 'unknown',
+}
+
+/**
+ * Template dialects: files whose markup carries a host-language directive that no shipped
+ * grammar can parse (`<%= user.name %>` is not HTML and not JavaScript). They are admitted as
+ * text-only sources — BugPilot runs its text-tier rules on them and claims no syntax verdict.
+ * Admission is not support: nothing here analyses EJS, ERB, Handlebars, Mustache or Twig.
+ */
+export const TEMPLATE_EXTENSIONS: readonly string[] = ['ejs', 'erb', 'hbs', 'mustache', 'twig']
+
+/**
+ * The marker that lets a markup file be read as a template. `<%` opens an EJS or ERB tag in every
+ * form the templating engines use (`<%`, `<%_`, `<%-`, `<%=` and `<%#`).
+ */
+export function hasTemplateDirective(text: string): boolean {
+  return text.slice(0, 65_536).includes('<%')
 }
 
 export function extensionOf(name: string): string {
@@ -154,7 +176,12 @@ function sniffContent(text: string): SourceLanguage | null {
 export function detectLanguage(name: string, text: string): LanguageDetection {
   const ext = extensionOf(name)
   const byExt = BY_EXTENSION[ext]
-  if (byExt) return { language: byExt, source: 'extension' }
+  if (byExt) {
+    // A markup file that carries template directives is not the language its grammar expects.
+    // The name supplies the candidate and the content decides, exactly as for JSONC.
+    if (byExt === 'html' && hasTemplateDirective(text)) return { language: 'template', source: 'extension' }
+    return { language: byExt, source: 'extension' }
+  }
   const byBase = BY_BASENAME[basenameOf(name)]
   if (byBase) return { language: byBase, source: 'extension' }
   if (text.startsWith('#!')) {

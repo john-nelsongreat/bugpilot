@@ -27,6 +27,7 @@ export const LANGUAGE_LABELS: Record<SourceLanguage, string> = {
   xml: 'XML',
   html: 'HTML',
   css: 'CSS',
+  template: 'Template markup',
   markdown: 'Markdown',
   text: 'Plain text',
   unknown: 'Unrecognised file type',
@@ -65,6 +66,24 @@ export function tierAvailability(language: SourceLanguage): CoverageTier[] {
         available: true,
         ran: false,
         reason: 'Strict JSON.parse syntax check.',
+      },
+      {
+        tier: 'pattern',
+        available: true,
+        ran: false,
+        reason: 'BugPilot generic and secret pattern rules.',
+      },
+    ]
+  }
+
+  if (language === 'template') {
+    return [
+      {
+        tier: 'syntax',
+        available: false,
+        ran: false,
+        reason:
+          'No syntax engine runs on template files: the bundled HTML and JavaScript grammars cannot read <% %> directives, so the file is recorded as un-checked instead of reported on.',
       },
       {
         tier: 'pattern',
@@ -304,6 +323,11 @@ const BASE_NOT_CHECKED: Record<SourceLanguage, string[]> = {
   ],
   css: [
     'No CSS parsing, property, or compatibility checks.',
+    'Only generic text patterns and credential shapes were checked.',
+  ],
+  template: [
+    'No template language is analysed. EJS, ERB, Handlebars, Mustache and Twig are recognised so these files can be reported as un-checked honestly, not because they are supported.',
+    'Markup, partials, layout inheritance and the expressions inside <% %> tags are not parsed or evaluated.',
     'Only generic text patterns and credential shapes were checked.',
   ],
   markdown: [

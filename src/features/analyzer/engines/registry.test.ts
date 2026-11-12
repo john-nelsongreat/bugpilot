@@ -129,6 +129,31 @@ describe('engine language registry', () => {
     expect(ENGINES_NOT_RUN_REASON).toContain('built-in rules')
   })
 
+  it('gives template files no engine, and does not fall back to the HTML grammar', () => {
+    // Admission is not support: a .ejs file must reach the honest "not checked" path rather
+    // than the HTML grammar that produced the false positives this slice removes.
+    const detected = detectLanguage('views/index.ejs', '<!doctype html>\n<html><%= a %></html>\n')
+    expect(detected.language).toBe('template')
+    expect(hasDeepEngine(detected.language)).toBe(false)
+    expect(enginesFor('template')).toBeNull()
+    expect(grammarFor('template')).toBeNull()
+    expect(LANGUAGE_ENGINES.template).toBeUndefined()
+    expect(tierAvailability('template').find((tier) => tier.tier === 'syntax')?.available).toBe(false)
+    expect(tierAvailability('template').find((tier) => tier.tier === 'pattern')?.available).toBe(true)
+
+    // Both sides: the .html this file could have been misread as does have a grammar.
+    expect(hasDeepEngine('html')).toBe(true)
+    expect(tierAvailability('html').find((tier) => tier.tier === 'syntax')?.available).toBe(true)
+  })
+
+  it('lists the template limits without claiming analysis', () => {
+    const lines = NOT_CHECKED_BY_LANGUAGE.template
+    expect(lines?.length ?? 0).toBeGreaterThan(0)
+    const text = lines.join(' ')
+    expect(text).toMatch(/not/i)
+    expect(text).not.toMatch(/\b(compiles|runs the code|executes your code)\b/i)
+  })
+
   it('probes WebAssembly with a module that is valid but does nothing', () => {
     expect([...MINIMAL_WASM]).toEqual([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])
     expect(MINIMAL_WASM.byteLength).toBe(8)

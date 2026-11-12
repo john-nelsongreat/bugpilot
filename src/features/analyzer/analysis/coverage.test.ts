@@ -70,4 +70,45 @@ describe('coverage builder', () => {
     const [file] = buildCoverage([entry('src/app.js', 'x\n')], [], [analysis('src/app.js', [], ['Rule stopped early.'])])
     expect(file.notes).toContain('Rule stopped early.')
   })
+
+  it('records a template file as syntax-unchecked and says why in the tiers', () => {
+    const source = entry('views/index.ejs', '<!doctype html>\n<html><%= user.name %></html>\n')
+    const [file] = buildCoverage([source], [], [analysis(source.name, ['bugpilot/generic/todo-marker'])])
+
+    expect(file.language).toBe('template')
+    expect(file.languageLabel).toBe('Template markup')
+    const syntax = file.tiers.find((tier) => tier.tier === 'syntax')
+    expect(syntax?.available).toBe(false)
+    expect(syntax?.ran).toBe(false)
+    expect(syntax?.reason).toContain('<%')
+    expect(file.tiers.find((tier) => tier.tier === 'pattern')?.ran).toBe(true)
+  })
+
+  it('does not claim a grammar for a .html file that carries template directives', () => {
+    const marked = entry('pages/home.html', '<p>hi</p>\n<%= title %>\n')
+    const plain = entry('public/index.html', '<!doctype html>\n<p>hi</p>\n')
+    const coverage = buildCoverage(
+      [marked, plain],
+      [],
+      [analysis(marked.name, []), analysis(plain.name, [])],
+    )
+
+    expect(coverage[0].language).toBe('template')
+    expect(coverage[0].tiers.find((tier) => tier.tier === 'syntax')?.available).toBe(false)
+    expect(coverage[1].language).toBe('html')
+    expect(coverage[1].tiers.find((tier) => tier.tier === 'syntax')?.available).toBe(true)
+  })
+
+  it('carries a dialect reason as a note, never as a rule that was run', () => {
+    const reason = 'Treated as JSONC (JSON with comments), not strict JSON.'
+    const [file] = buildCoverage(
+      [entry('tsconfig.json', '{ // comment\n "a": 1\n}\n')],
+      [],
+      [analysis('tsconfig.json', [], [reason])],
+    )
+
+    expect(file.notes).toContain(reason)
+    expect(file.findings).toBe(0)
+    expect(file.tiers.find((tier) => tier.tier === 'syntax')?.ran).toBe(false)
+  })
 })
