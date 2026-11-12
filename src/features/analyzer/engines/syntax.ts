@@ -238,6 +238,88 @@ function findUnclosedOpener(text: string, beforeIndex: number, grammar: string):
   return stack.length > 0 ? stack[stack.length - 1] : null
 }
 
+// --- third location: the CSS dialect the bundled grammar cannot see ---
+
+/**
+ * The at-rules defined by the CSS standards track. These are the ones the grammar really
+ * implements, so a failure on a listed name stays a finding. Anything else that opens with
+ * `@` is a dialect extension point — Tailwind's `@source` and `@variant`, a preprocessor's
+ * `@extend`, whatever a framework invents next — and the grammar has no rule for it at all.
+ * Listing the standard names, rather than the dialect names, is what keeps this honest: the
+ * tolerance is open-ended, so it cannot rot into a per-framework whitelist.
+ */
+export const KNOWN_CSS_AT_RULES: ReadonlySet<string> = new Set([
+  'character-variant',
+  'container',
+  'counter-style',
+  'document',
+  'font-face',
+  'font-feature-values',
+  'font-palette-values',
+  'import',
+  'keyframes',
+  'layer',
+  'media',
+  'nest',
+  'namespace',
+  'ornaments',
+  'page',
+  'position-try',
+  'property',
+  'scope',
+  'starting-style',
+  'string',
+  'styleset',
+  'stylistic',
+  'supports',
+  'view-transition',
+])
+
+/** A `}` or `)` the grammar says is absent is a real mistake, whatever the line opens with. */
+const MISSING_CLOSERS = new Set(['}', ')', ']'])
+
+const AT_RULE_OPEN = /^\s*@(?:([A-Za-z][A-Za-z0-9-]*))/
+
+function dialectAtRuleOnLine(input: SyntaxScanInput, row: number): string | null {
+  const line = input.file.lines[row] ?? ''
+  const open = AT_RULE_OPEN.exec(line)
+  if (!open) return null
+  const name = open[1].toLowerCase().replace(/^-(?:moz|webkit|ms|o)-/, '')
+  return KNOWN_CSS_AT_RULES.has(name) ? null : `@${name}`
+}
+
+function cssDialectAtRule(input: SyntaxScanInput, region: ErrorRegion): string[] | null {
+  if (input.grammar !== 'css') return null
+  if (region.missing) {
+    const token = region.node.type.replace(/^MISSING\s*/, '').trim()
+    if (MISSING_CLOSERS.has(token)) return null
+  }
+  // Tolerate a failure only when *every* line it covers opens with an unknown at-rule. A
+  // region that reaches a line which does not is the grammar's confusion spilling into
+  // ordinary CSS — the measured case is a dialect line followed by an unclosed block, where
+  // one ERROR node covers both. Checking line by line keeps that mistake reportable while
+  // still accepting a file that uses several dialect at-rules in a row.
+  const names = new Set<string>()
+  for (let row = region.node.startPosition.row; row <= region.node.endPosition.row; row += 1) {
+    const name = dialectAtRuleOnLine(input, row)
+    if (name === null) return null
+    names.add(name)
+  }
+  return [...names]
+}
+
+function describeCssDialect(names: readonly string[]): string {
+  return (
+    `Treated as a CSS dialect, not a syntax error: ${names.join(', ')} ` +
+    (names.length === 1 ? 'is' : 'are') +
+    ' not defined by the CSS standards track, so the bundled CSS grammar has no rule for the line that opens with ' +
+    'them and no finding is claimed there. BugPilot tolerates every unknown at-rule for the same reason, not only ' +
+    'the ones a particular framework uses. Unbalanced braces, broken selectors and truncated files are still ' +
+    'reported, including in this file. A standards-only CSS parser still rejects these lines, so a build step that ' +
+    'is not dialect-aware will fail on them.'
+  )
+}
+
 export interface SyntaxScanInput {
   file: RuleFile
   root: SyntaxNode
@@ -280,14 +362,34 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
     }
   }
 
-  const first = regions[0].node
+  // Part 4: an unknown at-rule is a dialect, so it is set aside before the checks that
+  // decide whether the grammar understood the file at all. What is left is judged on its
+  // own merits: a broken selector or an unclosed brace after a `@source` line still reports.
+  const dialectNames: string[] = []
+  const reported: ErrorRegion[] = []
+  for (const region of regions) {
+    const dialect = cssDialectAtRule(input, region)
+    if (dialect) {
+      for (const name of dialect) {
+        if (!dialectNames.includes(name)) dialectNames.push(name)
+      }
+      continue
+    }
+    reported.push(region)
+  }
+  if (dialectNames.length > 0) notes.push(describeCssDialect(dialectNames.sort()))
+  if (reported.length === 0) {
+    return { hits: [], understood: true, errorRegions: regions.length, firstErrorIndex: null, notes }
+  }
+
+  const first = reported[0].node
   const covered = first.endIndex - first.startIndex
   if (first.startPosition.row === 0 && covered >= input.file.text.length * 0.7) {
     return {
       hits: [],
       understood: false,
       errorRegions: regions.length,
-      firstErrorIndex: regions[0].node.startIndex,
+      firstErrorIndex: reported[0].node.startIndex,
       notes: [
         'The grammar stopped understanding this file almost immediately (one error region covers most of it). That is usually the grammar, not the code, so no syntax finding is claimed.',
       ],
@@ -297,17 +399,17 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
   const cap = input.maxHits ?? MAX_SYNTAX_HITS_PER_FILE
   const hits: EngineHit[] = []
 
-  for (const region of regions) {
+  for (const region of reported) {
     if (hits.length >= cap) {
       notes.push(
-        `${regions.length - hits.length} more syntax error region(s) in this file are not listed; the first ${cap} are shown.`,
+        `${reported.length - hits.length} more syntax error region(s) in this file are not listed; the first ${cap} are shown.`,
       )
       break
     }
 
     const lineIndex = region.node.startPosition.row
     const token = firstToken(region.node)
-    const manyErrors = regions.length > 5
+    const manyErrors = reported.length > 5
 
     // Second location: when a delimiter or block keyword is still open at the error,
     // name the line that opened it. Kept out when it equals the finding line (it is
@@ -344,7 +446,7 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
     }
     if (manyErrors) {
       limitations.push(
-        `This file has ${regions.length} error regions; after that many, the parser's view of the rest of the file is unreliable and later positions are guesses.`,
+        `This file has ${reported.length} error regions; after that many, the parser's view of the rest of the file is unreliable and later positions are guesses.`,
       )
     }
 

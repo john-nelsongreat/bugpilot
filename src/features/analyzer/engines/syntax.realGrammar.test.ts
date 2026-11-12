@@ -290,4 +290,105 @@ describe('syntax findings against the shipped grammars', () => {
     expect(result.errorRegions).toBeGreaterThan(0)
     expect(result.notes.join(' ')).toContain('recorded as missing coverage instead of as a bug')
   })
+
+  /**
+   * Part 4: modern CSS ships at-rules the bundled grammar has never heard of. The tolerance is
+   * defined by what the standards track does NOT list, not by a table of framework names, so it
+   * cannot rot — and every shape below was read off the real parse tree, including the region
+   * counts, which prove the grammar really did fail rather than the file really being clean.
+   */
+  describe('CSS dialect tolerance', () => {
+    const cssSample = (): Sample => {
+      const sample = SAMPLES.find((one) => one.grammar === 'css')
+      if (!sample) throw new Error('css sample missing')
+      return sample
+    }
+
+    const DIALECT_SHAPES: readonly [string, string][] = [
+      ['@source glob', '@source "../src/**/*.{html,js}";\n.a { color: red; }\n'],
+      ['@source inline', '@source inline("{,sm:,md:,lg:}text-white");\n'],
+      ['@variant', '@variant hover:focus-within { .a { color: red; } }\n'],
+      ['@custom-variant', '@custom-variant dark (&:where(.dark, .dark *));\n'],
+      ['an at-rule nobody has heard of', '@foo bar baz;\n.a { color: red; }\n'],
+      ['indented dialect line', '  @custom-variant dark (&:where(.dark));\n'],
+      ['dialect after a real rule', '.a { color: red; }\n@source "../b/**/*.ts";\n'],
+      ['two dialect lines in a row', '@source "a";\n@utility b { .x { top: 0; } }\n'],
+    ]
+
+    it('tolerates each unknown at-rule shape the grammar cannot see', () => {
+      for (const [name, code] of DIALECT_SHAPES) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, name).toEqual([])
+        // The grammar did fail; the tolerance is what kept it from being called a bug.
+        expect(result.errorRegions, name).toBeGreaterThan(0)
+        expect(result.understood, name).toBe(true)
+        const note = result.notes.join(' ')
+        expect(note, name).toContain('Treated as a CSS dialect, not a syntax error')
+        expect(note, name).toContain('@')
+      }
+    })
+
+    it('names every dialect at-rule it set aside and says a strict parser still rejects it', () => {
+      const result = scan(cssSample(), DIALECT_SHAPES[7][1])
+      const note = result.notes.join(' ')
+      expect(note).toContain('@source, @utility are not defined by the CSS standards track')
+      expect(note).toContain('Unbalanced braces, broken selectors and truncated files are still')
+      expect(note).toContain('BugPilot tolerates every unknown at-rule for the same reason, not only')
+      expect(note).toContain('A standards-only CSS parser still rejects these lines')
+    })
+
+    it('still reports unbalanced braces, broken selectors and truncated files', () => {
+      const cases: [string, string, number][] = [
+        ['missing closing brace', '.a { color: red;\n', 1],
+        ['broken selector', '.a{{ color: red; }\n', 1],
+        ['truncated file', '.a { color: red; }\n.b { padd', 2],
+      ]
+      for (const [name, code, line] of cases) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, name).toHaveLength(1)
+        expect(result.hits[0]?.range.startLine, name).toBe(line)
+        expect(result.understood, name).toBe(true)
+        expect(result.notes.join(' '), name).not.toContain('Treated as a CSS dialect')
+      }
+    })
+
+    it('reports a real mistake that sits on the line after a dialect line', () => {
+      const result = scan(cssSample(), '@source "../src/*.html";\n.a{{ color: red; }\n')
+      expect(result.hits).toHaveLength(1)
+      const [hit] = result.hits
+      expect(hit?.ruleId).toBe('tree-sitter/syntax-error')
+      expect(hit?.range.startLine).toBe(2)
+      // Both halves are true here, so both halves are said.
+      expect(result.notes.join(' ')).toContain('Treated as a CSS dialect')
+    })
+
+    it('never tolerates a missing closer, even when the line opens with an unknown at-rule', () => {
+      // `@theme {` with no closing brace is a real defect, and brace counting is something
+      // the grammar can see regardless of whether it knows the at-rule.
+      const result = scan(cssSample(), '@theme {\n  --color-a: red;\n')
+      expect(result.hits).toHaveLength(1)
+      expect(result.hits[0]?.ruleId).toBe('tree-sitter/missing-node')
+      expect(result.notes.join(' ')).not.toContain('Treated as a CSS dialect')
+    })
+
+    it('enforces the at-rules the standard does define, so the tolerance is not a name whitelist', () => {
+      for (const code of ['@media (min-width: ) { .a { top: 0; } }\n', '@keyframes spin { 0% { top: 0; } 100% top: 1; }\n']) {
+        const result = scan(cssSample(), code)
+        expect(result.hits, code).toHaveLength(1)
+        expect(result.notes.join(' '), code).not.toContain('Treated as a CSS dialect')
+      }
+    })
+
+    it('records the limit it cannot clear: a dialect line fused to a later unclosed block', () => {
+      // The grammar wraps `@source "x";` and the unfinished `.a {` in one ERROR node, so the
+      // tolerance declines (the region reaches a non-dialect line) and the pre-existing
+      // whole-file collapse says the grammar gave up. No finding is claimed — this is the
+      // false negative the README has to state.
+      const result = scan(cssSample(), '@source "x";\n.a { color: red;\n')
+      expect(result.hits).toEqual([])
+      expect(result.understood).toBe(false)
+      expect(result.notes.join(' ')).not.toContain('Treated as a CSS dialect')
+      expect(result.notes.join(' ')).toContain('That is usually the grammar, not the code')
+    })
+  })
 })
