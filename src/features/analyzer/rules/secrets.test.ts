@@ -321,6 +321,42 @@ describe('secret rule: credential assignment false-positive guards', () => {
   })
 })
 
+describe('secret rule: credential assignment typed declaration', () => {
+  const id = 'bugpilot/secret/credential-assignment'
+
+  it('finds a Kotlin typed declaration', () => {
+    const [hit] = hits(id, 'Ledger.kt', `private val LEDGER_API_KEY: String = "${fakeAssignment}"\n`)
+    expect(hit).toBeDefined()
+    expect(hit.message).toMatch(/credential-like name/)
+    expect(hit.evidence[0].quote).not.toContain(fakeAssignment)
+  })
+
+  it('finds a Rust typed declaration whose type begins with an ampersand', () => {
+    const [hit] = hits(id, 'ledger.rs', `pub const ACCESS_TOKEN: &str = "${fakeAssignment}"\n`)
+    expect(hit).toBeDefined()
+    expect(hit.message).toMatch(/credential-like name/)
+    expect(hit.evidence[0].quote).not.toContain(fakeAssignment)
+  })
+
+  it('does not fire on a typed numeric limit', () => {
+    expect(hits(id, 'Ledger.kt', 'private val PASSWORD_MIN_LENGTH: Int = 12\n')).toHaveLength(0)
+  })
+
+  it('does not fire on a typed variable whose name carries a disqualified segment', () => {
+    expect(hits(id, 'Ledger.kt', `val apiKeyName: String = "service-account"\n`)).toHaveLength(0)
+  })
+
+  it('reports a typed declaration and a plain assignment identically', () => {
+    const quoted = hits(id, 'Ledger.kt', `API_KEY = "${fakeAssignment}"`)[0]
+    const typed = hits(id, 'Ledger.kt', `val API_KEY: String = "${fakeAssignment}"`)[0]
+    expect(typed).toBeDefined()
+    expect(typed?.message).toBe(quoted?.message)
+    expect(typed?.explanation).toBe(quoted?.explanation)
+    expect(typed?.fix.action).toBe(quoted?.fix.action)
+    expect(typed?.confidence.level).toBe(quoted?.confidence.level)
+  })
+})
+
 describe('secret rules on template dialects', () => {
   // Re-labelling a template as `template` must not cost it the pattern tier: the file is
   // reported as syntax-unchecked, and that is the only change. Both directions are tested,

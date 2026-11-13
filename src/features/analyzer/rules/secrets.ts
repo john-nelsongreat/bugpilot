@@ -65,6 +65,12 @@ const CREDENTIAL_KEY_RE = new RegExp(`\\b${CREDENTIAL_KEY}\\b`, 'i')
 // label-like name (password_field_label, PASSWORD_MIN_LENGTH, secret_santa, header names).
 const QUOTED_ASSIGNMENT =
   new RegExp(`(?:^|[^A-Za-z0-9_$])(["']?)([A-Za-z_$][A-Za-z0-9_$]*)(["']?)[ \\t]*[:=][= \\t]*(["'])([^"'\\n]{8,})\\4`, 'gi')
+// `NAME: Type = "value"` — typed declarations put a type between the credential name and the
+// operator, so the identifier cannot sit next to it. Same guards apply. The `&*'` in the type's
+// first character class is not decoration: without it Rust's `&str` opens the type with `&` and
+// the whole match silently fails, while Kotlin, Swift, Scala and Python annotations still pass.
+const TYPED_ASSIGNMENT =
+  new RegExp(`(?:^|[^A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]*:[ \\t]*[A-Za-z0-9_&*'][A-Za-z0-9_&*'.<>,?\\[\\] ]{0,40}?[ \\t]*=[ \\t]*(["'])([^"'\\n]{8,})\\2`, 'gi')
 const ENV_ASSIGNMENT =
   new RegExp(`^[ \\t]*(?:export[ \\t]+)?([A-Za-z_$][A-Za-z0-9_$.]*)[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
 
@@ -347,6 +353,49 @@ const assignmentRule: AnalyzerRule = {
       const full = match[0]
       const identifierAt = (match.index ?? 0) + full.indexOf(name)
       if (insideStringContext(file.text, identifierAt, match[1], match[3])) continue
+      const entropy = shannonEntropy(value)
+      if (entropy < 3) continue
+      const index = identifierAt
+      const valueAt = full.lastIndexOf(value)
+      const redacted = `${full.slice(0, valueAt)}${redactSecret(value)}${full.slice(valueAt + value.length)}`
+      const lineIndex = lineIndexOf(file, index)
+      hits.push({
+        range: rangeFromOffsets(file.lineStarts, index, index + full.length - full.indexOf(name)),
+        message: 'A credential-like name is assigned a literal value.',
+        explanation:
+          'The assignment gives a password, secret, token or API key a quoted literal value. Values like this end up in source control, screenshots and build logs. A lookup such as an environment variable or a vault read is not reported.',
+        confidence: {
+          level: entropy >= 3.5 && value.length >= 16 ? 'high' : 'medium',
+          reason: `The literal is ${value.length} characters with ${entropy.toFixed(1)} bits of entropy per character and is not a known placeholder.`,
+        },
+        evidence: [lineEvidence(file, lineIndex, quoteLine(redacted))],
+        fix: manualFix(
+          'Replace the literal with an environment lookup or a secret-manager read, then rotate the value.',
+          'The assignment on this line. Renaming the key is not enough; the value must stop being tracked.',
+          'manual-only',
+          'BugPilot cannot know whether the value is still valid or where it is deployed, so it never edits it.',
+        ),
+        verificationSteps: SECRET_VERIFICATION,
+        limitations: SECRET_LIMITATIONS,
+      })
+    }
+
+    // Twin of the QUOTED_ASSIGNMENT loop: same four guards, same order, same inline hit
+    // literal, so a typed hit is indistinguishable from a quoted one except in the line it
+    // quotes. `insideStringContext` receives two empty quotes because the typed form is
+    // always an unquoted identifier — passing `match[1]`/`match[3]` here (which are the
+    // name and the secret, not the two quote characters) would flip the guard's early
+    // return and silently disable prose detection.
+    TYPED_ASSIGNMENT.lastIndex = 0
+    for (const match of file.text.matchAll(TYPED_ASSIGNMENT)) {
+      if (hits.length >= MAX_RULE_HITS) break
+      const name = match[1]
+      const value = match[3]
+      if (value.length < 8 || isPlaceholderValue(value)) continue
+      if (!isCredentialIdentifier(name)) continue
+      const full = match[0]
+      const identifierAt = (match.index ?? 0) + full.indexOf(name)
+      if (insideStringContext(file.text, identifierAt, '', '')) continue
       const entropy = shannonEntropy(value)
       if (entropy < 3) continue
       const index = identifierAt
