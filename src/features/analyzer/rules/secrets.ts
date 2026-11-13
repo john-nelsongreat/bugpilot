@@ -437,7 +437,7 @@ const assignmentRule: AnalyzerRule = {
     // the identifier and `match[5]` is the secret. Copying `match[1]`/`match[3]` from the
     // typed loop (where they are the identifier and the secret) would instead pass the two
     // key-quote characters. `insideStringContext` here receives the real two quotes, exactly
-    // as the QUOTED loop does at :349, so a quoted key is treated as data.
+    // as the QUOTED_ASSIGNMENT loop does, so a quoted key is treated as data.
     MAPPING_ASSIGNMENT.lastIndex = 0
     for (const match of file.text.matchAll(MAPPING_ASSIGNMENT)) {
       if (hits.length >= MAX_RULE_HITS) break
