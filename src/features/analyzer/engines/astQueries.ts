@@ -592,4 +592,14 @@ export const AST_RULES: readonly AstRuleDefinition[] = [
       'The whole method body is read as one text, so a multi-statement Ruby builder is reported at its `def` line.',
     ],
   }),
+  // 31 — C++: an empty handler. Appended last on purpose — FIXTURES in
+  // astQueries.realGrammar.test.ts is index-matched to this array, so inserting a rule in the
+  // middle would silently renumber every fixture comment after it.
+  define(EMPTY_CATCH, {
+    grammar: 'cpp',
+    query: '(catch_clause body: (compound_statement) @body)',
+    require: ['body'],
+    anchor: 'body',
+    checks: [{ capture: 'body', pattern: '^\\{\\s*\\}$', when: 'must' }],
+  }),
 ]

@@ -782,7 +782,7 @@ If the probe fails, the exact sentence **"Deep analysis engines are unavailable 
 | --- | --- | --- | --- | --- | --- |
 | `tree-sitter/syntax-error` | syntax | High / medium (high when only one region) | tree-sitter | 16 grammars, SQL and YAML excluded from reporting, and an unknown CSS at-rule set aside with a note (see [Dialects that are tolerated](#dialects-that-are-tolerated-and-what-that-hides)) | An `ERROR` node: the grammar could not fit the text into any rule. Position and span come from the tree; the cause does not. |
 | `tree-sitter/missing-node` | syntax | High / high | tree-sitter | as above | A `MISSING` node: the grammar names the token it expected and where it wanted it. |
-| `bugpilot/ast/empty-catch` | pattern | Medium / high | tree-sitter query | Python, Java, C#, PHP, Ruby | A handler whose body is genuinely empty — not one whose body is a comment. |
+| `bugpilot/ast/empty-catch` | pattern | Medium / high | tree-sitter query | Python, Java, C++, C#, PHP, Ruby | A handler whose body is genuinely empty — not one whose body is a comment. |
 | `bugpilot/ast/python-bare-except` | pattern | Medium / high | tree-sitter query | Python | `except:` with no exception expression. |
 | `bugpilot/ast/unreachable-code` | pattern | Low / medium | tree-sitter query | Python, Java, C, C++, C#, Go, PHP, Ruby | A statement after an unconditional `return`/`break`/`continue`/`raise`/`exit` in the same block. |
 | `bugpilot/ast/assignment-in-condition` | pattern | High / medium | tree-sitter query | C, C++, PHP | An assignment used as the controlling expression of `if`/`while`/`for`. |

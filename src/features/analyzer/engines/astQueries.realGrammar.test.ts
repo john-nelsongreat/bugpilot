@@ -289,6 +289,15 @@ const FIXTURES: readonly Fixture[] = [
       'def build_query_label(ledger_name)\n  "Ledger for " + ledger_name\nend\n',
     ],
   },
+  // 31 — C++ empty handler.
+  {
+    query: '(catch_clause body: (compound_statement) @body)',
+    positive: 'class A {\n    void m() {\n        try { read(); } catch (const std::exception& e) { }\n    }\n}\n',
+    negatives: [
+      'class A {\n    void m() {\n        try { read(); } catch (const std::exception& e) { log(e.what()); }\n    }\n}\n',
+      'class A {\n    void m() {\n        try { read(); } catch (const std::exception& e) { /* ignored on purpose */ }\n    }\n}\n',
+    ],
+  },
 ]
 
 const grammars = new Map<GrammarId, Language>()
@@ -405,6 +414,17 @@ describe('AST queries against the shipped grammars', () => {
       'package main\n\nfunc m(db *sql.DB, id int) {\n\trows, _ := db.Query(fmt.Sprintf("SELECT * FROM t WHERE id = %d", id))\n\t_ = rows\n}\n',
     )
     expect(formatted.hits.length).toBeGreaterThan(0)
+
+    // C++ also catches everything, and the empty body may be written across lines.
+    const cppEmpty = AST_RULES.find(
+      (candidate) => candidate.id === 'bugpilot/ast/empty-catch' && candidate.grammar === 'cpp',
+    )
+    if (!cppEmpty) throw new Error('The C++ empty-handler rule is missing.')
+    const catchAll = analyse(
+      cppEmpty,
+      'class A {\n    void m() {\n        try {\n            read();\n        } catch (...) {\n        }\n    }\n}\n',
+    )
+    expect(catchAll.hits.length).toBeGreaterThan(0)
   })
 
   it('writes a finding that quotes the tree and offers no automatic edit', () => {
