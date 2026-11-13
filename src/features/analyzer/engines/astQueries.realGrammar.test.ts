@@ -244,6 +244,51 @@ const FIXTURES: readonly Fixture[] = [
     positive: 'rows = conn.query("SELECT * FROM t WHERE id = " + id)\n',
     negatives: ['rows = conn.query("SELECT id FROM t")\n'],
   },
+  // 26 — Java query builder.
+  {
+    query: '(method_declaration name: (identifier) @name body: (block (return_statement (_) @val)))',
+    positive: 'class A {\n    public static String buildQueryCurrency(String ledgerName) {\n        return "SELECT * FROM ledger WHERE name = " + ledgerName;\n    }\n}\n',
+    negatives: [
+      'class A {\n    public static String buildQueryCategory(String ledgerName) {\n        return "SELECT * FROM ledger WHERE name = ?";\n    }\n}\n',
+      'class A {\n    public static String buildQueryLabel(String ledgerName) {\n        return "Ledger for " + ledgerName;\n    }\n}\n',
+    ],
+  },
+  // 27 — C# query builder.
+  {
+    query: '(method_declaration name: (identifier) @name body: (block (return_statement (_) @val)))',
+    positive: 'class A {\n    public static string BuildQueryCurrency(string ledgerName) {\n        return "SELECT * FROM ledger WHERE name = " + ledgerName;\n    }\n}\n',
+    negatives: [
+      'class A {\n    public static string BuildQueryCategory(string ledgerName) {\n        return "SELECT * FROM ledger WHERE name = ?";\n    }\n}\n',
+      'class A {\n    public static string BuildQueryLabel(string ledgerName) {\n        return "Ledger for " + ledgerName;\n    }\n}\n',
+    ],
+  },
+  // 28 — PHP query builder.
+  {
+    query: '(function_definition name: (name) @name body: (compound_statement (return_statement (_) @val)))',
+    positive: '<?php\nfunction build_query_currency(string $ledgerName): string {\n    return "SELECT * FROM ledger WHERE name = " . $ledgerName;\n}\n',
+    negatives: [
+      '<?php\nfunction build_query_category(string $ledgerName): string {\n    return "SELECT * FROM ledger WHERE name = ?";\n}\n',
+      '<?php\nfunction build_query_label(string $ledgerName): string {\n    return "Ledger for " . $ledgerName;\n}\n',
+    ],
+  },
+  // 29 — Go query builder.
+  {
+    query: '(function_declaration name: (identifier) @name body: (block (statement_list (return_statement (expression_list (_) @val)))))',
+    positive: 'func BuildQueryCurrency(ledgerName string) string {\n\treturn "SELECT * FROM ledger WHERE name = " + ledgerName\n}\n',
+    negatives: [
+      'func BuildQueryCategory(ledgerName string) string {\n\treturn "SELECT * FROM ledger WHERE name = ?"\n}\n',
+      'func BuildQueryLabel(ledgerName string) string {\n\treturn "Ledger for " + ledgerName\n}\n',
+    ],
+  },
+  // 30 — Ruby query builder: the last expression of the method is the query text.
+  {
+    query: '(method name: (identifier) @name body: (_) @val)',
+    positive: 'def build_query_currency(ledger_name)\n  "SELECT * FROM ledger WHERE name = #{ledger_name}"\nend\n',
+    negatives: [
+      'def build_query_category(ledger_name)\n  "SELECT * FROM ledger WHERE name = ?"\nend\n',
+      'def build_query_label(ledger_name)\n  "Ledger for " + ledger_name\nend\n',
+    ],
+  },
 ]
 
 const grammars = new Map<GrammarId, Language>()

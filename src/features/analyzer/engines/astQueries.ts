@@ -443,4 +443,153 @@ export const AST_RULES: readonly AstRuleDefinition[] = [
       },
     ],
   }),
+  // 26 — Java: a method whose own name says query builds its text instead of receiving it.
+  define(SQL_BUILD, {
+    grammar: 'java',
+    query: '(method_declaration name: (identifier) @name body: (block (return_statement (_) @val)))',
+    require: ['name', 'val'],
+    anchor: 'val',
+    checks: [
+      { capture: 'name', pattern: '[Qq]uery|[Ss][Qq][Ll]', when: 'must' },
+      {
+        capture: 'val',
+        pattern:
+          '[Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee]',
+        when: 'must',
+      },
+      {
+        capture: 'val',
+        pattern: '"[^"]*"\\s*\\+|\\+\\s*"|"\\s*\\.format\\(|%s"\\s*%|\\+\\s*[A-Za-z_$]',
+        when: 'must',
+      },
+    ],
+    message: 'The query returned by @name@ is built by concatenation or interpolation: @val@',
+    explanation:
+      'The parse tree shows a function whose own name presents it as a query builder, returning a string expression rather than a plain literal: `+`, `.format()` or a `%s` template. That shape is how SQL injection normally arrives, and it is also how a legitimate dynamic table or column name is built.',
+    limitations: [
+      'Only a function whose name contains `query` or `sql` is considered, so a builder named something else is invisible to this rule.',
+      'The returned expression is read as written: SQL assembled into a variable earlier in the function, or in another file, is not detected.',
+      'One file is analysed at a time, so BugPilot cannot see whether the interpolated part is user input or a constant.',
+      'Column, table and ORDER BY names cannot be bound as parameters, so some of these uses are correct and only need review.',
+      'Only a `return` written directly inside the method body is read; text assembled inside an `if` or loop body is not reported.',
+    ],
+  }),
+  // 27 — C#: same builder shape as Java, with C# interpolation and .Format.
+  define(SQL_BUILD, {
+    grammar: 'c_sharp',
+    query: '(method_declaration name: (identifier) @name body: (block (return_statement (_) @val)))',
+    require: ['name', 'val'],
+    anchor: 'val',
+    checks: [
+      { capture: 'name', pattern: '[Qq]uery|[Ss][Qq][Ll]', when: 'must' },
+      {
+        capture: 'val',
+        pattern:
+          '[Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee]',
+        when: 'must',
+      },
+      {
+        capture: 'val',
+        pattern: '"[^"]*"\\s*\\+|\\+\\s*"|\\$"[^"]*\\{|"\\s*\\.Format\\(',
+        when: 'must',
+      },
+    ],
+    message: 'The query returned by @name@ is built by concatenation or interpolation: @val@',
+    explanation:
+      'The parse tree shows a function whose own name presents it as a query builder, returning a string expression rather than a plain literal: `+`, `$"…{…}"` interpolation or `.Format()`. That shape is how SQL injection normally arrives, and it is also how a legitimate dynamic table or column name is built.',
+    limitations: [
+      'Only a function whose name contains `query` or `sql` is considered, so a builder named something else is invisible to this rule.',
+      'The returned expression is read as written: SQL assembled into a variable earlier in the function, or in another file, is not detected.',
+      'One file is analysed at a time, so BugPilot cannot see whether the interpolated part is user input or a constant.',
+      'Column, table and ORDER BY names cannot be bound as parameters, so some of these uses are correct and only need review.',
+      'Only a `return` written directly inside the method body is read; text assembled inside an `if` or loop body is not reported.',
+    ],
+  }),
+  // 28 — PHP: a user function returning a dotted-together query.
+  define(SQL_BUILD, {
+    grammar: 'php',
+    query: '(function_definition name: (name) @name body: (compound_statement (return_statement (_) @val)))',
+    require: ['name', 'val'],
+    anchor: 'val',
+    checks: [
+      { capture: 'name', pattern: '[Qq]uery|[Ss][Qq][Ll]', when: 'must' },
+      {
+        capture: 'val',
+        pattern:
+          '[Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee]',
+        when: 'must',
+      },
+      { capture: 'val', pattern: '["\'][^"\']*["\']\\s*\\.|\\.\\s*["\']|\\$\\{', when: 'must' },
+    ],
+    message: 'The query returned by @name@ is built by concatenation or interpolation: @val@',
+    explanation:
+      'The parse tree shows a function whose own name presents it as a query builder, returning a string expression rather than a plain literal: the `.` concatenating operator or `"…${…}"` interpolation. That shape is how SQL injection normally arrives, and it is also how a legitimate dynamic table or column name is built.',
+    limitations: [
+      'Only a function whose name contains `query` or `sql` is considered, so a builder named something else is invisible to this rule.',
+      'The returned expression is read as written: SQL assembled into a variable earlier in the function, or in another file, is not detected.',
+      'One file is analysed at a time, so BugPilot cannot see whether the interpolated part is user input or a constant.',
+      'Column, table and ORDER BY names cannot be bound as parameters, so some of these uses are correct and only need review.',
+      'Only a `return` written directly inside the function body is read; text assembled inside a branch or loop is not reported.',
+    ],
+  }),
+  // 29 — Go: a function returning a concatenated query. The statements of a Go block sit inside
+  // statement_list, and a return's value inside expression_list; both levels are part of the query.
+  define(SQL_BUILD, {
+    grammar: 'go',
+    query:
+      '(function_declaration name: (identifier) @name body: (block (statement_list (return_statement (expression_list (_) @val)))))',
+    require: ['name', 'val'],
+    anchor: 'val',
+    checks: [
+      { capture: 'name', pattern: '[Qq]uery|[Ss][Qq][Ll]', when: 'must' },
+      {
+        capture: 'val',
+        pattern:
+          '[Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee]',
+        when: 'must',
+      },
+      { capture: 'val', pattern: '"[^"]*"\\s*\\+|\\+\\s*"|fmt\\.Sprintf\\(', when: 'must' },
+    ],
+    message: 'The query returned by @name@ is built by concatenation or interpolation: @val@',
+    explanation:
+      'The parse tree shows a function whose own name presents it as a query builder, returning a string expression rather than a plain literal: `+` or `fmt.Sprintf`. That shape is how SQL injection normally arrives, and it is also how a legitimate dynamic table or column name is built.',
+    limitations: [
+      'Only a function whose name contains `query` or `sql` is considered, so a builder named something else is invisible to this rule.',
+      'The returned expression is read as written: SQL assembled into a variable earlier in the function, or in another file, is not detected.',
+      'One file is analysed at a time, so BugPilot cannot see whether the interpolated part is user input or a constant.',
+      'Column, table and ORDER BY names cannot be bound as parameters, so some of these uses are correct and only need review.',
+      'Go nests statements in a block, so only a `return` written directly in the function body is read.',
+    ],
+  }),
+  // 30 — Ruby: the last expression of a method is its return value, so the body itself is read.
+  define(SQL_BUILD, {
+    grammar: 'ruby',
+    query: '(method name: (identifier) @name body: (_) @val)',
+    require: ['name', 'val'],
+    anchor: 'val',
+    checks: [
+      { capture: 'name', pattern: '[Qq]uery|[Ss][Qq][Ll]', when: 'must' },
+      {
+        capture: 'val',
+        pattern:
+          '[Ss][Ee][Ll][Ee][Cc][Tt]|[Ii][Nn][Ss][Ee][Rr][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]|[Dd][Ee][Ll][Ee][Tt][Ee]',
+        when: 'must',
+      },
+      {
+        capture: 'val',
+        pattern: '["\'][^"\']*["\']\\s*\\+|\\+\\s*["\']|"[^"]*#\\{[^}]*\\}|%\\{|\\.format\\(',
+        when: 'must',
+      },
+    ],
+    message: 'The query returned by @name@ is built by concatenation or interpolation: @val@',
+    explanation:
+      'The parse tree shows a method whose own name presents it as a query builder, whose body evaluates to a string expression rather than a plain literal: `+`, `"…#{…}"` interpolation or `%{…}`. That shape is how SQL injection normally arrives, and it is also how a legitimate dynamic table or column name is built.',
+    limitations: [
+      'Only a method whose name contains `query` or `sql` is considered, so a builder named something else is invisible to this rule.',
+      'The returned expression is read as written: SQL assembled into a variable earlier in the function, or in another file, is not detected.',
+      'One file is analysed at a time, so BugPilot cannot see whether the interpolated part is user input or a constant.',
+      'Column, table and ORDER BY names cannot be bound as parameters, so some of these uses are correct and only need review.',
+      'The whole method body is read as one text, so a multi-statement Ruby builder is reported at its `def` line.',
+    ],
+  }),
 ]
