@@ -71,6 +71,12 @@ const QUOTED_ASSIGNMENT =
 // the whole match silently fails, while Kotlin, Swift, Scala and Python annotations still pass.
 const TYPED_ASSIGNMENT =
   new RegExp(`(?:^|[^A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]*:[ \\t]*[A-Za-z0-9_&*'][A-Za-z0-9_&*'.<>,?\\[\\] ]{0,40}?[ \\t]*=[ \\t]*(["'])([^"'\\n]{8,})\\2`, 'gi')
+// `'key' => 'value'` — PHP and Ruby association syntax. The key quotes are required, not
+// optional: that is what keeps JS/TS arrow bodies (`apiKey => "…"`) out of a Critical rule. The two
+// quote groups are passed to insideStringContext exactly as QUOTED_ASSIGNMENT does, so a quoted key is
+// treated as data, not as prose.
+const MAPPING_ASSIGNMENT =
+  new RegExp(`(?:^|[^A-Za-z0-9_$])(["'])([A-Za-z_$][A-Za-z0-9_$]*)(["'])[ \\t]*=>[ \\t]*(["'])([^"'\\n]{8,})\\4`, 'gi')
 const ENV_ASSIGNMENT =
   new RegExp(`^[ \\t]*(?:(?:export|ENV|ARG)[ \\t]+)?([A-Za-z_$][A-Za-z0-9_$.]*)[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
 
@@ -340,7 +346,7 @@ const assignmentRule: AnalyzerRule = {
   severity: 'Critical',
   languages: ALL_TEXT_LANGUAGES,
   description:
-    'Finds password, secret, token and API-key assignments whose value is a literal string, including typed declarations (`KEY: String = "…"`) and Dockerfile `ENV`/`ARG` lines. A name ending in a location word such as `_FILE` or `_PATH` is treated as a location, not a secret.',
+    'Finds password, secret, token and API-key assignments whose value is a literal string, including typed declarations (`KEY: String = "…"`) and Dockerfile `ENV`/`ARG` lines and PHP/Ruby `=>` associations with a quoted key. A name ending in a location word such as `_FILE` or `_PATH` is treated as a location, not a secret.',
   check: (file) => {
     const hits: RuleHit[] = []
 
@@ -397,6 +403,51 @@ const assignmentRule: AnalyzerRule = {
       const full = match[0]
       const identifierAt = (match.index ?? 0) + full.indexOf(name)
       if (insideStringContext(file.text, identifierAt, '', '')) continue
+      const entropy = shannonEntropy(value)
+      if (entropy < 3) continue
+      const index = identifierAt
+      const valueAt = full.lastIndexOf(value)
+      const redacted = `${full.slice(0, valueAt)}${redactSecret(value)}${full.slice(valueAt + value.length)}`
+      const lineIndex = lineIndexOf(file, index)
+      hits.push({
+        range: rangeFromOffsets(file.lineStarts, index, index + full.length - full.indexOf(name)),
+        message: 'A credential-like name is assigned a literal value.',
+        explanation:
+          'The assignment gives a password, secret, token or API key a quoted literal value. Values like this end up in source control, screenshots and build logs. A lookup such as an environment variable or a vault read is not reported.',
+        confidence: {
+          level: entropy >= 3.5 && value.length >= 16 ? 'high' : 'medium',
+          reason: `The literal is ${value.length} characters with ${entropy.toFixed(1)} bits of entropy per character and is not a known placeholder.`,
+        },
+        evidence: [lineEvidence(file, lineIndex, quoteLine(redacted))],
+        fix: manualFix(
+          'Replace the literal with an environment lookup or a secret-manager read, then rotate the value.',
+          'The assignment on this line. Renaming the key is not enough; the value must stop being tracked.',
+          'manual-only',
+          'BugPilot cannot know whether the value is still valid or where it is deployed, so it never edits it.',
+        ),
+        verificationSteps: SECRET_VERIFICATION,
+        limitations: SECRET_LIMITATIONS,
+      })
+    }
+
+    // Twin of the QUOTED_ASSIGNMENT loop for PHP/Ruby `=>` associations. Same four guards,
+    // same order, same inline hit literal, so a mapping hit is indistinguishable from a
+    // quoted hit except in the line it quotes. Group numbering trap: in this regex the
+    // groups are open-quote / name / close-quote / value-quote / value, so `match[2]` is
+    // the identifier and `match[5]` is the secret. Copying `match[1]`/`match[3]` from the
+    // typed loop (where they are the identifier and the secret) would instead pass the two
+    // key-quote characters. `insideStringContext` here receives the real two quotes, exactly
+    // as the QUOTED loop does at :349, so a quoted key is treated as data.
+    MAPPING_ASSIGNMENT.lastIndex = 0
+    for (const match of file.text.matchAll(MAPPING_ASSIGNMENT)) {
+      if (hits.length >= MAX_RULE_HITS) break
+      const name = match[2]
+      const value = match[5]
+      if (value.length < 8 || isPlaceholderValue(value)) continue
+      if (!isCredentialIdentifier(name)) continue
+      const full = match[0]
+      const identifierAt = (match.index ?? 0) + full.indexOf(name)
+      if (insideStringContext(file.text, identifierAt, match[1], match[3])) continue
       const entropy = shannonEntropy(value)
       if (entropy < 3) continue
       const index = identifierAt

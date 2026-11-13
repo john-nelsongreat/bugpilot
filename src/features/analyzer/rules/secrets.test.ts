@@ -383,6 +383,79 @@ describe('secret rule: credential assignment Dockerfile ENV and location names',
   })
 })
 
+describe('secret rule: credential assignment mapping operator', () => {
+  // The corpus's 44 `.rb` files use symbol keys (`:api_key => 'v'`), which the narrow
+  // quoted-key form deliberately does not reach. The Ruby row below is therefore
+  // synthetic — it exercises real Ruby syntax, not a Ruby finding the scan can see today.
+  const id = 'bugpilot/secret/credential-assignment'
+
+  it('finds a PHP association array literal', () => {
+    const [hit] = hits(id, 'config.php', `<?php\n$config = ['api_key' => '${fakeAssignment}'];\n`)
+    expect(hit).toBeDefined()
+    expect(hit.message).toMatch(/credential-like name/)
+    expect(hit.evidence[0].quote).not.toContain(fakeAssignment)
+  })
+
+  it('finds a Ruby hash rocket with a double-quoted key', () => {
+    const [hit] = hits(id, 'ledger.rb', `CREDENTIALS = { "access_token" => "${fakeAssignment}" }\n`)
+    expect(hit).toBeDefined()
+    expect(hit.evidence[0].quote).not.toContain(fakeAssignment)
+  })
+
+  it('reports a mapping and a plain assignment identically', () => {
+    const plain = hits(id, 'Ledger.kt', `API_KEY = "${fakeAssignment}"`)[0]
+    const mapped = hits(id, 'ledger.php', `<?php\n$x = ['api_key' => '${fakeAssignment}'];\n`)[0]
+    expect(plain).toBeDefined()
+    expect(mapped).toBeDefined()
+    expect(mapped?.message).toBe(plain?.message)
+    expect(mapped?.explanation).toBe(plain?.explanation)
+    expect(mapped?.fix?.explanation).toBe(plain?.fix?.explanation)
+    expect(mapped?.confidence.level).toBe(plain?.confidence.level)
+  })
+
+  it('reports a JSON key only once, not twice', () => {
+    expect(hits(id, 'ledger.json', `{"api_key": "${fakeAssignment}"}\n`)).toHaveLength(1)
+  })
+
+  it('does not fire on a JS arrow function whose parameter is credential-shaped', () => {
+    expect(
+      hits(id, 'ledger.js', 'const mask = (apiKey) => "redacted-value"\n'),
+    ).toHaveLength(0)
+  })
+
+  it('does not fire on a TS single-parameter arrow body', () => {
+    expect(
+      hits(id, 'ledger.ts', `const f = secret => "${fakeAssignment}"\n`),
+    ).toHaveLength(0)
+  })
+
+  it('does not fire on a mapping whose value is a known placeholder', () => {
+    expect(hits(id, 'config.php', `<?php\n$x = ['api_key' => 'your-key-here'];\n`)).toHaveLength(0)
+  })
+
+  it('does not fire on a mapping whose key carries a disqualified segment', () => {
+    expect(
+      hits(id, 'config.php', `<?php\n$x = ['password_field_label' => '${fakeAssignment}'];\n`),
+    ).toHaveLength(0)
+  })
+
+  it('does not fire on a mapping whose value is shorter than 8 characters', () => {
+    expect(hits(id, 'config.php', `<?php\n$x = ['api_key' => 'short'];\n`)).toHaveLength(0)
+  })
+
+  it('does not fire on a Scala hash literal (the arrow is ->, not =>)', () => {
+    expect(
+      hits(id, 'ledger.scala', `val m = Map("client_secret" -> "${fakeAssignment}")\n`),
+    ).toHaveLength(0)
+  })
+
+  it('does not fire on a Rust match arm (no key quotes)', () => {
+    expect(
+      hits(id, 'ledger.rs', 'match state { Secret => "aaaaaaaaaaaaaaaa", _ => "" }\n'),
+    ).toHaveLength(0)
+  })
+})
+
 describe('secret rules on template dialects', () => {
   // Re-labelling a template as `template` must not cost it the pattern tier: the file is
   // reported as syntax-unchecked, and that is the only change. Both directions are tested,
