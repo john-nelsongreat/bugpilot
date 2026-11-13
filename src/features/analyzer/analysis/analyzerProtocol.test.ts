@@ -44,6 +44,20 @@ function makeScope(): FakeScope {
 
 const limits = DEFAULT_ANALYSIS_LIMITS
 
+// Observe worker completion by polling the posted 'done' messages instead of betting on a fixed
+// wait; the 5000ms ceiling only guards a hang, and the unchanged assertions run once done is seen.
+function waitForDone(fake: FakeScope, count = 1, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      if (fake.posted.filter((message) => message.type === 'done').length >= count) resolve()
+      else if (Date.now() - started > timeoutMs) reject(new Error('analyzer worker never posted done'))
+      else setTimeout(poll, 0)
+    }
+    poll()
+  })
+}
+
 describe('analyzer worker protocol', () => {
   it('answers an analysis request with per-file findings', async () => {
     const fake = makeScope()
@@ -55,7 +69,7 @@ describe('analyzer worker protocol', () => {
       entries: [entry('src/app.js', '// TODO: tidy\n'), entry('data/bad.json', '{"a":1,}')],
       limits,
     })
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    await waitForDone(fake)
 
     const done = fake.posted.filter((message) => message.type === 'done') as unknown as Array<{
       id: number
@@ -75,7 +89,7 @@ describe('analyzer worker protocol', () => {
     startAnalyzerWorker(fake.scope)
 
     fake.dispatched({ type: 'analyze', id: 2, entries: [entry('src/a.js', 'x\n'), entry('src/b.js', 'y\n')], limits })
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    await waitForDone(fake)
 
     const types = fake.posted.map((message) => message.type)
     expect(types).toContain('progress')
@@ -90,7 +104,7 @@ describe('analyzer worker protocol', () => {
 
     const many = Array.from({ length: 1_000 }, (_, index) => entry(`src/f${index}.js`, '// TODO: x\nconst a = 1;\n'))
     fake.dispatched({ type: 'analyze', id: 5, entries: many, limits })
-    await new Promise((resolve) => setTimeout(resolve, 400))
+    await waitForDone(fake)
 
     const progress = fake.posted.filter((message) => message.type === 'progress') as unknown as Array<{
       progress: { filesDone: number; filesTotal: number }
@@ -121,7 +135,7 @@ describe('analyzer worker protocol', () => {
       limits,
     })
     fake.dispatched({ type: 'cancel', id: 3 })
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDone(fake)
 
     const done = fake.posted.filter((message) => message.type === 'done') as unknown as Array<{
       result: { files: unknown[]; cancelled: boolean }
@@ -142,7 +156,7 @@ describe('analyzer worker protocol', () => {
       limits,
     })
     fake.dispatched({ type: 'analyze', id: 2, entries: [entry('src/c.js', 'z\n')], limits })
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDone(fake, 2)
 
     const done = fake.posted.filter((message) => message.type === 'done') as unknown as Array<{
       id: number
@@ -160,9 +174,10 @@ describe('analyzer worker protocol', () => {
     startAnalyzerWorker(fake.scope)
 
     fake.dispatched({ type: 'analyze', id: 4, entries: [entry('src/a.js', 'x\n')], limits })
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await waitForDone(fake)
     fake.dispatched({ type: 'cancel', id: 4 })
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    // Cancel of a finished job is a no-op: one macrotask to flush the handler, then assert NO 2nd 'done'.
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(fake.posted.filter((message) => message.type === 'done')).toHaveLength(1)
   })
