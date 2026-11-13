@@ -13,7 +13,7 @@ import type { GrammarId } from './assets'
 
 const COMMENT_TYPES = ['comment', 'line_comment', 'block_comment']
 
-const GRAMMAR_LABEL: Partial<Record<GrammarId, string>> = {
+export const GRAMMAR_LABEL: Partial<Record<GrammarId, string>> = {
   python: 'Python',
   java: 'Java',
   c: 'C',
