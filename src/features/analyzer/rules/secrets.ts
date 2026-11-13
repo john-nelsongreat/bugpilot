@@ -72,13 +72,13 @@ const QUOTED_ASSIGNMENT =
 const TYPED_ASSIGNMENT =
   new RegExp(`(?:^|[^A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]*:[ \\t]*[A-Za-z0-9_&*'][A-Za-z0-9_&*'.<>,?\\[\\] ]{0,40}?[ \\t]*=[ \\t]*(["'])([^"'\\n]{8,})\\2`, 'gi')
 const ENV_ASSIGNMENT =
-  new RegExp(`^[ \\t]*(?:export[ \\t]+)?([A-Za-z_$][A-Za-z0-9_$.]*)[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
+  new RegExp(`^[ \\t]*(?:(?:export|ENV|ARG)[ \\t]+)?([A-Za-z_$][A-Za-z0-9_$.]*)[ \\t]*=[ \\t]*([A-Za-z0-9_./+=:@-]{12,})[ \\t]*$`, 'gim')
 
-// Segments that turn a credential-shaped name into a label, a limit or a fixture name.
+// Segments that turn a credential-shaped name into a label, a limit, a fixture name or a location.
 const NON_CREDENTIAL_SEGMENTS = new Set([
   'field', 'label', 'header', 'name', 'santa', 'length', 'min', 'max', 'test',
   'demo', 'example', 'sample', 'dummy', 'placeholder', 'default', 'schema',
-  'pattern', 'format', 'prefix', 'suffix', 'expected',
+  'pattern', 'format', 'prefix', 'suffix', 'expected', 'file', 'path',
 ])
 
 function identifierSegments(name: string): string[] {
@@ -339,7 +339,8 @@ const assignmentRule: AnalyzerRule = {
   tier: 'pattern',
   severity: 'Critical',
   languages: ALL_TEXT_LANGUAGES,
-  description: 'Finds password, secret, token and API-key assignments whose value is a literal string.',
+  description:
+    'Finds password, secret, token and API-key assignments whose value is a literal string, including typed declarations (`KEY: String = "…"`) and Dockerfile `ENV`/`ARG` lines. A name ending in a location word such as `_FILE` or `_PATH` is treated as a location, not a secret.',
   check: (file) => {
     const hits: RuleHit[] = []
 

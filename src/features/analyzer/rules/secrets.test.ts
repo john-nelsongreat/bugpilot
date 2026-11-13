@@ -352,8 +352,34 @@ describe('secret rule: credential assignment typed declaration', () => {
     expect(typed).toBeDefined()
     expect(typed?.message).toBe(quoted?.message)
     expect(typed?.explanation).toBe(quoted?.explanation)
-    expect(typed?.fix.action).toBe(quoted?.fix.action)
+    expect(typed?.fix?.explanation).toBe(quoted?.fix?.explanation)
     expect(typed?.confidence.level).toBe(quoted?.confidence.level)
+  })
+})
+
+describe('secret rule: credential assignment Dockerfile ENV and location names', () => {
+  const id = 'bugpilot/secret/credential-assignment'
+
+  it('finds a Dockerfile ENV whose value is a literal credential', () => {
+    const [hit] = hits(id, 'Dockerfile', `ENV LEDGER_API_KEY=${fakeAssignment}\n`)
+    expect(hit).toBeDefined()
+    expect(hit.evidence[0].quote).not.toContain(fakeAssignment)
+  })
+
+  it('does not fire on a Dockerfile ENV whose name ends in a location word', () => {
+    expect(hits(id, 'Dockerfile', 'ENV API_KEY_FILE=/etc/ssl/ledger.pem\n')).toHaveLength(0)
+  })
+
+  it('does not fire on a typed assignment whose name ends in _FILE', () => {
+    expect(
+      hits(id, 'Ledger.kt', `private val LEDGER_API_KEY_FILE: String = "${fakeAssignment}"\n`),
+    ).toHaveLength(0)
+  })
+
+  it('still fires on a typed assignment whose name has no disqualified segment', () => {
+    expect(
+      hits(id, 'Ledger.kt', `private val LEDGER_API_KEY_TEXT: String = "${fakeAssignment}"\n`),
+    ).toHaveLength(1)
   })
 })
 
