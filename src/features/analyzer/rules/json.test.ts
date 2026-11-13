@@ -63,6 +63,16 @@ describe('JSON syntax rule', () => {
     expect(jsonSyntaxRule.coverageNotes?.(makeFile(text))?.[0]).toContain('JSONC')
   })
 
+  it('tolerates a trailing comma with no comments in the file', () => {
+    const text = '{\n  "tags": ["a", "b",],\n}\n'
+    expect(jsonSyntaxRule.check(makeFile(text))).toHaveLength(0)
+    const [note] = jsonSyntaxRule.coverageNotes?.(makeFile(text)) ?? []
+    expect(note).toContain('JSONC')
+    expect(note).toContain('a comma before a closing } or ]')
+    expect(note, 'no comments were tolerated, so none may be claimed').not.toContain('// or /* */')
+    expect(note).toContain('A strict JSON parser still rejects this document')
+  })
+
   it('keeps comment punctuation inside strings out of the dialect decision', () => {
     const text = JSON.stringify({ url: 'http://example.com/a//b', doc: '/* not a comment */' })
     expect(jsonSyntaxRule.check(makeFile(text))).toHaveLength(0)
