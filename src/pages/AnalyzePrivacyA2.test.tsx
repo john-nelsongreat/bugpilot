@@ -277,7 +277,7 @@ describe('Analyze page privacy for fixes and clean export', () => {
     expect(document.body.textContent).toContain(MASKED_SECRET)
     expect(document.body.textContent).not.toContain(FAKE_SECRET)
 
-    await user.click(screen.getByRole('button', { name: 'Build clean export' }))
+    await user.click(await screen.findByRole('button', { name: 'Build clean export' }))
     const cleanExport = await screen.findByRole('region', { name: 'Clean export' })
     await within(cleanExport).findByRole('button', { name: 'Download changes.patch' })
     expect(cleanExport.textContent).toContain('Built 5 files from 1 fixed file.')
