@@ -62,7 +62,7 @@ describe('fix plan', () => {
 
   it('reports verification failures through the unavailable map', async () => {
     // The defect is one whose fixer is reachable from a reported finding; the JSON trailing-comma
-    // fixer is not (see jsonTrailingComma.test.ts), so it cannot be used to drive this path.
+    // fixer is not, so it cannot be used to drive this path.
     const source = entry('public/page.html', '<a href="http://cdn.acme-widgets.com/assets.json">files</a>\n')
     const findings = analyzeEntries([source]).files[0].findings
     const sourceFinding = findings.find((item) => item.ruleId === HTTP_RULE)

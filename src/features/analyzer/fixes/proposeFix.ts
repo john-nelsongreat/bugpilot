@@ -3,7 +3,6 @@ import { isNotebookDerivedName } from '../archive/notebook'
 import type { AnalyzerFinding } from '../types'
 import { proposeHttpsUrlFix } from './httpsUrl'
 import { proposeMixedIndentationFix } from './indentation'
-import { proposeJsonTrailingCommaFix } from './jsonTrailingComma'
 import { proposeSecretFix } from './secretFix'
 import type { FixCandidate } from './types'
 
@@ -25,9 +24,6 @@ export function proposeFix(finding: AnalyzerFinding, source: ArchiveEntry): FixC
   if (isNotebookDerivedName(finding.file)) return null
   if (SECRET_RULES.has(finding.ruleId)) {
     return proposeSecretFix(finding, source.text, source.language, source.name)
-  }
-  if (finding.ruleId === 'bugpilot/syntax/json') {
-    return proposeJsonTrailingCommaFix(finding, source.text, source.name)
   }
   if (finding.ruleId === 'bugpilot/generic/insecure-http-url') {
     return proposeHttpsUrlFix(finding, source.text, source.name)
