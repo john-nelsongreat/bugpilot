@@ -96,14 +96,17 @@ export function tierAvailability(language: SourceLanguage): CoverageTier[] {
 
   const engines = enginesFor(language)
   if (engines?.grammar) {
-    const patternParts = ['BugPilot generic and secret pattern rules', 'tree-sitter AST rules']
+    const patternParts = ['BugPilot generic and secret pattern rules']
+    if (engines.astRules) patternParts.push('tree-sitter AST rules')
     if (engines.engines.includes('ruff')) patternParts.push('Ruff lint rules')
     return [
       {
         tier: 'syntax',
-        available: true,
+        available: engines.syntaxClaims,
         ran: false,
-        reason: `tree-sitter ${engines.grammar} grammar: ERROR and MISSING nodes only, no compiler.`,
+        reason: engines.syntaxClaims
+          ? `tree-sitter ${engines.grammar} grammar: ERROR and MISSING nodes only, no compiler.`
+          : `The ${engines.grammar} grammar is not trusted for syntax claims: BugPilot parses with it and records the language as missing coverage.`,
       },
       {
         tier: 'pattern',
@@ -179,7 +182,7 @@ const ENGINE_NOT_CHECKED: Record<string, string[]> = {
   ],
   rust: [
     'No compiler or borrow-checker: only the tree-sitter grammar reads this file.',
-    'Only the AST rules listed in the README run.',
+    'No AST rules are written for Rust yet: this language gets syntax coverage only.',
     'Engine findings are manual-only.',
   ],
   c: [
@@ -194,7 +197,7 @@ const ENGINE_NOT_CHECKED: Record<string, string[]> = {
   ],
   swift: [
     'No compiler or type analysis; the Swift grammar is large (3.3 MiB) and only loads for a .swift file.',
-    'Only the AST rules listed in the README run.',
+    'No AST rules are written for Swift yet: this language gets syntax coverage only.',
     'Engine findings are manual-only.',
   ],
   shell: [

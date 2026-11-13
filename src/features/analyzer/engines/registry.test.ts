@@ -5,6 +5,8 @@ import { GRAMMAR_URLS } from './assets'
 import { MINIMAL_WASM } from './featureProbe'
 import { ENGINES_NOT_RUN_REASON } from '../analysis/coverage'
 import { ENGINE_IDS, grammarFor, LANGUAGE_ENGINES, needsRuff, enginesFor } from './registry'
+import { AST_RULES } from './astQueries'
+import { UNTRUSTED_SYNTAX_GRAMMARS } from './syntax'
 
 const PROMISED_LANGUAGES = [
   'python',
@@ -159,5 +161,41 @@ describe('engine language registry', () => {
     expect(MINIMAL_WASM.byteLength).toBe(8)
     expect(enginesFor('python')?.engines).toEqual(['tree-sitter', 'ruff'])
     expect(enginesFor('scala' as never)).toBeNull()
+  })
+
+  it('keeps the astRules flag in sync with the AST rule table', () => {
+    const ruleGrammars = [...new Set<string>(AST_RULES.map((rule) => rule.grammar))].sort()
+    const claimedGrammars: string[] = []
+    for (const profile of Object.values(LANGUAGE_ENGINES)) {
+      if (profile?.astRules && profile.grammar) claimedGrammars.push(profile.grammar)
+    }
+    expect(claimedGrammars.sort()).toEqual(ruleGrammars)
+  })
+
+  it('keeps the syntaxClaims flag in sync with the untrusted grammar set', () => {
+    const untrusted = [...UNTRUSTED_SYNTAX_GRAMMARS].sort()
+    const notClaimed: string[] = []
+    for (const profile of Object.values(LANGUAGE_ENGINES)) {
+      if (profile && profile.syntaxClaims === false && profile.grammar) notClaimed.push(profile.grammar)
+    }
+    expect(notClaimed.sort()).toEqual(untrusted)
+  })
+
+  it('names AST rules only for languages that have them', () => {
+    let noRuleCount = 0
+    for (const profile of Object.values(LANGUAGE_ENGINES)) {
+      if (!profile || profile.astRules) continue
+      noRuleCount += 1
+      const patternTier = tierAvailability(profile.language).find((tier) => tier.tier === 'pattern')
+      expect(patternTier?.reason, profile.language).not.toContain('AST rules')
+    }
+    expect(noRuleCount).toBe(8)
+  })
+
+  it('turns the syntax tier off for the untrusted grammars and keeps it on elsewhere', () => {
+    expect(tierAvailability('sql').find((tier) => tier.tier === 'syntax')?.available).toBe(false)
+    expect(tierAvailability('yaml').find((tier) => tier.tier === 'syntax')?.available).toBe(false)
+    expect(tierAvailability('python').find((tier) => tier.tier === 'syntax')?.available).toBe(true)
+    expect(tierAvailability('html').find((tier) => tier.tier === 'syntax')?.available).toBe(true)
   })
 })

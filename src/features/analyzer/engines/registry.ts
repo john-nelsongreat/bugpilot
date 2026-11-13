@@ -10,6 +10,10 @@ export interface LanguageEngines {
   /** Grammar in the tree-sitter pack, or null when no permissive grammar is shipped. */
   grammar: GrammarId | null
   engines: EngineId[]
+  /** True only when `astQueries.ts` holds at least one rule for this grammar. */
+  astRules: boolean
+  /** False when the grammar is not trusted for syntax claims: BugPilot parses and reports nothing. */
+  syntaxClaims: boolean
 }
 
 /**
@@ -25,22 +29,22 @@ export interface LanguageEngines {
  * is what the report says.
  */
 export const LANGUAGE_ENGINES: Partial<Record<SourceLanguage, LanguageEngines>> = {
-  python: { language: 'python', grammar: 'python', engines: ['tree-sitter', 'ruff'] },
-  java: { language: 'java', grammar: 'java', engines: ['tree-sitter'] },
-  kotlin: { language: 'kotlin', grammar: 'kotlin', engines: ['tree-sitter'] },
-  csharp: { language: 'csharp', grammar: 'c_sharp', engines: ['tree-sitter'] },
-  php: { language: 'php', grammar: 'php', engines: ['tree-sitter'] },
-  ruby: { language: 'ruby', grammar: 'ruby', engines: ['tree-sitter'] },
-  go: { language: 'go', grammar: 'go', engines: ['tree-sitter'] },
-  rust: { language: 'rust', grammar: 'rust', engines: ['tree-sitter'] },
-  c: { language: 'c', grammar: 'c', engines: ['tree-sitter'] },
-  cpp: { language: 'cpp', grammar: 'cpp', engines: ['tree-sitter'] },
-  swift: { language: 'swift', grammar: 'swift', engines: ['tree-sitter'] },
-  shell: { language: 'shell', grammar: 'bash', engines: ['tree-sitter'] },
-  sql: { language: 'sql', grammar: 'sql', engines: ['tree-sitter'] },
-  yaml: { language: 'yaml', grammar: 'yaml', engines: ['tree-sitter'] },
-  html: { language: 'html', grammar: 'html', engines: ['tree-sitter'] },
-  css: { language: 'css', grammar: 'css', engines: ['tree-sitter'] },
+  python: { language: 'python', grammar: 'python', engines: ['tree-sitter', 'ruff'], astRules: true, syntaxClaims: true },
+  java: { language: 'java', grammar: 'java', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  kotlin: { language: 'kotlin', grammar: 'kotlin', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  csharp: { language: 'csharp', grammar: 'c_sharp', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  php: { language: 'php', grammar: 'php', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  ruby: { language: 'ruby', grammar: 'ruby', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  go: { language: 'go', grammar: 'go', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  rust: { language: 'rust', grammar: 'rust', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  c: { language: 'c', grammar: 'c', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  cpp: { language: 'cpp', grammar: 'cpp', engines: ['tree-sitter'], astRules: true, syntaxClaims: true },
+  swift: { language: 'swift', grammar: 'swift', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  shell: { language: 'shell', grammar: 'bash', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  sql: { language: 'sql', grammar: 'sql', engines: ['tree-sitter'], astRules: false, syntaxClaims: false },
+  yaml: { language: 'yaml', grammar: 'yaml', engines: ['tree-sitter'], astRules: false, syntaxClaims: false },
+  html: { language: 'html', grammar: 'html', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  css: { language: 'css', grammar: 'css', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
 }
 
 export function enginesFor(language: SourceLanguage): LanguageEngines | null {
