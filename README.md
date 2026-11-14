@@ -753,7 +753,7 @@ Two WebAssembly engines run the optional deep pass. Both are read-only detectors
 
 | Engine | Package and version | Role | Languages | What it cannot do |
 | --- | --- | --- | --- | --- |
-| tree-sitter | `web-tree-sitter` 0.27.1 + `tree-sitter-wasm` 2.0.4 (16 grammars) | Parses a file into a real syntax tree. Reports `ERROR`/`MISSING` nodes as syntax findings, and answers five saved-pattern queries for AST-level findings | 16 (see the table above) | It is a parser, not a compiler: no types, no imports, no data flow, no idea whether the code would run. A construct the grammar does not support looks exactly like a mistake. |
+| tree-sitter | `web-tree-sitter` 0.27.1 + `tree-sitter-wasm` 2.0.4 (16 grammars) | Parses a file into a real syntax tree. Reports `ERROR`/`MISSING` nodes as syntax findings, and answers the saved-pattern queries listed in the table below | 16 (see the table above) | It is a parser, not a compiler: no types, no imports, no data flow, no idea whether the code would run. A construct the grammar does not support looks exactly like a mistake. |
 | Ruff | `@astral-sh/ruff-wasm-web` 0.17.3 | Lints Python with 21 hand-picked rules and reports its own parse failure | Python | The WASM build exposes **no fixes** in every settings combination measured in the spike, so Python findings are detector-only. It reads one file at a time, so it sees no cross-file names. |
 
 JavaScript, TypeScript and JSON keep their slice-A engines (the TypeScript parser and `JSON.parse`); no tree-sitter grammar is loaded for them.
