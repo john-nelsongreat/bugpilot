@@ -312,6 +312,25 @@ function ruleFileFor(grammar: GrammarId, text: string): RuleFile {
   })
 }
 
+/**
+ * The rule a test means, named by what it is instead of by where it sits in the array.
+ * `AST_RULES` is ordered by hand and `keeps one fixture per rule` pins that order, so a position is
+ * a build detail that moves whenever a define is inserted — and a moved position makes the tests
+ * below run their snippets against the wrong rule, which reads as a detection failure, not an
+ * indexing one. (id, grammar, query) is unique for all 32 defines: three queries repeat, but always
+ * across different grammars, so query alone is not a key and id-and-grammar alone is not either.
+ */
+function ruleFor(ruleId: string, grammar: string, query: string): AstRuleDefinition {
+  const matches = AST_RULES.filter((rule) => rule.id === ruleId && rule.grammar === grammar && rule.query === query)
+  const [only] = matches
+  if (matches.length !== 1 || !only) {
+    throw new Error(
+      `Expected exactly one AST rule for ${ruleId} / ${grammar} / ${query}, found ${matches.length}.`,
+    )
+  }
+  return only
+}
+
 /** Parses `code` and runs exactly one rule over it, the way the worker does. */
 function analyse(rule: AstRuleDefinition, code: string): { hits: ReturnType<typeof evaluateAstRule>; sexp: string } {
   const language = grammars.get(rule.grammar)
@@ -394,7 +413,7 @@ describe('AST queries against the shipped grammars', () => {
   })
 
   it('reports extra positive shapes the same rule is meant to catch', () => {
-    const pythonSql = AST_RULES[19]
+    const pythonSql = ruleFor('bugpilot/ast/sql-built-by-concatenation', 'python', '(call function: (attribute attribute: (identifier) @method) arguments: (argument_list (_) @arg))')
     for (const code of [
       'cursor.execute(f"SELECT * FROM t WHERE id = {user_id}")\n',
       'cursor.execute("SELECT * FROM t WHERE id = %s" % (user_id,))\n',
@@ -404,11 +423,11 @@ describe('AST queries against the shipped grammars', () => {
       expect(result.hits.length, code).toBeGreaterThan(0)
     }
 
-    const cSharpSql = AST_RULES[23]
+    const cSharpSql = ruleFor('bugpilot/ast/sql-built-by-concatenation', 'c_sharp', '(invocation_expression function: (member_access_expression name: (identifier) @method) arguments: (argument_list (_) @arg))')
     const interpolated = analyse(cSharpSql, 'class A {\n    void M(int id) {\n        var rows = conn.Query($"SELECT * FROM t WHERE id = {id}");\n    }\n}\n')
     expect(interpolated.hits.length).toBeGreaterThan(0)
 
-    const goSql = AST_RULES[24]
+    const goSql = ruleFor('bugpilot/ast/sql-built-by-concatenation', 'go', '(call_expression function: (selector_expression field: (field_identifier) @method) arguments: (argument_list (_) @arg))')
     const formatted = analyse(
       goSql,
       'package main\n\nfunc m(db *sql.DB, id int) {\n\trows, _ := db.Query(fmt.Sprintf("SELECT * FROM t WHERE id = %d", id))\n\t_ = rows\n}\n',
@@ -416,10 +435,7 @@ describe('AST queries against the shipped grammars', () => {
     expect(formatted.hits.length).toBeGreaterThan(0)
 
     // C++ also catches everything, and the empty body may be written across lines.
-    const cppEmpty = AST_RULES.find(
-      (candidate) => candidate.id === 'bugpilot/ast/empty-catch' && candidate.grammar === 'cpp',
-    )
-    if (!cppEmpty) throw new Error('The C++ empty-handler rule is missing.')
+    const cppEmpty = ruleFor('bugpilot/ast/empty-catch', 'cpp', '(catch_clause body: (compound_statement) @body)')
     const catchAll = analyse(
       cppEmpty,
       'class A {\n    void m() {\n        try {\n            read();\n        } catch (...) {\n        }\n    }\n}\n',
@@ -428,7 +444,7 @@ describe('AST queries against the shipped grammars', () => {
   })
 
   it('writes a finding that quotes the tree and offers no automatic edit', () => {
-    const { hits } = analyse(AST_RULES[0], 'try:\n    call()\nexcept ValueError:\n    pass\n')
+    const { hits } = analyse(ruleFor('bugpilot/ast/empty-catch', 'python', '(except_clause (block . (pass_statement) .)) @ex'), 'try:\n    call()\nexcept ValueError:\n    pass\n')
     expect(hits).toHaveLength(1)
     const hit = hits[0]
     expect(hit.engine).toBe('tree-sitter')
@@ -463,8 +479,12 @@ describe('AST queries against the shipped grammars', () => {
     parser.setLanguage(language)
     const tree = parser.parse(code)
     const file = ruleFileFor(cGrammar, code)
-    const rule = AST_RULES.find((candidate) => candidate.id === 'bugpilot/ast/unreachable-code' && candidate.grammar === cGrammar)
-    if (!rule || !tree) throw new Error('The C rule or the parse tree is missing.')
+    const rule = ruleFor(
+      'bugpilot/ast/unreachable-code',
+      cGrammar,
+      '(compound_statement [(return_statement) (break_statement) (continue_statement) (goto_statement)] (_) @after)',
+    )
+    if (!tree) throw new Error('The C parse tree is missing.')
 
     const runQuery = (source: string) => {
       const query = new Query(language, source)
@@ -497,5 +517,14 @@ describe('AST queries against the shipped grammars', () => {
       tree.delete()
       parser.delete()
     }
+  })
+
+  it('names every rule it tests instead of counting array positions', () => {
+    // A positional `AST_RULES[n]` changes meaning the moment a define is inserted, and what it
+    // breaks reads like a detection bug rather than an indexing one. Naming is permanent only if
+    // something keeps it that way, so this file checks its own source.
+    const self = 'src/features/analyzer/engines/astQueries.realGrammar.test.ts'
+    const source = readFileSync(resolve(process.cwd(), self), 'utf8')
+    expect(source.match(/AST_RULES\[\d+\]/g) ?? [], self).toEqual([])
   })
 })
