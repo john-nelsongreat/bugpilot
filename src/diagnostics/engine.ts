@@ -183,7 +183,7 @@ const LANGUAGE_SIGNALS: ReadonlyArray<{
     language: 'javascript',
     label: 'a JavaScript stack frame with file positions',
     weight: 3,
-    pattern: /[^\s()]+\.(?:js|mjs|cjs|jsx|ts|tsx):\d+:\d+/i,
+    pattern: /[^\s()]{1,300}\.(?:js|mjs|cjs|jsx|ts|tsx):\d+:\d+/i,
   },
   {
     language: 'javascript',
