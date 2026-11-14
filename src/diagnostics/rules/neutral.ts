@@ -49,7 +49,7 @@ interface GitSubSignature {
 
 const FATAL_LINE = /^fatal:\s*(.+)$/
 
-const GIT_SUB_SIGNATURES: readonly GitSubSignature[] = [
+export const GIT_SUB_SIGNATURES: readonly GitSubSignature[] = [
   {
     shape: 'not-a-repository',
     pattern:
