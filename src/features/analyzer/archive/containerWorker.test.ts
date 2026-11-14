@@ -39,13 +39,22 @@ function makeScope(): FakeScope {
   }
 }
 
+async function waitForDone(fake: FakeScope, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (fake.posted.some((message) => (message as { type: string }).type === 'done')) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(`the worker sent no done message within ${timeoutMs}ms`)
+}
+
 async function readInWorker(bytes: Uint8Array, name: string | undefined) {
   const fake = makeScope()
   startArchiveWorker(fake.scope)
   fake.scope.onmessage?.({
     data: { type: 'read-archive', id: 1, bytes: bytes.buffer, name, limits: limitsFor() },
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await waitForDone(fake)
   const done = fake.posted.filter((message) => (message as { type: string }).type === 'done') as Array<
     {
       result: {
