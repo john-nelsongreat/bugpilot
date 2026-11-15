@@ -78,10 +78,10 @@ export function Mascot() {
         >
           <ellipse className="mascot-shadow" cx="64" cy="118" rx="24" ry="4" />
           <g className="mascot-legs">
-            <path className="mascot-leg" d="M40 78 L31 74" />
+            <path className="mascot-leg" d="M45 63 L29 49" />
             <path className="mascot-leg" d="M38 90 L29 94" />
             <path className="mascot-leg" d="M48 101 L43 110" />
-            <path className="mascot-leg" d="M88 78 L97 74" />
+            <path className="mascot-leg" d="M83 63 L99 49" />
             <path className="mascot-leg" d="M90 90 L99 94" />
             <path className="mascot-leg" d="M80 101 L85 110" />
           </g>
