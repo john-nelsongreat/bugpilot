@@ -173,6 +173,18 @@ function analyzeWith(results: AnalysisSessionResult[]): MockAnalyze {
   return Object.assign(fn, { calls })
 }
 
+// The wait below observes this fake's own `calls` record instead of betting on a wall-clock budget, so a
+// loaded box cannot lose the race; the ceiling only guards a hang and throws naming expected vs seen.
+// Shape reused from features/analyzer/analysis/analyzerProtocol.test.ts:49.
+async function waitForCalls(analyze: MockAnalyze, count: number, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started <= timeoutMs) {
+    if (analyze.calls.length >= count) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`analyze was called ${analyze.calls.length} time(s), expected ${count}`)
+}
+
 /** Serves only the engine manifest, and keeps its arguments so the assertions can read them. */
 function manifestFetch(fails = false) {
   return vi.fn(async (_url: string, _init?: RequestInit) => ({
@@ -316,7 +328,7 @@ describe('engine gate', () => {
     expect(run).toHaveFocus()
     await user.keyboard('{Enter}')
 
-    await vi.waitFor(() => expect(analyze).toHaveBeenCalledTimes(2))
+    await waitForCalls(analyze, 2)
     expect(analyze.calls[1].engines).toBe('approved')
   })
 

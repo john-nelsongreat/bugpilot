@@ -64,6 +64,18 @@ function analyseMessage(entries: ArchiveEntry[], overrides: Partial<EngineReques
 
 const ENTRIES = [entry('a/app.py'), entry('b/Main.java')]
 
+// Each of these waits observes the spy's own call record, which is the arrival signal the test already
+// owns, so a loaded box cannot fail a bet on wall-clock time. The ceiling only guards a hang, and it
+// throws naming what it expected and what it saw. Shape reused from analysis/analyzerProtocol.test.ts:49.
+async function waitForCalls(spy: { mock: { calls: unknown[] } }, count: number, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started <= timeoutMs) {
+    if (spy.mock.calls.length >= count) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`runFile was called ${spy.mock.calls.length} time(s), expected ${count}`)
+}
+
 describe('engine worker', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -152,7 +164,7 @@ describe('engine worker', () => {
     startEngineWorker(scope, deps)
 
     const running = send(analyseMessage(ENTRIES))
-    await vi.waitFor(() => expect(runFile).toHaveBeenCalled())
+    await waitForCalls(runFile, 1)
     await send({ type: 'cancel', id: 2 })
     await running
 
@@ -200,13 +212,13 @@ describe('engine worker', () => {
     startEngineWorker(scope, deps)
 
     const first = send(analyseMessage(ENTRIES))
-    await vi.waitFor(() => expect(runFile).toHaveBeenCalled())
+    await waitForCalls(runFile, 1)
     await send(analyseMessage([entry('c/app.py')], { id: 3 }))
 
     expect(posted.at(-1)).toMatchObject({ type: 'done', id: 3, error: 'The deep engines are already working on another file set.' })
 
     pending.shift()?.()
-    await vi.waitFor(() => expect(runFile).toHaveBeenCalledTimes(2))
+    await waitForCalls(runFile, 2)
     pending.shift()?.()
     await first
     expect(posted.filter((message) => message.type === 'done')).toHaveLength(2)

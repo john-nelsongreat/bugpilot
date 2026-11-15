@@ -99,7 +99,7 @@ describe('Mascot', () => {
     expect(stateOf(view)).toBe('flying')
   })
 
-  it('records that the plain event type reaches the DOM but not React here', () => {
+  it('a plain animationend leaves the state at tapped but webkitAnimationEnd advances it to takeoff', () => {
     const view = render(<Mascot />)
     fireEvent.click(button(view))
 
@@ -120,6 +120,11 @@ describe('Mascot', () => {
     const eye = view.container.querySelector('.mascot-eye')!
     endAnimation(eye, 'mascot-blink')
     expect(stateOf(view)).toBe('tapped')
+
+    // Positive control, last so the test reads "wrong phase dropped, unknown name dropped, and the
+    // listener is live": without it both drops also pass on a component that never installed the handler.
+    endPhase(view, 'mascot-tapped')
+    expect(stateOf(view)).toBe('takeoff')
   })
 
   it('completes the loop back to idle', () => {
