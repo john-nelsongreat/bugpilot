@@ -141,7 +141,7 @@ export function Mascot() {
                   ry="6.2"
                 />
                 <circle className="mascot-pupil" cx="59.4" cy="35.6" r="2.9" />
-                <circle className="mascot-glint" cx="57.4" cy="33" r="1.1" />
+                <circle className="mascot-glint" cx="58.6" cy="34.4" r="1.0" />
               </g>
               <g className="mascot-eye">
                 <ellipse
@@ -152,7 +152,7 @@ export function Mascot() {
                   ry="6.2"
                 />
                 <circle className="mascot-pupil" cx="68.6" cy="35.6" r="2.9" />
-                <circle className="mascot-glint" cx="66.6" cy="33" r="1.1" />
+                <circle className="mascot-glint" cx="67.8" cy="34.4" r="1.0" />
               </g>
             </g>
           </g>

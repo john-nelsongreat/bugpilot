@@ -1,7 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#1f1f1f" />
-  <circle cx="16" cy="16" r="9" fill="none" stroke="#ffbf00" stroke-width="1.5" opacity="0.5" />
-  <path d="M16 5v22M5 16h22" stroke="#ffbf00" stroke-width="1.5" stroke-linecap="round" opacity="0.8" />
-  <circle cx="16" cy="16" r="3.4" fill="#ffbf00" />
-  <circle cx="16" cy="16" r="1.3" fill="#1f1f1f" />
+  <title>BugPilot</title>
+  <!--
+    Every coordinate below is copied verbatim from the .mascot-headgroup subtree in
+    src/components/Mascot.tsx. The only added numbers are the crop transform, which maps
+    the head's measured bounding box (38.5 6.5 51 42) into the 32-unit plate, and the
+    antenna stroke weight, optically sized so it clears 1.1 device px at a 16 px tab icon.
+  -->
+  <rect width="32" height="32" rx="7" fill="#ffbf00" />
+  <defs>
+    <mask id="bugpilot-eyes" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="#fff" />
+      <g transform="translate(1.05 3.85) scale(0.72) translate(-43.2 -11.5)">
+        <circle cx="59.4" cy="35.6" r="2.9" fill="#000" />
+        <circle cx="68.6" cy="35.6" r="2.9" fill="#000" />
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#bugpilot-eyes)">
+    <g transform="translate(1.05 3.85) scale(0.72) translate(-43.2 -11.5)" fill="#2b2a26">
+      <path
+        d="M56 26 C52 22 50 19 48 16"
+        fill="none"
+        stroke="#2b2a26"
+        stroke-width="4.6"
+        stroke-linecap="round"
+      />
+      <path
+        d="M72 26 C76 22 78 19 80 16"
+        fill="none"
+        stroke="#2b2a26"
+        stroke-width="4.6"
+        stroke-linecap="round"
+      />
+      <circle cx="48" cy="16" r="3.2" />
+      <circle cx="80" cy="16" r="3.2" />
+      <ellipse cx="64" cy="34" rx="13.5" ry="10" />
+    </g>
+  </g>
 </svg>
