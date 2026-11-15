@@ -4,6 +4,15 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+const appCss = readFileSync(resolve(process.cwd(), 'src/App.css'), 'utf8')
+
+function fillTokens(rule: string): string[] {
+  const block = appCss.match(new RegExp(`^\\.${rule}\\s*\\{([^}]*)\\}`, 'm'))
+  if (!block) throw new Error(`Missing .${rule} rule in App.css`)
+  return [...block[1].matchAll(/fill:\s*var\((--[\w-]+)\)/g)].map(
+    (match) => match[1],
+  )
+}
 
 type Tokens = Record<string, string>
 
@@ -214,6 +223,28 @@ describe.each(themes)('$name theme tokens', ({ selector, expected }) => {
         ? []
         : [`${label}: ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`]
     })
+    expect(failures, failures.join('\n')).toEqual([])
+  })
+
+  it('keeps the mascot face fill readable against the page', () => {
+    const page = tokens['--bg']
+    if (!page) throw new Error('missing --bg token')
+    const failures: string[] = []
+    for (const rule of ['mascot-head', 'mascot-pronotum']) {
+      for (const tokenName of fillTokens(rule)) {
+        const value = tokens[tokenName]
+        if (!value) {
+          failures.push(`${rule}: unknown token ${tokenName}`)
+          continue
+        }
+        const ratio = contrast(value, page)
+        if (ratio < 3) {
+          failures.push(
+            `${selector} ${rule}: ${tokenName} on --bg is ${ratio.toFixed(2)}:1 (needs 3:1)`,
+          )
+        }
+      }
+    }
     expect(failures, failures.join('\n')).toEqual([])
   })
 })

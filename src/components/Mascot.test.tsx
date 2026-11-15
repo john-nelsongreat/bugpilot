@@ -213,4 +213,23 @@ describe('Mascot', () => {
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })
+
+  it('sizes the collar against the head so the mark reads as a beetle, not a stack of balls', () => {
+    const view = render(<Mascot />)
+    const head = view.container.querySelector('.mascot-head')!
+    const pronotum = view.container.querySelector('.mascot-pronotum')!
+
+    const headRx = Number(head.getAttribute('rx'))
+    const pronotumRx = Number(pronotum.getAttribute('rx'))
+    expect(pronotumRx, 'collar half-width must be at least 2x the head').toBeGreaterThanOrEqual(
+      headRx * 2,
+    )
+
+    const headTop = Number(head.getAttribute('cy')) - Number(head.getAttribute('ry'))
+    const collarTop =
+      Number(pronotum.getAttribute('cy')) - Number(pronotum.getAttribute('ry'))
+    expect(collarTop - headTop, 'head must not rise more than 14px above the collar').toBeLessThanOrEqual(
+      14,
+    )
+  })
 })
