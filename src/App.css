@@ -3667,3 +3667,418 @@ textarea[aria-invalid='true'] {
   gap: 0.5rem;
   margin: 0.6rem 0;
 }
+
+/* ============================================================
+   Mascot — the ladybug companion on the Overview page.
+
+   State arrives only as data-mascot-state on the button, set by
+   src/components/Mascot.tsx from the reducer in
+   src/features/mascot/flight.ts. CSS owns the four flight durations;
+   JS owns only the glance hold. --mascot-fly-* are component-scoped
+   amplitudes, not design tokens.
+   ============================================================ */
+
+.mascot-stage {
+  --mascot-fly-x: 190px;
+  --mascot-fly-lift: 58px;
+
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  min-height: 176px;
+}
+
+.mascot-copy {
+  max-width: 34rem;
+}
+
+.mascot {
+  flex: none;
+  width: 112px;
+  height: 112px;
+  padding: 0;
+  border: 0;
+  background: none;
+  touch-action: manipulation;
+}
+
+.mascot-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transform-origin: 50% 82%;
+}
+
+.mascot:not([data-mascot-state='idle']) .mascot-art {
+  will-change: transform;
+}
+
+/* Token rule: the silhouette edge is --ink, which clears 13:1 against the
+   page in both themes; interior detail on the amber shell is --accent-ink,
+   which does not flip in dark theme. --ink on amber is 1.45:1 there. */
+.mascot-shadow {
+  fill: var(--ink);
+  opacity: 0.1;
+}
+
+.mascot-legs path,
+.mascot-antenna {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.mascot-wing {
+  fill: var(--accent-soft);
+  stroke: var(--ink);
+  stroke-width: 1.6;
+  stroke-opacity: 0.55;
+  transform-box: fill-box;
+  transform: scaleX(0.16);
+  transition: transform 240ms cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+.mascot-wing--left {
+  transform-origin: 100% 50%;
+}
+
+.mascot-wing--right {
+  transform-origin: 0% 50%;
+}
+
+/* glance opens the wings too: it is the whole response for a user who switched motion off,
+   and a folded-wing glance is indistinguishable from idle. */
+.mascot[data-mascot-state='takeoff'] .mascot-wing,
+.mascot[data-mascot-state='flying'] .mascot-wing,
+.mascot[data-mascot-state='glance'] .mascot-wing {
+  transform: scaleX(1);
+}
+
+.mascot[data-mascot-state='landing'] .mascot-wing {
+  transition-duration: 380ms;
+}
+
+.mascot-shell {
+  transform-box: fill-box;
+  transform-origin: 50% 82%;
+}
+
+.mascot-half {
+  transform-box: fill-box;
+  transition: transform 240ms cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+.mascot-half--left {
+  transform-origin: 100% 62%;
+}
+
+.mascot-half--right {
+  transform-origin: 0% 62%;
+}
+
+.mascot[data-mascot-state='takeoff'] .mascot-half--left,
+.mascot[data-mascot-state='flying'] .mascot-half--left {
+  transform: rotate(-12deg);
+}
+
+.mascot[data-mascot-state='takeoff'] .mascot-half--right,
+.mascot[data-mascot-state='flying'] .mascot-half--right {
+  transform: rotate(12deg);
+}
+
+.mascot[data-mascot-state='landing'] .mascot-half {
+  transition-duration: 380ms;
+}
+
+.mascot-skin {
+  fill: var(--accent);
+  stroke: var(--ink);
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+}
+
+.mascot-split {
+  stroke: var(--accent-ink);
+  stroke-width: 1.6;
+}
+
+.mascot-spot,
+.mascot-motif-dot {
+  fill: var(--accent-ink);
+}
+
+.mascot-motif-ring {
+  fill: none;
+  stroke: var(--accent-ink);
+  stroke-width: 1.8;
+}
+
+.mascot-motif-arm {
+  stroke: var(--accent-ink);
+  stroke-width: 1.4;
+}
+
+.mascot-pronotum,
+.mascot-head {
+  fill: var(--panel);
+  stroke: var(--ink);
+  stroke-width: 2.4;
+}
+
+.mascot-pronotum-dot {
+  fill: var(--panel-ink);
+}
+
+.mascot-eye {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease-out;
+}
+
+.mascot-sclera,
+.mascot-glint {
+  fill: var(--panel-ink);
+}
+
+.mascot-iris {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+}
+
+.mascot-pupil {
+  fill: var(--accent-ink);
+}
+
+.mascot-smile {
+  fill: none;
+  stroke: var(--panel-ink);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.mascot-antennae {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: transform 160ms ease-out;
+}
+
+.mascot-tip {
+  fill: var(--accent);
+}
+
+.mascot-halo {
+  fill: var(--accent);
+  opacity: 0.32;
+}
+
+.mascot-marks {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.mascot-marks path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.65;
+}
+
+.mascot[data-mascot-state='tapped'] .mascot-marks,
+.mascot[data-mascot-state='glance'] .mascot-marks {
+  opacity: 1;
+}
+
+.mascot[data-mascot-state='tapped'] .mascot-eye {
+  transform: scaleY(0.22);
+}
+
+.mascot[data-mascot-state='tapped'] .mascot-antennae,
+.mascot[data-mascot-state='glance'] .mascot-antennae {
+  transform: rotate(6deg);
+}
+
+/* Idle micro-animations run only at rest and are infinite, so they never
+   emit the animationend that drives the flight machine. */
+.mascot[data-mascot-state='idle'] .mascot-shell {
+  animation: mascot-breathe 4s ease-in-out infinite;
+}
+
+.mascot[data-mascot-state='idle'] .mascot-eye {
+  animation: mascot-blink 6s ease-in-out infinite;
+}
+
+.mascot[data-mascot-state='idle'] .mascot-halo {
+  animation: mascot-halo 3.4s ease-in-out infinite;
+}
+
+/* The four phase animations are attached only to .mascot-art, so exactly one
+   animationend per phase is the machine's clock. */
+.mascot[data-mascot-state='tapped'] .mascot-art {
+  animation: mascot-tapped 160ms ease-out;
+}
+
+.mascot[data-mascot-state='takeoff'] .mascot-art {
+  animation: mascot-takeoff 240ms cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+.mascot[data-mascot-state='flying'] .mascot-art {
+  animation: mascot-flight 1700ms linear;
+}
+
+.mascot[data-mascot-state='landing'] .mascot-art {
+  animation: mascot-landing 380ms cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+@keyframes mascot-tapped {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+
+  50% {
+    transform: translate(0, -1px) rotate(-2deg);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+}
+
+@keyframes mascot-takeoff {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  55% {
+    transform: scale(1.06, 0.92);
+  }
+}
+
+@keyframes mascot-landing {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(1.04, 0.9);
+  }
+}
+
+/* The loop, as multiples of the two component amplitudes. The resting perch is
+   at the right end of the stage, so every x offset travels left; every lift is
+   upward (ky >= 0) because the stage sits directly on .stat-strip. */
+@keyframes mascot-flight {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  8% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.03), calc(var(--mascot-fly-lift) * -0.38))
+      rotate(-5deg) scale(0.98);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  20% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.37), calc(var(--mascot-fly-lift) * -0.86))
+      rotate(-8deg) scale(0.94);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  34% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.79), calc(var(--mascot-fly-lift) * -1))
+      rotate(-3deg) scale(0.92);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  46% {
+    transform: translate(calc(var(--mascot-fly-x) * -1), calc(var(--mascot-fly-lift) * -0.59))
+      rotate(4deg) scale(0.93);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  58% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.79), calc(var(--mascot-fly-lift) * -0.14))
+      rotate(9deg) scale(0.95);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  70% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.42), calc(var(--mascot-fly-lift) * -0.52))
+      rotate(5deg) scale(0.98);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  82% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.14), calc(var(--mascot-fly-lift) * -0.83))
+      rotate(-3deg) scale(1);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  92% {
+    transform: translate(calc(var(--mascot-fly-x) * -0.03), calc(var(--mascot-fly-lift) * -0.31))
+      rotate(-1deg) scale(1);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1);
+  }
+
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes mascot-breathe {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  50% {
+    transform: scaleY(1.015);
+  }
+}
+
+@keyframes mascot-blink {
+  0%,
+  96%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  98% {
+    transform: scaleY(0.06);
+  }
+}
+
+@keyframes mascot-halo {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (max-width: 620px) {
+  .mascot-stage {
+    --mascot-fly-x: 84px;
+    --mascot-fly-lift: 30px;
+
+    min-height: 132px;
+  }
+
+  .mascot {
+    width: 88px;
+    height: 88px;
+
+    /* Wrapping leaves the perch alone on its line, where space-between puts it at the left;
+       the flight arcs leftwards, so it would leave the stage and the viewport. */
+    margin-inline-start: auto;
+  }
+}

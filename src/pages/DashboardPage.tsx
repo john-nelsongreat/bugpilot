@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useWorkspace } from '../app/useWorkspace'
 import { SeverityBadge, StatusBadge } from '../components/Badges'
+import { Mascot } from '../components/Mascot'
 import { formatDate } from '../features/bugs/format'
 import {
   computeDashboardStats,
@@ -48,6 +49,8 @@ export function DashboardPage() {
           </Link>
         </div>
       </header>
+
+      <Mascot />
 
       <div className="stat-strip">
         {statItems.map((item) => (
