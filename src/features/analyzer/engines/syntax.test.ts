@@ -3,6 +3,7 @@ import { makeRuleFile } from '../rules/context'
 import type { RuleFile } from '../rules/types'
 import {
   collectErrorRegions,
+  MACRO_BLIND_MISSING_TOKEN_GRAMMARS,
   MAX_SYNTAX_HITS_PER_FILE,
   scanSyntax,
   UNTRUSTED_SYNTAX_GRAMMARS,
@@ -150,7 +151,7 @@ describe('tree-sitter syntax findings', () => {
     expect(hit.verificationSteps.join(' ')).toContain('official compiler or interpreter')
   })
 
-  it('raises confidence for a MISSING node because the grammar names the token', () => {
+  it('raises confidence for a MISSING node only where the grammar is trusted to name the token', () => {
     const root = node({
       type: 'MISSING ")"',
       text: 'MISSING ")"',
@@ -158,11 +159,30 @@ describe('tree-sitter syntax findings', () => {
       row: 4,
       column: 11,
     })
-    const [hit] = scanSyntax({ file: ruleFile('print(1\n'), root, grammar: 'python' }).hits
-    expect(hit.ruleId).toBe('tree-sitter/missing-node')
-    expect(hit.confidence.level).toBe('high')
-    expect(hit.message).toBe('Missing ")" at line 5, column 12.')
-    expect(hit.limitations.join(' ')).toContain('one line after the real mistake')
+    const [python] = scanSyntax({ file: ruleFile('print(1\n'), root, grammar: 'python' }).hits
+    expect(python.ruleId).toBe('tree-sitter/missing-node')
+    expect(python.confidence.level).toBe('high')
+    expect(python.message).toBe('Missing ")" at line 5, column 12.')
+    expect(python.limitations.join(' ')).toContain('one line after the real mistake')
+
+    // The C grammar is measured to invent a MISSING token inside valid macro-heavy source, so the
+    // same tree shape must not carry the same claim — but the finding itself has to survive,
+    // because the seeded corpus defects are reached through this same path.
+    expect([...MACRO_BLIND_MISSING_TOKEN_GRAMMARS]).toEqual(['c'])
+    const [c] = scanSyntax({ file: ruleFile('printf(1\n', 'c'), root, grammar: 'c' }).hits
+    expect(c.ruleId).toBe('tree-sitter/missing-node')
+    expect(c.severity).toBe('High')
+    expect(c.confidence.level).toBe('medium')
+    expect(c.message).toBe(python.message)
+    // The explanation is unchanged apart from the grammar name it always interpolated.
+    expect(c.explanation).toBe(
+      'The c grammar expected the token it names at this position and found something else. The position comes from the parse tree; the reason is not in it.',
+    )
+    expect(c.evidence).toHaveLength(1)
+    expect(c.fix?.riskClass).toBe('manual-only')
+    expect(c.verificationSteps).toEqual(python.verificationSteps)
+    expect(c.confidence.reason).toContain('macro constructs are a known cause')
+    expect(c.confidence.reason).not.toContain('which is a strong signal')
   })
 
   it('caps the list and says how much was suppressed', () => {

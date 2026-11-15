@@ -346,6 +346,31 @@ describe('syntax findings against the shipped grammars', () => {
   })
 
   /**
+   * LOOP2-L3, measured against the shipped grammars rather than a hand-written tree: a C
+   * `MISSING` finding must survive (the seeded corpus defects are reached through this same path,
+   * so deleting it would delete real bugs with the noise) while its level drops, and the python
+   * `MISSING` finding must stay `high` because nothing was ever measured about python.
+   */
+  it('keeps the real-grammar C MISSING finding but stops calling it high-confidence', () => {
+    const c = SAMPLES.find((sample) => sample.grammar === 'c')
+    if (!c) throw new Error('c sample missing')
+    const result = scan(c, c.broken)
+    const missing = result.hits.filter((hit) => hit.ruleId === 'tree-sitter/missing-node')
+    expect(missing.length).toBeGreaterThan(0)
+    for (const hit of missing) {
+      expect(hit.severity).toBe('High')
+      expect(hit.confidence.level).toBe('medium')
+      expect(hit.confidence.reason).toContain('macro constructs are a known cause')
+    }
+
+    const python = SAMPLES.find((sample) => sample.grammar === 'python')
+    if (!python) throw new Error('python sample missing')
+    const [pythonHit] = scan(python, python.broken).hits
+    expect(pythonHit.ruleId).toBe('tree-sitter/missing-node')
+    expect(pythonHit.confidence.level).toBe('high')
+  })
+
+  /**
    * Part 4: modern CSS ships at-rules the bundled grammar has never heard of. The tolerance is
    * defined by what the standards track does NOT list, not by a table of framework names, so it
    * cannot rot — and every shape below was read off the real parse tree, including the region

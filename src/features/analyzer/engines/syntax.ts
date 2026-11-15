@@ -29,6 +29,18 @@ export const MAX_SYNTAX_HITS_PER_FILE = 12
  */
 export const UNTRUSTED_SYNTAX_GRAMMARS = new Set(['sql', 'yaml'])
 
+/**
+ * Grammars measured to synthesise a `MISSING` token inside valid source. C is the one this
+ * repository already documents as macro-blind (`dialectDocs.test.ts:97`), and that blindness is
+ * what puts 55 of the 81 C `missing-node` false positives in the holdout sheet in front of a
+ * user at `high`. A `missing` region from one of these grammars still reports — the seeded
+ * corpus defects ride the same path, so silencing it would delete real bugs with the noise — but
+ * its level is capped, because the token the grammar names records how far the parser got, not
+ * what the author left out. `UNTRUSTED_SYNTAX_GRAMMARS` above is the heavier mechanism and is
+ * deliberately not reused: it returns no finding at all.
+ */
+export const MACRO_BLIND_MISSING_TOKEN_GRAMMARS = new Set(['c'])
+
 function safeQuote(line: string): string {
   return redactIfCredential(quoteLine(line))
 }
@@ -495,19 +507,31 @@ export function scanSyntax(input: SyntaxScanInput): SyntaxScanResult {
       )
     }
 
+    // A MISSING node is only as strong as the grammar that invented it. Where that grammar is
+    // measured to go blind on macros, the token it names is a fact about the parse and not about
+    // the file, so the finding stays and the claim shrinks — same shape as the syntax-error cap
+    // in `astRules.ts:182-185`.
+    const unreliableMissing = region.missing && MACRO_BLIND_MISSING_TOKEN_GRAMMARS.has(input.grammar)
+    const confidence: EngineHit['confidence'] = unreliableMissing
+      ? {
+          level: 'medium',
+          reason: `The ${input.grammar} grammar expected this token given how far it could parse the file, and macro constructs are a known cause of that expectation in this language, so it is not evidence that the token is missing.`,
+        }
+      : {
+          level: region.missing && !manyErrors ? 'high' : 'medium',
+          reason: region.missing
+            ? 'The grammar names the exact token it expected at this position, which is a strong signal.'
+            : manyErrors
+              ? 'Several error regions mean the parser lost its place; the first one is the most trustworthy.'
+              : 'An ERROR node is what the parser reports when no rule matches, so the position is real but the cause is not.',
+        }
+
     hits.push({
       ruleId: region.missing ? 'tree-sitter/missing-node' : 'tree-sitter/syntax-error',
       engine: 'tree-sitter',
       tier: 'syntax',
       severity: 'High',
-      confidence: {
-        level: region.missing && !manyErrors ? 'high' : 'medium',
-        reason: region.missing
-          ? 'The grammar names the exact token it expected at this position, which is a strong signal.'
-          : manyErrors
-            ? 'Several error regions mean the parser lost its place; the first one is the most trustworthy.'
-            : 'An ERROR node is what the parser reports when no rule matches, so the position is real but the cause is not.',
-      },
+      confidence,
       range: {
         startLine: lineIndex + 1,
         startColumn: region.node.startPosition.column + 1,
