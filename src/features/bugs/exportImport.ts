@@ -12,12 +12,16 @@ import {
   saveBugs,
   type StorageLike,
 } from './storage'
+import { resolvePersistentStorage } from '../privacy/storageCore'
 
 export const EXPORT_APP = 'bugpilot'
 export const EXPORT_SCHEMA_VERSION = 1
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 export const MAX_IMPORT_REPORTS = 5000
 export const PREIMPORT_STORAGE_KEY = 'bugpilot.bugs.preimport.v1'
+
+const BACKUP_FAILURE_MESSAGE =
+  'The current reports could not be backed up. Your reports are unchanged. Browser storage may be full or blocked.'
 
 export interface BugExport {
   app: typeof EXPORT_APP
@@ -340,7 +344,8 @@ export function applyBugImport(options: {
 
   let rawCurrent: string | null
   try {
-    const target = storage ?? window.localStorage
+    const target = storage ?? resolvePersistentStorage()
+    if (!target) throw new Error('Storage unavailable')
     rawCurrent = target.getItem(BUGS_STORAGE_KEY)
   } catch {
     return {
@@ -369,14 +374,19 @@ export function applyBugImport(options: {
     replaced = currentBugs.length
   }
 
-  const backupTarget = storage ?? window.localStorage
+  const backupTarget = storage ?? resolvePersistentStorage()
+  if (!backupTarget) {
+    return {
+      ok: false,
+      message: BACKUP_FAILURE_MESSAGE,
+    }
+  }
   try {
     backupTarget.setItem(PREIMPORT_STORAGE_KEY, rawCurrent ?? '')
   } catch {
     return {
       ok: false,
-      message:
-        'The current reports could not be backed up. Your reports are unchanged. Browser storage may be full or blocked.',
+      message: BACKUP_FAILURE_MESSAGE,
     }
   }
 

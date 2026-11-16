@@ -10,6 +10,7 @@ import {
 } from './types'
 import { validateBugDraft, validateSavedDiagnosis } from './validation'
 import { createSampleBugs } from './samples'
+import { resolvePersistentStorage } from '../privacy/storageCore'
 
 export const BUGS_STORAGE_KEY = 'bugpilot.bugs.v1'
 export const BUG_RECOVERY_STORAGE_KEY = 'bugpilot.bugs.recovery.v1'
@@ -40,12 +41,7 @@ export type SaveBugsResult =
   | { ok: false; message: string }
 
 function getDefaultStorage(): StorageLike | null {
-  try {
-    if (typeof window === 'undefined') return null
-    return window.localStorage
-  } catch {
-    return null
-  }
+  return resolvePersistentStorage()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

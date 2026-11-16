@@ -1,3 +1,5 @@
+import { resolvePersistentStorage } from '../privacy/storageCore'
+
 export const THEME_STORAGE_KEY = 'bugpilot.theme.v1'
 
 export type Theme = 'light' | 'dark'
@@ -8,12 +10,7 @@ export interface ThemeStorage {
 }
 
 function getDefaultStorage(): ThemeStorage | null {
-  try {
-    if (typeof window === 'undefined') return null
-    return window.localStorage
-  } catch {
-    return null
-  }
+  return resolvePersistentStorage()
 }
 
 export function systemPrefersDark(): boolean {
