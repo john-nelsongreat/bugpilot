@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type {
   AnalysisSessionResult,
   AnalyzeUploadOptions,
@@ -10,11 +10,20 @@ import type { ArchiveReadStats } from '../features/analyzer/archive/guard'
 import type { AnalyzerFinding, AnalyzerReport, FileCoverage } from '../features/analyzer/types'
 import { ENGINES_UNAVAILABLE_MESSAGE } from '../features/analyzer/engines/featureProbe'
 import { ENGINES_NOT_RUN_REASON } from '../features/analyzer/analysis/coverage'
-import { resetEngineManifestCache } from '../features/analyzer/engines/downloadPlan'
 import { makeBug, makeSavedDiagnosis } from '../test/factories'
 import { BUGS_STORAGE_KEY, saveBugs } from '../features/bugs/storage'
 import { getAxeViolations } from '../test/axe'
-import { AnalyzePage } from './AnalyzePage'
+
+// `downloadPlan` memoises the manifest promise at module scope, so a page test that ran earlier in
+// this worker hands the gate a cached manifest and the first case never sees the fetch it asserts.
+let AnalyzePage: typeof import('./AnalyzePage').AnalyzePage
+let resetEngineManifestCache: typeof import('../features/analyzer/engines/downloadPlan').resetEngineManifestCache
+
+beforeAll(async () => {
+  vi.resetModules()
+  AnalyzePage = (await import('./AnalyzePage')).AnalyzePage
+  resetEngineManifestCache = (await import('../features/analyzer/engines/downloadPlan')).resetEngineManifestCache
+})
 
 type AnalyzeFunction = (
   input: UploadInput,

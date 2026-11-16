@@ -1,12 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ArchiveEntry } from '../features/analyzer/archive/guard'
-import { buildCleanExport, type CleanExportResult } from '../features/analyzer/cleanExport/build'
-import { authorizeCleanExport } from '../features/analyzer/cleanExport/gate'
+import type { CleanExportResult } from '../features/analyzer/cleanExport/build'
 import type { FixCandidate } from '../features/analyzer/fixes/types'
 import type { AnalyzerFinding, AnalyzerReport } from '../features/analyzer/types'
-import { CleanExportPanel } from '../features/analyzer/ui/CleanExportPanel'
 import { getAxeViolations } from '../test/axe'
 
 vi.mock('../features/analyzer/cleanExport/gate', () => ({
@@ -19,6 +17,19 @@ vi.mock('../features/analyzer/cleanExport/gate', () => ({
 vi.mock('../features/analyzer/cleanExport/build', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/analyzer/cleanExport/build')>()
   return { ...actual, buildCleanExport: vi.fn() }
+})
+
+// Another file in the same worker can evaluate the real gate and builder first, or leave this
+// file's own mocks behind for a later file; binding them after a reset fixes both directions.
+let authorizeCleanExport: typeof import('../features/analyzer/cleanExport/gate').authorizeCleanExport
+let buildCleanExport: typeof import('../features/analyzer/cleanExport/build').buildCleanExport
+let CleanExportPanel: typeof import('../features/analyzer/ui/CleanExportPanel').CleanExportPanel
+
+beforeAll(async () => {
+  vi.resetModules()
+  authorizeCleanExport = (await import('../features/analyzer/cleanExport/gate')).authorizeCleanExport
+  buildCleanExport = (await import('../features/analyzer/cleanExport/build')).buildCleanExport
+  CleanExportPanel = (await import('../features/analyzer/ui/CleanExportPanel')).CleanExportPanel
 })
 
 const FINDING: AnalyzerFinding = {

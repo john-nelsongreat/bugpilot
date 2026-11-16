@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
-import { afterEach, beforeEach, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, vi } from 'vitest'
 
 configure({ asyncUtilTimeout: 15000 })
 
@@ -36,3 +36,11 @@ if (inDom && typeof window.matchMedia !== 'function') {
     }),
   })
 }
+// With `isolate: false` one worker shares a single module registry across files, so a mocked module
+// stays mocked for whoever imports it next — including files that never mock anything and want the
+// real thing (AppLayout.announcement.test.tsx renders the real <App/> and inherits useWorkspace's
+// stub that way). Leave the registry as this file found it so no file's mocks reach the next file.
+afterAll(() => {
+  vi.unstubAllGlobals()
+  vi.resetModules()
+})

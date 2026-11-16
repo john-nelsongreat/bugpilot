@@ -1,8 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AssistantPage } from './AssistantPage'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AttachDiagnosisErrorCode } from '../features/bugs/diagnosis'
 import { makeBug } from '../test/factories'
 
@@ -23,6 +22,15 @@ vi.mock('../app/useWorkspace', () => ({
     dismissToast: vi.fn(),
   }),
 }))
+
+// A page test that runs earlier in the same worker pins the real `useWorkspace`, which throws
+// outside its provider; the page is therefore bound after a registry reset.
+let AssistantPage: typeof import('./AssistantPage').AssistantPage
+
+beforeAll(async () => {
+  vi.resetModules()
+  AssistantPage = (await import('./AssistantPage')).AssistantPage
+})
 
 const TRACEBACK = [
   'Traceback (most recent call last):',

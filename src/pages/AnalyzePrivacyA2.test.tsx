@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   AnalysisSessionResult,
   AnalyzeUploadOptions,
@@ -11,7 +11,6 @@ import type { ArchiveReadStats, ArchiveEntry } from '../features/analyzer/archiv
 import type { FixPlan } from '../features/analyzer/fixes/plan'
 import type { FixCandidate } from '../features/analyzer/fixes/types'
 import type { AnalyzerFinding, AnalyzerReport, FileCoverage } from '../features/analyzer/types'
-import { AnalyzePage } from './AnalyzePage'
 
 vi.mock('../features/analyzer/analysis/verifyFixes', () => ({
   verifyFixCandidates: async (candidates: readonly unknown[]) => ({
@@ -19,6 +18,15 @@ vi.mock('../features/analyzer/analysis/verifyFixes', () => ({
     dropped: [],
   }),
 }))
+
+// This file proves the real clean-export path, so a `CleanExportPanel.test.tsx` that ran earlier in
+// the worker must not hand it that file's stubbed gate and builder. Re-import the page after a reset.
+let AnalyzePage: typeof import('./AnalyzePage').AnalyzePage
+
+beforeAll(async () => {
+  vi.resetModules()
+  AnalyzePage = (await import('./AnalyzePage')).AnalyzePage
+})
 
 const FAKE_SECRET = ['Kp4', 'Mw7', 'Nc2', 'Vb9', 'Xs3'].join('')
 const MASKED_SECRET = `${FAKE_SECRET[0]}…${FAKE_SECRET[FAKE_SECRET.length - 1]}`

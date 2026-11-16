@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { detectLanguage } from '../archive/classify'
 import type { ArchiveEntry } from '../archive/guard'
 import type { GrammarId } from './assets'
-import { DownloadError, loadGrammar } from './treeSitter'
 import type { RuffDiagnostic } from './ruff'
 import { DEFAULT_ENGINE_LIMITS, type EngineHit } from './protocol'
-import { dedupeEngineHits, runEngineFile, type EngineRunContext } from './runFile'
+import type { EngineRunContext } from './runFile'
 
 /**
  * The engine plumbing is tested here with the wasm modules replaced: which engine ran, what a
@@ -104,6 +103,23 @@ vi.mock('./ruff', async (importOriginal) => {
       }
     },
   }
+})
+
+// Without isolation a file that imports the real engine plumbing (`engineWorker.test.ts`) can pin
+// `./treeSitter` and `./runFile` first, leaving these mocks inert. Bind them after a registry reset.
+let DownloadError: typeof import('./treeSitter').DownloadError
+let loadGrammar: typeof import('./treeSitter').loadGrammar
+let dedupeEngineHits: typeof import('./runFile').dedupeEngineHits
+let runEngineFile: typeof import('./runFile').runEngineFile
+
+beforeAll(async () => {
+  vi.resetModules()
+  const treeSitterModule = await import('./treeSitter')
+  DownloadError = treeSitterModule.DownloadError
+  loadGrammar = treeSitterModule.loadGrammar
+  const runFileModule = await import('./runFile')
+  dedupeEngineHits = runFileModule.dedupeEngineHits
+  runEngineFile = runFileModule.runEngineFile
 })
 
 interface NodeSpec {

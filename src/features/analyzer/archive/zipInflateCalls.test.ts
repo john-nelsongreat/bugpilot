@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { buildZip } from '../../../test/zipFixtures'
 
 /**
@@ -19,7 +19,17 @@ vi.mock('fflate', async (importOriginal) => {
   return { ...actual, Inflate: CountingInflate as unknown as typeof actual.Inflate }
 })
 
-import { createMemorySource, readArchiveSource } from './guard'
+// Without isolation a previous file may already have evaluated `./guard`, whose `Inflate` then
+// stays the un-mocked one. Drop the registry before binding the reader so the counter is live.
+let createMemorySource: typeof import('./guard').createMemorySource
+let readArchiveSource: typeof import('./guard').readArchiveSource
+
+beforeAll(async () => {
+  vi.resetModules()
+  const guard = await import('./guard')
+  createMemorySource = guard.createMemorySource
+  readArchiveSource = guard.readArchiveSource
+})
 
 describe('random-access zip: inflate calls follow the classification', () => {
   it('never constructs an inflater for an ignored folder or a binary entry', async () => {

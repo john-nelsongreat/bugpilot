@@ -147,5 +147,10 @@ export default defineConfig({
     // Forked workers intermittently miss the startup timeout on this Windows
     // machine; threads keep the same per-file isolation without process spawn.
     pool: 'threads',
+    // Sharing one module registry across files is what makes the suite cheap. It is only safe
+    // while every file that mocks a production module re-imports it after vi.resetModules(), the
+    // pattern added to the six files listed in handoff-audit/evidence/m1g; a file that wants the
+    // real module can otherwise inherit an earlier file's mock.
+    isolate: false,
   },
 })
