@@ -106,7 +106,7 @@ function isJavaScriptFrameShaped(literal: LiftedLiteral): boolean {
 /**
  * The three shapes that make an unbounded run expensive: a long run with no match available, a long path-shaped run
  * with a dot but no colon pair, and a long digit/colon run. Written as the audit measured them; their lengths are
- * 20,000 characters — `MAX_ERROR_TEXT_LENGTH`, the longest input the engine accepts, so none of them probes a
+ * 20,000 characters — `MAX_ERROR_TEXT_LENGTH`, the longest text any rule scan receives, so none of them probes a
  * path the shipped code can never reach.
  */
 const PAYLOADS: ReadonlyArray<{ readonly name: string; readonly text: string }> = [

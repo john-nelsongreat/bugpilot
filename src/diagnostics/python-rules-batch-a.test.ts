@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_ERROR_TEXT_LENGTH, diagnose } from './engine'
+import { MAX_ACCEPTED_ERROR_TEXT_LENGTH, diagnose } from './engine'
 import {
   pythonJsonDecodeErrorRule,
   pythonRecursionErrorRule,
@@ -774,7 +774,7 @@ describe('Batch A input limits', () => {
 
   it('refuses an oversized batch-A input instead of truncating it', () => {
     const errorText = `ZeroDivisionError: division by zero\n${'log line\n'.repeat(
-      Math.ceil(MAX_ERROR_TEXT_LENGTH / 9) + 1,
+      Math.ceil(MAX_ACCEPTED_ERROR_TEXT_LENGTH / 9) + 1,
     )}`
 
     const result = diagnose({ language: 'auto', errorText })
@@ -783,7 +783,7 @@ describe('Batch A input limits', () => {
     expect(result.matchedSignature).toBeNull()
     expect(result.likelyCause).toMatch(/longer than/i)
     expect(result.limitations.join(' ')).toContain(
-      MAX_ERROR_TEXT_LENGTH.toLocaleString(),
+      MAX_ACCEPTED_ERROR_TEXT_LENGTH.toLocaleString(),
     )
   })
 })

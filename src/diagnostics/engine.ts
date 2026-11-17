@@ -15,6 +15,16 @@ import type {
 
 export const MAX_ERROR_TEXT_LENGTH = 20_000
 
+/**
+ * The longest paste the engine accepts. A paste above MAX_ERROR_TEXT_LENGTH is
+ * analysed inside one window of at most MAX_ERROR_TEXT_LENGTH characters,
+ * anchored on the final exception line; above this bound the engine refuses.
+ */
+export const MAX_ACCEPTED_ERROR_TEXT_LENGTH = 200_000
+
+const WINDOW_LIMITATION =
+  'The paste exceeded 20,000 characters, so the engine analysed only the window around the final exception line; context outside that window was not scanned.'
+
 const ALL_RULES: readonly DiagnosticRule[] = [
   ...pythonRules,
   ...javascriptRules,
@@ -304,11 +314,26 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     )
   }
 
-  if (errorText.length > MAX_ERROR_TEXT_LENGTH) {
+  if (errorText.length > MAX_ACCEPTED_ERROR_TEXT_LENGTH) {
     return unrecognized(
-      `The error text is longer than ${MAX_ERROR_TEXT_LENGTH.toLocaleString()} characters, so no cause can be determined.`,
-      `The engine did not analyze text over ${MAX_ERROR_TEXT_LENGTH.toLocaleString()} characters.`,
+      `The error text is longer than ${MAX_ACCEPTED_ERROR_TEXT_LENGTH.toLocaleString()} characters, so no cause can be determined.`,
+      `The engine did not analyze text over ${MAX_ACCEPTED_ERROR_TEXT_LENGTH.toLocaleString()} characters.`,
     )
+  }
+
+  let analysisText = errorText
+  let lineOffset = 0
+  if (errorText.length > MAX_ERROR_TEXT_LENGTH) {
+    const located = selectExceptionLine(errorText)
+    if (!located) {
+      return unrecognized(
+        'No exception line was found in the supplied text, so no cause can be determined.',
+        'The supplied text did not contain a readable exception line.',
+      )
+    }
+    const window = buildAnalysisWindow(errorText, located)
+    analysisText = window.text
+    lineOffset = window.startLine - 1
   }
 
   const language = record.language as DiagnosticLanguage
@@ -318,7 +343,7 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     typeof record.reproductionDetails === 'string'
       ? record.reproductionDetails
       : ''
-  const selectedLine = selectExceptionLine(errorText)
+  let selectedLine = selectExceptionLine(analysisText)
 
   if (!selectedLine) {
     return unrecognized(
@@ -331,9 +356,9 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
   const candidatesByLanguage = collectCandidates(primaryLine)
   mergeContextCandidates(
     candidatesByLanguage,
-    collectContextCandidates(primaryLine, errorText, selectedLine),
+    collectContextCandidates(primaryLine, analysisText, selectedLine),
   )
-  const signals = collectLanguageSignals(errorText, reproductionDetails)
+  const signals = collectLanguageSignals(analysisText, reproductionDetails)
   const outcome = chooseSelection(language, candidatesByLanguage, signals)
   let selection: CandidateSelection | null =
     outcome.kind === 'match' ? outcome.selection : null
@@ -344,7 +369,26 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     candidatesByLanguage.python.length === 0 &&
     candidatesByLanguage.javascript.length === 0
   ) {
-    selection = selectNeutralCandidate(primaryLine, errorText, selectedLine)
+    selection = selectNeutralCandidate(primaryLine, analysisText, selectedLine)
+  }
+
+  if (lineOffset > 0) {
+    selectedLine = {
+      ...selectedLine,
+      lineNumber: selectedLine.lineNumber + lineOffset,
+    }
+    if (selection !== null && selection.candidate.contextLine) {
+      selection = {
+        ...selection,
+        candidate: {
+          ...selection.candidate,
+          contextLine: {
+            ...selection.candidate.contextLine,
+            lineNumber: selection.candidate.contextLine.lineNumber + lineOffset,
+          },
+        },
+      }
+    }
   }
 
   if (selection === null) {
@@ -382,7 +426,7 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
 
   const context: RuleContext = {
     primaryLine,
-    errorText,
+    errorText: analysisText,
     codeSnippet,
     reproductionDetails,
   }
@@ -420,7 +464,11 @@ export function diagnose(input: DiagnosticInput): DiagnosticResult {
     possibleFix: narrative.possibleFix,
     verificationSteps: narrative.verificationSteps,
     confidence,
-    limitations: [...narrative.limitations, SAFETY_LIMITATION],
+    limitations: [
+      ...narrative.limitations,
+      ...(lineOffset > 0 ? [WINDOW_LIMITATION] : []),
+      SAFETY_LIMITATION,
+    ],
     alternativeExplanations: narrative.alternativeExplanations,
   }
 }
@@ -1111,6 +1159,39 @@ function selectExceptionLine(errorText: string): SelectedLine | null {
   })
 
   return lastException ?? lastNodeError ?? lastNonEmpty
+}
+
+function buildAnalysisWindow(
+  errorText: string,
+  located: SelectedLine,
+): { text: string; startLine: number } {
+  const starts: number[] = [0]
+  for (
+    let position = errorText.indexOf('\n');
+    position !== -1;
+    position = errorText.indexOf('\n', position + 1)
+  ) {
+    starts.push(position + 1)
+  }
+
+  const locatedIndex = located.lineNumber - 1
+  let end = errorText.length
+  if (end - starts[locatedIndex] > MAX_ERROR_TEXT_LENGTH) {
+    end = starts[locatedIndex] + MAX_ERROR_TEXT_LENGTH
+  }
+
+  let firstIndex = locatedIndex
+  while (
+    firstIndex > 0 &&
+    end - starts[firstIndex - 1] <= MAX_ERROR_TEXT_LENGTH
+  ) {
+    firstIndex -= 1
+  }
+
+  return {
+    text: errorText.slice(starts[firstIndex], end),
+    startLine: firstIndex + 1,
+  }
 }
 
 function stripConsolePrefix(line: string): string {

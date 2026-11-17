@@ -1274,10 +1274,10 @@ describe('engine support for batch C1', () => {
     expect(javascriptRules).toHaveLength(14)
   })
 
-  it('rejects empty and oversized input', () => {
+  it('refuses empty input and analyses oversized input in its window', () => {
     expect(run('').category).toBe('unrecognized')
-    expect(
-      run(`${BARE_2322}${'x'.repeat(MAX_ERROR_TEXT_LENGTH)}`).category,
-    ).toBe('unrecognized')
+    const oversized = run(`${BARE_2322}${'x'.repeat(MAX_ERROR_TEXT_LENGTH)}`)
+    expect(oversized.category).toBe('typescript-error')
+    expect(oversized.matchedSignature).toBe('error TS2322: <message>')
   })
 })

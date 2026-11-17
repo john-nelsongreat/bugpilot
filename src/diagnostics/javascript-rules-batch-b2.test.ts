@@ -744,7 +744,7 @@ describe('Input limits and labels', () => {
     expect(result.matchedSignature).toBeNull()
   })
 
-  it('rejects oversized input instead of analysing it', () => {
+  it('analyses oversized input inside the window around its exception line', () => {
     const result = diagnose({
       language: 'javascript',
       errorText:
@@ -752,8 +752,8 @@ describe('Input limits and labels', () => {
         'x'.repeat(MAX_ERROR_TEXT_LENGTH),
     })
 
-    expect(result.category).toBe('unrecognized')
-    expect(result.matchedSignature).toBeNull()
+    expect(result.category).toBe('type-mismatch')
+    expect(result.matchedSignature).toBe('TypeError: <JavaScript type mismatch>')
   })
 
   it('registers the new categories with readable labels', () => {

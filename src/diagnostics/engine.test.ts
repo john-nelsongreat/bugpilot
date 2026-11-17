@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_ERROR_TEXT_LENGTH, diagnose } from './engine'
+import { MAX_ACCEPTED_ERROR_TEXT_LENGTH, MAX_ERROR_TEXT_LENGTH, diagnose } from './engine'
 import type { DiagnosticInput } from './types'
 
 describe('diagnose', () => {
@@ -355,7 +355,7 @@ describe('diagnose', () => {
 
   it('refuses an oversized input instead of analyzing a truncated buffer', () => {
     const errorText = `ModuleNotFoundError: No module named 'requests'\n${'log line\n'.repeat(
-      Math.ceil(MAX_ERROR_TEXT_LENGTH / 9) + 1,
+      Math.ceil(MAX_ACCEPTED_ERROR_TEXT_LENGTH / 9) + 1,
     )}`
 
     const result = diagnose({ language: 'auto', errorText })
@@ -364,8 +364,38 @@ describe('diagnose', () => {
     expect(result.matchedSignature).toBeNull()
     expect(result.likelyCause).toMatch(/longer than/i)
     expect(result.limitations.join(' ')).toContain(
-      MAX_ERROR_TEXT_LENGTH.toLocaleString(),
+      MAX_ACCEPTED_ERROR_TEXT_LENGTH.toLocaleString(),
     )
+  })
+
+  it('analyses an oversized input inside a window anchored on the final exception line', () => {
+    const filler = 'log line\n'.repeat(3000)
+    const errorText = `${filler}ModuleNotFoundError: No module named 'requests'\nfinal summary line\n`
+
+    const result = diagnose({ language: 'auto', errorText })
+
+    expect(result.category).not.toBe('unrecognized')
+    expect(result.matchedSignature).not.toBeNull()
+    expect(result.evidence[0]?.lineNumber).toBe(filler.split('\n').length)
+    expect(result.limitations.join(' ')).toContain('window')
+  })
+
+  it('keeps the single-window path at the bound and refuses past the accepted bound', () => {
+    const exceptionLine = "ModuleNotFoundError: No module named 'requests'"
+    const atBound = `${exceptionLine}\n${'log line\n'.repeat(
+      Math.floor((MAX_ERROR_TEXT_LENGTH - exceptionLine.length - 1) / 9),
+    )}`
+    expect(atBound.length).toBeLessThanOrEqual(MAX_ERROR_TEXT_LENGTH)
+    expect(
+      diagnose({ language: 'auto', errorText: atBound }).category,
+    ).not.toBe('unrecognized')
+
+    const overAccepted = `${exceptionLine}\n${'log line\n'.repeat(
+      Math.ceil(MAX_ACCEPTED_ERROR_TEXT_LENGTH / 9) + 1,
+    )}`
+    expect(
+      diagnose({ language: 'auto', errorText: overAccepted }).category,
+    ).toBe('unrecognized')
   })
 
   it('handles malformed requests without throwing', () => {

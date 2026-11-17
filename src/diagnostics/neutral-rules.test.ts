@@ -249,7 +249,12 @@ describe('language-neutral rule support in the engine', () => {
     ])
   })
 
-  it('leaves empty and oversized input handling unchanged', () => {
+  it('keeps empty and oversized input refusals per language', () => {
+    const noSignatureCause: Record<DiagnosticLanguage, RegExp> = {
+      auto: /No supported exception signature was found/,
+      python: /No supported Python signature matched/,
+      javascript: /No supported JavaScript signature matched/,
+    }
     for (const language of MODES) {
       const empty = diagnose({ language, errorText: '   \n\t\n' })
       expect(empty.category).toBe('unrecognized')
@@ -260,7 +265,8 @@ describe('language-neutral rule support in the engine', () => {
         errorText: `${NOT_A_REPOSITORY}\n${'x'.repeat(20_001)}`,
       })
       expect(oversized.category).toBe('unrecognized')
-      expect(oversized.likelyCause).toMatch(/longer than 20,000 characters/)
+      expect(oversized.matchedSignature).toBeNull()
+      expect(oversized.likelyCause).toMatch(noSignatureCause[language])
     }
   })
 

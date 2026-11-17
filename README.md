@@ -624,7 +624,7 @@ Windows PowerShell and Command Prompt commands come first in every fix, with the
 ### Unrecognised input and limits
 
 - Empty error text is rejected by the form before analysis.
-- Input longer than **20,000 characters** is not analysed. The assistant shows the current character count and an over-limit error, and the engine itself also refuses oversized input instead of truncating it.
+- Input longer than **20,000 characters** is not analysed. The assistant shows the current character count and an over-limit error. The engine accepts up to **200,000 characters** by analysing a window of at most 20,000 characters around the final exception line (the Assistant form's own 20,000-character cap is unchanged until the deferred interface work), and refuses longer input instead of truncating it.
 - If no readable exception line exists, no supported signature matches, or `auto` cannot resolve a signature shared by both languages, the result is `unrecognized` with `matchedSignature: null`, no possible fix, low confidence, general debugging and verification steps, and an explicit limitation. The assistant does not invent a cause.
 - Malformed direct calls to `diagnose()` are handled without throwing and return an unrecognised result.
 
