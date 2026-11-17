@@ -6,8 +6,9 @@
 // delivered the real module in both states (evidence/m1i-probe/probe.log arm 2), the consumer path delivered
 // the stub in one (evidence/m1i/v6probe-20261116T200552Z.log arm 2). Only the second can report the hazard.
 //
-// Keep this file SMALLER than src/registryPolluter.test.ts so the cold-checkout size ordering puts the
-// polluter first and the hazard is actually exercised.
+// RegistryOrderSequencer in vite.config.ts runs this file after src/registryPolluter.test.ts so the hazard
+// is actually exercised; it stays smaller than the polluter because the byte assertion there is the
+// backstop if that pin is ever removed.
 // toBeTruthy is load-bearing, not stylistic. Both obvious alternatives are vacuous in a direction this round
 // measured: toBeDefined() passes for the stub's null, and typeof null === 'object' so a type test passes for it
 // too. A React context object is truthy; the stub's null is not.

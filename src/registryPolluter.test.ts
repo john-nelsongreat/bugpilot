@@ -7,12 +7,13 @@
 // later importer receives the binding that instance captured. That cached consumer is exactly what
 // src/test/setup.ts's afterAll reset has to clear, and src/test/registryConsumerFixture.ts is this guard's.
 //
-// The ordering this pair depends on is vitest's own, not an argument or a flag: with no cached result for
-// a file, BaseSequencer.sort orders by size, largest first, and a cold CI checkout (`npm ci` deletes
-// node_modules/.vite/**/results.json) has no cached results at all. So this file must stay LARGER than
-// src/registryVictim.test.ts, and the byte assertion below is what fails loudly if someone edits the
-// victim into being bigger and silently turns this guard into a no-op. Do not restore ordering by
-// padding this file with filler; if the sizes drift, say so in your report instead.
+// This file has to run before src/registryVictim.test.ts, and RegistryOrderSequencer in vite.config.ts is
+// what makes that true. The older mechanism was size: with no cached result for a file, BaseSequencer.sort
+// orders by size, largest first, and a cold CI checkout (`npm ci` deletes
+// node_modules/.vite/**/results.json) has no cached results at all. The byte assertion below is kept as
+// the backstop for a run where that pin is gone, so it still fails loudly if someone edits the victim into
+// being bigger. Do not restore ordering by padding this file with filler; if the sizes drift, say so in
+// your report instead.
 //
 // The tmpdir handshake, not an assertion, is what carries state between the three files: globals are
 // per worker thread, so a file is the only channel that survives a worker change.

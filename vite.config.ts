@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vitest/config'
+import { BaseSequencer, type TestSpecification } from 'vitest/node'
 
 /**
  * Everything a browser needs in order to run a WebAssembly engine has to be served
@@ -129,6 +130,30 @@ function engineManifestPlugin(outDir: string): Plugin {
   }
 }
 
+/**
+ * The registry trio only exercises the shared-registry leak in one order: `registryPolluter`
+ * registers a mock and evaluates the consumer fixture, `registryVictim` imports that consumer, and
+ * `registryHygieneCensus` adjudicates what the victim recorded. The default sequencer puts
+ * previously-failed files first and then longest-first, so one census red moves the census ahead of
+ * its own inputs, where the only mark it can read is one an earlier run left behind (measured
+ * 2026-11-17: census at line 47 of evidence/loop2l9/audit/audit-G4c-full-suite.log, its polluter at
+ * 299). Pinning the trio's relative order makes the guard's premise enforced rather than usual.
+ */
+const REGISTRY_ORDER = ['registryPolluter', 'registryVictim', 'registryHygieneCensus']
+
+class RegistryOrderSequencer extends BaseSequencer {
+  override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
+    const sorted = await super.sort(files)
+    const trio = REGISTRY_ORDER.map((name) => sorted.find((spec) => spec.moduleId.includes(name))).filter(
+      (spec): spec is TestSpecification => spec !== undefined,
+    )
+    if (trio.length === 0) return sorted
+    const others = sorted.filter((spec) => !trio.includes(spec))
+    const at = Math.min(sorted.findIndex((spec) => trio.includes(spec)), others.length)
+    return [...others.slice(0, at), ...trio, ...others.slice(at)]
+  }
+}
+
 export default defineConfig({
   plugins: [react(), engineManifestPlugin('dist')],
   build: {
@@ -144,6 +169,7 @@ export default defineConfig({
     restoreMocks: true,
     testTimeout: 60000,
     fileParallelism: false,
+    sequence: { sequencer: RegistryOrderSequencer },
     // Forked workers intermittently miss the startup timeout on this Windows
     // machine; threads keep the same per-file isolation without process spawn.
     pool: 'threads',

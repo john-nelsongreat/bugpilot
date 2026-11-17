@@ -1,8 +1,9 @@
 /// <reference types="node" />
 // The anti-vacuity half of the pair. The victim's own assertions pass when it runs first, so on their
-// own they cannot tell a closed leak from an untested arrangement. This file is both the smallest and
-// the cheapest of the three, which puts it last in the cold size ordering and last in the warm
-// duration ordering too, so by the time it runs the victim has recorded which case happened.
+// own they cannot tell a closed leak from an untested arrangement. This file therefore has to run last
+// of the three, and that is enforced rather than hoped for: RegistryOrderSequencer in vite.config.ts
+// pins the trio's relative order. Without that pin the default sequencer's failed-first rule can put
+// this file ahead of the victim, where the only mark on disk is one a previous run left behind.
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
