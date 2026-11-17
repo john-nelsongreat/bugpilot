@@ -31,6 +31,7 @@ import type { FileAnalysis } from './engine'
 import { makeFinding } from './finding'
 import { splitGeneratedEntries } from './generated'
 import { IGNORE_MANIFEST_NAME, matchIgnoreManifest, parseIgnoreManifest } from '../suppression/manifest'
+import { applyInlineWaivers } from '../suppression/waivers'
 import { sensitiveFindings } from '../rules/sensitiveFiles'
 import {
   buildReport,
@@ -639,6 +640,13 @@ export async function analyzeUpload(
       })
     }
   }
+
+  // One call site, here: the coverage table, the report and the retained file texts are all built
+  // from `analyses`, so a waiver applied further down would let those consumers disagree about what
+  // was found. The sentence goes into the limitations the report already carries, not into prose.
+  const waivers = applyInlineWaivers(analyses, entries)
+  analyses = waivers.analyses
+  if (waivers.summary) extraLimitations.push(waivers.summary)
 
   const coverage: FileCoverage[] = buildCoverage(entries, skipped, analyses, tsStatus, engineStatus)
   const report = buildReport({

@@ -315,4 +315,27 @@ describe('analysis session', () => {
     expect(result.report).toBeNull()
     expect(ts.dispose).toHaveBeenCalledTimes(1)
   })
+
+  it('an inline waiver is seen by coverage and the report alike', async () => {
+    const source = '// bugpilot:ignore bugpilot/generic/todo-marker\nconst a = 1 // TODO\n'
+    const entries = [entry('src/app.js', source)]
+    const waived = { ...finding('src/app.js'), range: { startLine: 2, startColumn: 1, endLine: 2, endColumn: 6 } }
+
+    const result = await analyzeUpload(
+      { kind: 'archive', bytes: new Uint8Array([1]) },
+      { archiveBytes: 1 },
+      {
+        readArchive: async () => readResult(entries),
+        analyzer: fakeAnalyzer([analysis('src/app.js', [waived])]),
+        createTsClient: async () => fakeTsClient(() => tsResult({})).client,
+      },
+    )
+
+    expect(result.status).toBe('completed')
+    expect(result.report?.findings).toHaveLength(0)
+    expect(result.report?.limitations.some((line) => line.includes('1 finding was waived'))).toBe(true)
+    const coverage = result.report?.coverage.find((file) => file.file === 'src/app.js')
+    expect(coverage?.findings).toBe(0)
+    expect(coverage?.tiers.find((tier) => tier.tier === 'pattern')?.ran).toBe(true)
+  })
 })
