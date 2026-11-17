@@ -9,6 +9,7 @@ import type {
 import { archiveReasonMessage } from '../archive/reasons'
 import {
   DEFAULT_ARCHIVE_LIMITS,
+  MAX_MANIFEST_SET_ASIDE,
   MAX_RETAINED_TEXT_BYTES,
   type ArchiveLimits,
 } from '../archive/limits'
@@ -29,6 +30,7 @@ import { buildCoverage, ENGINES_NOT_RUN_REASON, type EngineStatus, type TypeScri
 import type { FileAnalysis } from './engine'
 import { makeFinding } from './finding'
 import { splitGeneratedEntries } from './generated'
+import { IGNORE_MANIFEST_NAME, matchIgnoreManifest, parseIgnoreManifest } from '../suppression/manifest'
 import { sensitiveFindings } from '../rules/sensitiveFiles'
 import {
   buildReport,
@@ -424,11 +426,54 @@ export async function analyzeUpload(
   for (const entry of entries) collectSensitive(entry.name, entry.text)
   for (const item of skipped) collectSensitive(item.name, null)
 
+  // Read the manifest from the pre-split entry list: a file whose own header says "auto-generated" is set
+  // aside by the generated rule, and a list written in such a file would otherwise stop applying because
+  // another rule happened to dislike its first line. What gets set aside is decided below, from what is
+  // read here. The sensitive pass above already ran over every file, so no ordering here hides a
+  // credential.
+  const manifest = parseIgnoreManifest(
+    entries.find((entry) => entry.name === IGNORE_MANIFEST_NAME)?.text ?? null,
+  )
+
   // Generated and vendored files are set aside before anything is analysed. The override reads
   // them too, but `.git` is never read at any setting.
   const generated = splitGeneratedEntries(entries, options.includeGenerated === true)
   entries = generated.kept
   skipped = [...skipped, ...generated.skipped]
+  // The archive's own ignore list is honoured after the generated/vendored set-aside and before
+  // notebooks expand, so a pattern naming a notebook sets the whole notebook aside rather than
+  // leaving its cells behind. Sensitive-data findings were collected before either split, so listing
+  // a file here cannot hide a credential in it.
+  const manifestSkipped: ArchiveSkippedEntry[] = []
+  let manifestSetAside = 0
+  const overCap: string[] = []
+  if (manifest.ruleCount > 0) {
+    const kept: ArchiveEntry[] = []
+    for (const entry of entries) {
+      const match = matchIgnoreManifest(entry.name, manifest)
+      if (!match.ignored) {
+        kept.push(entry)
+        continue
+      }
+      if (manifestSetAside >= MAX_MANIFEST_SET_ASIDE) {
+        overCap.push(entry.name)
+        kept.push(entry)
+        continue
+      }
+      manifestSetAside += 1
+      manifestSkipped.push({
+        name: entry.name,
+        code: 'ignored_by_manifest',
+        message: archiveReasonMessage(
+          'ignored_by_manifest',
+          entry.name,
+          match.pattern ?? undefined,
+        ),
+      })
+    }
+    entries = kept
+    skipped = [...skipped, ...manifestSkipped]
+  }
 
   // A notebook is one JSON document holding many small programs plus whatever a kernel printed.
   // It is split before anything is analysed, so each cell reaches the rules, the TypeScript check
@@ -534,6 +579,11 @@ export async function analyzeUpload(
     ...(notebookNote ? [notebookNote] : []),
     ...(partial ? [partial.message] : []),
     ...(resumedWithoutProgress ? [RESUME_NO_PROGRESS_MESSAGE] : []),
+    ...(overCap.length > 0
+      ? [
+          `The archive's own ${IGNORE_MANIFEST_NAME} matched ${manifestSetAside + overCap.length} file(s), but the cap allows ${manifestSetAside} to be set aside, so ${overCap.length} of them were analysed anyway.`,
+        ]
+      : []),
   ]
 
   if (engineFiles.length > 0 && options.engines === 'approved') {

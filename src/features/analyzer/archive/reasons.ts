@@ -53,6 +53,7 @@ export const ARCHIVE_SKIP_CODES = [
   'encrypted_entry',
   'unsupported_compression',
   'crc_mismatch',
+  'ignored_by_manifest',
 ] as const
 
 export type ArchiveRefusalCode = (typeof ARCHIVE_REFUSAL_CODES)[number]
@@ -161,6 +162,8 @@ const PLAIN_MESSAGES: Record<ArchiveReasonCode, PlainMessage> = {
     `"${name}" uses compression method ${extra ?? 'unknown'}, which BugPilot cannot unpack, so it skipped this entry and kept going.`,
   crc_mismatch: (name) =>
     `"${name}" does not match the checksum stored in the archive, so BugPilot skipped this entry and kept going.`,
+  ignored_by_manifest: (name, extra) =>
+    `"${name}" is listed in this archive's own .bugpilotignore${extra ? ` (matched "${extra}")` : ''}, so BugPilot did not analyse it. Sensitive-data findings from the file are still reported, and files past the ignore cap are analysed anyway.`,
 }
 
 /**

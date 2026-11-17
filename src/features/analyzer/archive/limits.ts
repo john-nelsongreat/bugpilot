@@ -91,6 +91,13 @@ export const MAX_RETAINED_TEXT_BYTES = 32 * 1024 * 1024
  */
 export const MAX_FINDINGS_STORED = 200_000
 
+/**
+ * How many files an archive's own ignore manifest may set aside. Past this the rest are analysed anyway
+ * and the report says so, because a file list supplied by the thing being scanned cannot be allowed to
+ * blank the scan.
+ */
+export const MAX_MANIFEST_SET_ASIDE = 200
+
 /** `navigator.deviceMemory` at or below this many GiB means the tab shares a small machine. */
 const SMALL_DEVICE_MEMORY_GIB = 2
 
