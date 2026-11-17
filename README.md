@@ -1157,7 +1157,7 @@ src/features/analyzer/
 │                  lazy grammar/Ruff loading with byte ceilings and budgets, tree-sitter syntax findings,
 │                  AST queries, the 21-rule Ruff mapping, credential redaction for engine quotes, and the
 │                  download plan that reads the build's engine manifest
-├─ export/         Export filtering and the Markdown/JSON writers and download helpers
+├─ export/         Export filtering and the Markdown/JSON/SARIF writers and download helpers
 ├─ fixes/          Fix candidates, the four fixers, overlap resolution, and text-edit helpers
 ├─ review/         jsdiff-backed unified/side-by-side model, line mapping and credential masking, plus the diff worker and its client
 ├─ rules/          Generic, secret, sensitive-file-name, and JSON syntax rules plus shared text helpers

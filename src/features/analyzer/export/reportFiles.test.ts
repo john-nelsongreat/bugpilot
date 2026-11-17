@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { AnalyzerReport } from '../types'
-import { renderReportMarkdown, reportFileStem, reportForExport } from './reportFiles'
+import type { Severity } from '../../bugs/types'
+import type { AnalyzerFinding, AnalyzerReport } from '../types'
+import { renderReportMarkdown, renderReportSarif, reportFileStem, reportForExport } from './reportFiles'
 
 const REPORT: AnalyzerReport = {
   schemaVersion: 1,
@@ -149,5 +150,124 @@ describe('report export', () => {
     expect(reportFileStem('2026-02-03T04:05:06.000Z')).toBe(
       'bugpilot-analysis-2026-02-03T04-05-06-000Z',
     )
+  })
+})
+
+describe('SARIF export', () => {
+  const finding = (overrides: Partial<AnalyzerFinding>): AnalyzerFinding => ({
+    ...REPORT.findings[0],
+    ...overrides,
+  })
+
+  function sarifOf(report: AnalyzerReport) {
+    return JSON.parse(renderReportSarif(report)) as {
+      $schema: string
+      version: string
+      runs: {
+        tool: { driver: { name: string; rules: { id: string; shortDescription: { text: string } }[] } }
+        results: {
+          ruleId: string
+          ruleIndex: number
+          level: string
+          message: { text: string }
+          locations: { physicalLocation: { artifactLocation: { uri: string }; region: Record<string, number> } }[]
+        }[]
+      }[]
+    }
+  }
+
+  it('emits a 2.1.0 log with a schema reference and one BugPilot run', () => {
+    const sarif = sarifOf(REPORT)
+
+    expect(sarif.$schema).toBe('https://json.schemastore.org/sarif-2.1.0.json')
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs).toHaveLength(1)
+    expect(sarif.runs[0].tool.driver.name).toBe('BugPilot')
+  })
+
+  it('maps every severity through the fixed table without recomputing', () => {
+    const severities: Severity[] = ['Critical', 'High', 'Medium', 'Low']
+    const report: AnalyzerReport = {
+      ...REPORT,
+      findings: severities.map((severity) => finding({ severity })),
+    }
+    const [run] = sarifOf(report).runs
+
+    expect(run.results.map((result) => result.level)).toEqual(['error', 'error', 'warning', 'note'])
+  })
+
+  it('emits one descriptor per distinct ruleId, sorted, with ruleIndex on every result', () => {
+    const report: AnalyzerReport = {
+      ...REPORT,
+      findings: [
+        finding({ ruleId: 'bugpilot/b/rule-two' }),
+        finding({ ruleId: 'bugpilot/a/rule-one' }),
+        finding({ ruleId: 'bugpilot/b/rule-two' }),
+      ],
+    }
+    const [run] = sarifOf(report).runs
+
+    expect(run.tool.driver.rules.map((rule) => rule.id)).toEqual([
+      'bugpilot/a/rule-one',
+      'bugpilot/b/rule-two',
+    ])
+    expect(run.results.map((result) => result.ruleIndex)).toEqual([1, 0, 1])
+  })
+
+  it('describes each rule by the ruleId already in the report model', () => {
+    const [run] = sarifOf(REPORT).runs
+
+    expect(run.tool.driver.rules).toEqual([
+      {
+        id: 'bugpilot/generic/merge-conflict-markers',
+        shortDescription: { text: 'bugpilot/generic/merge-conflict-markers' },
+      },
+    ])
+  })
+
+  it('percent-encodes each path segment of the artifact uri', () => {
+    const report: AnalyzerReport = {
+      ...REPORT,
+      findings: [finding({ file: 'my folder/app file.ts' })],
+    }
+    const [run] = sarifOf(report).runs
+
+    expect(run.results[0].locations[0].physicalLocation.artifactLocation.uri).toBe(
+      'my%20folder/app%20file.ts',
+    )
+  })
+
+  it('emits a 1-based region and omits columns the finding does not have', () => {
+    const report: AnalyzerReport = {
+      ...REPORT,
+      findings: [finding({ range: { startLine: 3, endLine: 4 } }), REPORT.findings[0]],
+    }
+    const [run] = sarifOf(report).runs
+
+    expect(run.results[0].locations[0].physicalLocation.region).toEqual({ startLine: 3, endLine: 4 })
+    expect(run.results[1].locations[0].physicalLocation.region).toEqual({
+      startLine: 1,
+      startColumn: 1,
+      endLine: 1,
+      endColumn: 8,
+    })
+  })
+
+  it('keeps fixes, evidence and limitations out of the SARIF payload', () => {
+    const sarifText = renderReportSarif(REPORT)
+    const [run] = sarifOf(REPORT).runs
+
+    expect(Object.keys(run.results[0])).toEqual(['ruleId', 'ruleIndex', 'level', 'message', 'locations'])
+    expect(run.results[0].message.text).toBe('Merge conflict marker left in the file.')
+    expect(sarifText).not.toContain('<<<<<<< HEAD')
+    expect(sarifText).not.toContain('manual-only')
+  })
+
+  it('exports a report with no findings as a valid empty run', () => {
+    const report: AnalyzerReport = { ...REPORT, findings: [] }
+    const [run] = sarifOf(report).runs
+
+    expect(run.tool.driver.rules).toEqual([])
+    expect(run.results).toEqual([])
   })
 })

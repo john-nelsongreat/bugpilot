@@ -1,3 +1,4 @@
+import type { Severity } from '../../bugs/types'
 import type { AnalyzerFinding, AnalyzerReport } from '../types'
 import {
   codeFenceFor,
@@ -214,6 +215,74 @@ export function downloadReportJson(report: AnalyzerReport, includeSnippets: bool
   downloadTextFile(
     `${reportFileStem(prepared.generatedAt)}.json`,
     JSON.stringify(prepared, null, 2),
+    'application/json;charset=utf-8',
+  )
+}
+
+const SARIF_SCHEMA = 'https://json.schemastore.org/sarif-2.1.0.json'
+
+type SarifLevel = 'error' | 'warning' | 'note'
+
+const SARIF_LEVEL_BY_SEVERITY: Record<Severity, SarifLevel> = {
+  Critical: 'error',
+  High: 'error',
+  Medium: 'warning',
+  Low: 'note',
+}
+
+/**
+ * SARIF 2.1.0 mirror of the report. Severities are mapped, never recomputed, and evidence
+ * quotes, fixes and limitations stay out of the payload: the JSON export remains the channel
+ * that carries the honesty lines. Rule descriptors reuse the rule ids already in the report
+ * model; no rule catalog is imported here so the page chunk stays free of the rule modules.
+ */
+export function renderReportSarif(report: AnalyzerReport): string {
+  const ruleIds = Array.from(new Set(report.findings.map((finding) => finding.ruleId))).sort()
+  const results = report.findings.map((finding) => ({
+    ruleId: finding.ruleId,
+    ruleIndex: ruleIds.indexOf(finding.ruleId),
+    level: SARIF_LEVEL_BY_SEVERITY[finding.severity],
+    message: { text: finding.message },
+    locations: [
+      {
+        physicalLocation: {
+          artifactLocation: { uri: finding.file.split('/').map(encodeURIComponent).join('/') },
+          region: {
+            startLine: finding.range.startLine,
+            ...(finding.range.startColumn === undefined ? {} : { startColumn: finding.range.startColumn }),
+            endLine: finding.range.endLine,
+            ...(finding.range.endColumn === undefined ? {} : { endColumn: finding.range.endColumn }),
+          },
+        },
+      },
+    ],
+  }))
+  return JSON.stringify(
+    {
+      $schema: SARIF_SCHEMA,
+      version: '2.1.0',
+      runs: [
+        {
+          tool: {
+            driver: {
+              name: 'BugPilot',
+              rules: ruleIds.map((id) => ({ id, shortDescription: { text: id } })),
+            },
+          },
+          results,
+        },
+      ],
+    },
+    null,
+    2,
+  )
+}
+
+/** Same download flow as the Markdown and JSON exports, with the `.sarif` extension. */
+export function downloadReportSarif(report: AnalyzerReport): void {
+  downloadTextFile(
+    `${reportFileStem(report.generatedAt)}.sarif`,
+    renderReportSarif(report),
     'application/json;charset=utf-8',
   )
 }
