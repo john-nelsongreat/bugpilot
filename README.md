@@ -173,27 +173,69 @@ Open `http://localhost:4173`. A preview server is a separate browser origin from
 
 ## Deployment
 
-BugPilot is a static single-page app. A Vercel deployment uses `npm run build` as the build command and `dist` as the output directory. The committed `vercel.json` rewrites requests that do not match an existing file to `/index.html`, so direct visits to client-side routes such as `/bugs` and `/assistant` load the app instead of a server 404.
+BugPilot is a static single-page app. A Vercel deployment uses `npm run build` as the build command and `dist` as the output directory. The committed `vercel.json` rewrites requests that do not match an existing file to `/index.html`, so direct visits to client-side routes such as `/bugs` and `/assistant` load the app instead of a server 404. Requests under `/assets/` are deliberately left out of that fallback: a hashed name the current build does not contain answers 404 rather than serving the app document under a code URL, which is the precondition for caching that directory for a year (see **Asset caching**).
 
 No environment variables or backend are required. Bug reports are stored in each visitor's own browser, so a deployed copy does not share data between visitors. The app is deployed on Vercel at [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
 
 ### Content Security Policy
 
-`vercel.json` carries **two** header rules. The main-document rule is the pre-engine policy
-character-for-character, with only the engine directory carved out of its catch-all; a second,
-scoped rule adds `'wasm-unsafe-eval'` for the files under `assets/engines/` and nothing else.
+`vercel.json` carries **four** header rules whose `source` patterns partition every request path.
+The main-document rule is the pre-engine policy character-for-character, with the hashed asset
+directory carved out of its catch-all; three scoped rules cover that directory, of which only the
+engine one adds `'wasm-unsafe-eval'`.
 
 ```text
-source: /((?!assets/engines/).*)
+source: /((?!assets/).*)                        the document, /favicon.svg, /licenses/…
 default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
-source: /assets/engines/(.*)
+source: /assets/((?!engines/).*)                every hashed app chunk: entry, lazy route, CSS, font
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+Cache-Control: public, max-age=31536000, immutable
+
+source: /assets/engines/((?!manifest.json).*)   the engine worker scripts and every .wasm
 default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+Cache-Control: public, max-age=31536000, immutable
+
+source: /assets/engines/manifest.json           the only mutable pointer in that directory
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+Cache-Control: public, max-age=0, must-revalidate
 ```
 
-Both rules send the same four other headers: `X-Content-Type-Options: nosniff`,
+All four rules send the same four other headers: `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`,
 `Permissions-Policy: camera=(), microphone=(), geolocation=()`.
+
+### Asset caching
+
+Vite names every file it writes under `assets/` with a hash of its bytes, so a name can never
+point at different content twice: a browser that keeps an old copy is not stale, it is correct.
+That is worth a year of `immutable`. On the deployment measured on 2026-11-18 an audit-side probe
+enumerated **35 hashed files** under `/assets/`. Twenty-four were already immutable — the engine
+scripts and `.wasm` modules, from the previous phase — and the other **eleven revalidated on every
+visit: 4,589,033 bytes of build output**, the entry bundle and stylesheet, the TypeScript worker,
+and the lazily-imported route and panel chunks. Those figures are decompressed response bodies for
+the names the probe could read out of the shipped bundles, so they are a floor on the population and
+not a census of it: a chunk no harvester can name is a chunk the probe never requested.
+
+Three things keep the promise honest, and all three are gated:
+
+- **Only hashed names get it.** The rules are split by directory, and everything outside
+  `/assets/` — `favicon.svg`, the licence texts, the document itself — stays on Vercel's
+  revalidating default, because those names do not change when their bytes do.
+- **The mutable pointer revalidates.** `assets/engines/manifest.json` is the file that tells a
+  browser which grammar names are current, so caching it would pin every visitor to the previous
+  generation. The engine rule carves it out with a negative lookahead, and `src/csp.test.ts`
+  asserts the two carve-outs are exact complements for arbitrary names.
+- **A missing hashed name must not become the document.** A header rule is chosen by the request
+  path, so a path the build does not contain still receives whichever rule its prefix claims — and
+  the single-page-app fallback used to cover every path, `/assets/` included. That is not
+  hypothetical: on the same deployment `/assets/engines/web-tree-sitter.wasm` and
+  `/assets/engines/ruff_wasm_bg.js`, two names the deployed manifest does not list, answered **200
+  with the app document, `immutable`, and the engine's WebAssembly policy attached**. A browser that
+  asks for a stale chunk URL would cache HTML under a `.js` URL for a year, surviving every later
+  deploy until the visitor cleared their cache by hand. The fallback now excludes `/assets/`, and
+  `scripts/check-live.mjs` requests `/assets/app-canary-00000000.js` — a hashed name no build can
+  produce — and fails if it is answered with a 200 document.
 
 **Why the allowance is scoped, not global.** WebAssembly needs `wasm-unsafe-eval` in
 `script-src`; `'unsafe-eval'` was never considered and `blob:` was not added. The change was
@@ -201,17 +243,22 @@ kept out of the document policy because the page itself has no WebAssembly need 
 engine worker scripts and the `.wasm` files they load do — and because a global allowance would
 have let any future injected script in the document compile WebAssembly, which is a strictly
 larger attack surface than "the four engine files can". The scoping is done with a negative
-lookahead in the main rule's `source`, so the two rules never both claim a path: a path under
-`assets/engines/` matches only the engine rule, everything else only the main rule. That matters
-because a browser **intersects** repeated `Content-Security-Policy` headers, so an overlapping
-rule would have silently re-blocked WebAssembly. `scripts/check-live.mjs` therefore resolves
-each rule against the path it probes and fails if a path is claimed by more than one rule.
+lookahead, and the four `source` patterns partition the path space: a path under
+`assets/engines/` matches the engine rule — unless it *is* the manifest, which the manifest rule
+takes — any other path under `assets/` matches the app rule, and everything else matches the main
+rule. No path is claimed twice. That matters because a browser **intersects** repeated
+`Content-Security-Policy` headers, so an overlapping rule would have silently re-blocked
+WebAssembly. `scripts/check-live.mjs` therefore resolves each rule against the path it probes and
+fails if a path is claimed by more than one rule.
 
-`src/csp.test.ts` asserts both strings exactly, asserts the main policy is the pre-engine
-string, asserts the only difference between the two is the `'wasm-unsafe-eval'` source, asserts
-neither policy contains `'unsafe-inline'`, `'unsafe-eval'`, `blob:`, `data:` in `script-src` or
-a wildcard source, and asserts that the two `source` patterns are mutually exclusive for a
-sample of real built paths.
+`src/csp.test.ts` asserts the four header blocks against the strings above, asserts the main
+policy is the pre-engine string, asserts the only difference between the engine policy and the
+other three is the `'wasm-unsafe-eval'` source, asserts none of them contains `'unsafe-inline'`,
+`'unsafe-eval'`, `blob:`, `data:` in `script-src` or a wildcard source, asserts the four `source`
+patterns are mutually exclusive for a sample of real built paths and leave no request uncovered at
+the seams (`/assets`, `/assets/engines`, `/assetsengines-x.js`), pins each `Cache-Control` value to
+its own rule, and pins the single-page-app fallback to the one `source` that cannot answer an
+`/assets/` URL with a document.
 
 | Directive | Why it is set |
 | --- | --- |
@@ -233,7 +280,9 @@ No `'unsafe-inline'` is used for scripts or styles anywhere, and no `style-src-a
 
 **WebKit `<select>` `style-src-attr` refusals (re-verified 2026-10-31, live and on a temporary stdlib-only server).** WebKit reports exactly one `style-src-attr` violation for each `<select>` on the page: 4 on `/bugs` (`filter-severity`, `filter-status`, `filter-project`, `sort-reports`), 3 on `/bugs/new` (`severity`, `status`, `fixStatus`), 1 on a report detail (`quick-status`), 1 on `/assistant` (`assistant-language`), and 0 on `/`. Every event was `{ violatedDirective: 'style-src-attr', effectiveDirective: 'style-src-attr', blockedURI: 'inline', sample: '', disposition: 'enforce' }`, reported from `assets/index-CP3t6mAD.js` at `8:89104`. A temporary copy of the project outside the repository, built with `--sourcemap` from the same `node_modules` (minified line 8 byte-identical to the shipped file), maps that position to `ownerDocument.createElement("select")` inside `completeWork()` in `node_modules/react-dom/cjs/react-dom-client.production.js:8514` (react-dom 19.3.1) — **React DOM internals, not application code**. Application source has no inline style at all (`grep -rn "style=" src/` matches nothing), and hooks installed before load on `Element.prototype.setAttribute`, `setAttributeNS`, `removeAttribute`, `CSSStyleDeclaration.prototype.setProperty`, the `cssText` setter, the `Element.style` setter, plus a `MutationObserver` filtered to the `style` attribute, recorded **zero** style writes on every route, live and locally. Pages with no React reproduce the same one-per-`<select>` count, including `<select>` markup parsed straight from HTML — where the event's `sourceFile` is empty, so no script frame is on the stack — and a `<select>` created but never inserted; `<option>`, `<input>`, and `<textarea>` never trigger it. All of them fire during the first React mount, before any interaction: the theme toggle and opening a `<select>` add none. Per engine on the live site: WebKit equals the number of `<select>` elements, **Chromium 0, Firefox 0**. The refusal changes nothing visible — the same routes served with and without the CSP header produced **0 differing pixels** across 12 paired light/dark screenshots at 1280x900 and 390x844, and the `<select>` elements keep no `style` attribute and an empty `style.cssText` in both cases. The only computed-style differences were `html`/`body` height on the narrow viewport, which also varied between repeats of the *same* configuration, so it is run-to-run layout jitter, not the refusal. Conclusion: this is console and violation-report noise in WebKit only, with no user-visible effect, and it is not fixable from application code without replacing every `<select>` with a custom widget. `style-src` stays `'self'`; `'unsafe-inline'` was not added.
 
-**How it was checked locally.** On 2026-10-25 the production build was served by a temporary stdlib-only Node server outside the repository. It read the headers from `vercel.json` at startup, applied all of them, and used the same SPA fallback. Fresh Chromium contexts at 1440x700 with real 15px scrollbars loaded every route directly and exercised first-run seeding, create/edit/delete, search/filter/sort, fix states, both themes, the Debug Assistant (Python, JavaScript, unrecognised, empty, over-limit, copy, checklist, clear), export, import preview/merge and the replace gate, toasts, the joke rotation, keyboard focus, and the then-existing delete and import dialogs: **216 assertions, 0 CSP violations, 0 console errors, 0 page errors**, with requests only to the local server. A throwaway page then confirmed that an inline script, an external image, and an external `fetch` were each blocked and reported as a violation (exactly three expected violations). `src/csp.test.ts` also reads this file during `npm test` and fails if the global rule loses the policy, the required directives change, or an unsafe source appears.
+**How it was checked locally.** On 2026-10-25 the production build was served by a temporary stdlib-only Node server outside the repository. It read the headers from `vercel.json` at startup, applied all of them, and used the same SPA fallback. Fresh Chromium contexts at 1440x700 with real 15px scrollbars loaded every route directly and exercised first-run seeding, create/edit/delete, search/filter/sort, fix states, both themes, the Debug Assistant (Python, JavaScript, unrecognised, empty, over-limit, copy, checklist, clear), export, import preview/merge and the replace gate, toasts, the joke rotation, keyboard focus, and the then-existing delete and import dialogs: **216 assertions, 0 CSP violations, 0 console errors, 0 page errors**, with requests only to the local server. A throwaway page then confirmed that an inline script, an external image, and an external `fetch` were each blocked and reported as a violation (exactly three expected violations). `src/csp.test.ts` also reads this file during `npm test` and fails if the main-document rule loses
+the policy, the required directives change, an unsafe source appears, or the hashed asset rule
+loses its caching promise.
 
 **What this does not prove.** `npm run dev` and `npm run preview` do **not** apply `vercel.json`; they serve no CSP. The policy reaches users only after a Vercel deployment, and the live response had not yet been inspected when this section was written. Re-run the header command in [Security headers](docs/MANUAL_TEST_CHECKLIST.md#17-security-headers) after deploying and confirm the policy string before treating the production site as protected. A local emulator proves the policy is compatible with the build, not that the host is sending it.
 
@@ -243,7 +292,7 @@ No `'unsafe-inline'` is used for scripts or styles anywhere, and no `style-src-a
 
 `.github/workflows/live-check.yml` runs `scripts/check-live.mjs` once a day at 06:17 UTC, and it can be run by hand from the repository's **Actions** tab (**Live site check** → **Run workflow**). The optional `url` input sends the same checks to another address; leaving it empty uses [bugpilot-lac.vercel.app](https://bugpilot-lac.vercel.app).
 
-The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant`, `/analyze` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares the security headers with the values in `vercel.json` — resolving which header rule is supposed to describe each path, and failing if a path is claimed by more than one rule, because a browser intersects repeated `Content-Security-Policy` headers — fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. For the engines it GETs `/assets/engines/manifest.json`, checks its own headers against the engine rule, then fetches **every file the deployed manifest lists** and checks each one's headers, that the `.wasm` files are served as `application/wasm`, that the engine policy is the `'wasm-unsafe-eval'` one and the rest of the site is not, and that no policy anywhere gained `'unsafe-inline'`, `'unsafe-eval'` or `blob:`. Network errors are retried twice; redirects are reported and not followed.
+The script is a dependency-free Node 24 ES module. It GETs `/`, `/bugs`, `/bugs/new`, `/assistant`, `/analyze` and a nonsense path; each must return HTTP 200 with an HTML body that contains the app root and script and no Vercel 404 marker. It compares the security headers with the values in `vercel.json` — resolving which header rule is supposed to describe each path, and failing if a path is claimed by more than one rule, because a browser intersects repeated `Content-Security-Policy` headers — fetches the script and stylesheet referenced by `/`, checks that every script, stylesheet, image and font URL is same-origin, reports each request time, and fails a request that stays above 8 seconds after retries. Each fetched asset is compared against whichever rule claims its path, and a rule that declares a `Cache-Control` makes that value part of the assertion, so a hashed chunk served without its caching promise goes red instead of merely being served; the observed line names the rule it used. Two rows read the configuration without requesting anything: `vercel.json policy split` checks the engine policy differs from the document policy only in `script-src`, and `vercel.json app asset policy` checks the app rule declares a policy and that it is identical to the document's — the asset directory earns the long cache, not a looser CSP. It also GETs `/assets/app-canary-00000000.js`, a hashed name no build can produce, and fails the `App asset fallback mask` check if that request is answered with a 200 document, because a document cached under a `.js` URL is the one way the immutable promise could outlive every later deploy in a visitor's cache. For the engines it GETs `/assets/engines/manifest.json`, checks its own headers against the rule that claims it (`Cache-Control: public, max-age=0, must-revalidate` included), then fetches **every file the deployed manifest lists** and checks each one's headers, that the `.wasm` files are served as `application/wasm`, that the engine policy is the `'wasm-unsafe-eval'` one and the rest of the site is not, that every path in the manifest is claimed by that one engine rule, and that no policy anywhere gained `'unsafe-inline'`, `'unsafe-eval'` or `blob:`. Network errors are retried twice; redirects are reported and not followed.
 
 Run it locally with:
 
@@ -256,7 +305,7 @@ The first line of every run prints the Node version, the base URL actually used,
 Inside GitHub Actions (`GITHUB_ACTIONS=true`) every failure is also published where the Actions UI shows it without a login:
 
 - Every failed check produces one `::error title=<check>::<observed value and every failing detail>` workflow command, so it appears as a red **annotation** on the run summary page and beside the failing step.
-- Every early-exit guard produces one annotation titled `Live check guard`: an invalid `LIVE_URL`, a `vercel.json` that cannot be read or parsed, a configuration without the global `/(.*)` header block, and a configuration missing one of the required headers. These guards exit before any request is made, which previously left a red run with no visible reason.
+- Every early-exit guard produces one annotation titled `Live check guard`: an invalid `LIVE_URL`, a `vercel.json` that cannot be read, parsed, or has no header rules at all, a configuration without a global header block (the guard names the shapes it accepts — `/(.*)`, `/:path*`, or a guarded catch-all such as `/((?!assets/).*)` — so the message cannot outlive the pattern it describes), a configuration in which no single rule claims the engine manifest or a hashed app asset, and a configuration missing one of the required headers, the app, engine and manifest `Cache-Control` promises included. These guards exit before any request is made, which previously left a red run with no visible reason. A `source` built from a path-to-regexp feature this check does not implement is never guessed at either: the path it should have covered is reported as having no single rule.
 - An unexpected exception is caught at the top level and annotated as `Live check crash` with the error name, message and stack.
 - When `GITHUB_STEP_SUMMARY` is set, the same checks are appended as a markdown table (check, result, observed value, failing details) with the base URL, commit and pass/fail counts, so the whole result is readable on the run page.
 

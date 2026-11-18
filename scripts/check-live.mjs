@@ -25,10 +25,10 @@ export const REQUIRED_HEADERS = Object.freeze([
 export const ENGINE_PATH_PREFIX = '/assets/engines/'
 export const ENGINE_MANIFEST_PATH = '/assets/engines/manifest.json'
 /**
- * The engine files and the manifest are the two rules that also make a caching promise, so a
- * response for them has to carry `Cache-Control` too: the immutable directive is what keeps a
- * content-hashed grammar out of the revalidation path, and the manifest's `must-revalidate` is
- * what lets a new grammar generation reach a browser at all.
+ * The three rules under `/assets/` each make a caching promise, so a response for them has to
+ * carry `Cache-Control` too: the immutable directive is what keeps a content-hashed file out of
+ * the revalidation path, and the manifest's `must-revalidate` is what lets a new grammar
+ * generation reach a browser at all.
  */
 export const ASSET_REQUIRED_HEADERS = Object.freeze([
   ...REQUIRED_HEADERS,
@@ -41,6 +41,16 @@ export const ASSET_REQUIRED_HEADERS = Object.freeze([
  * pattern that also matches the manifest.
  */
 export const ENGINE_CANARY_PATH = '/assets/engines/engine-canary-00000000.wasm'
+/**
+ * A hashed app-asset name no build can produce. Two claims rest on it. Statically it is inside
+ * `/assets/` and outside `/assets/engines/`, so the single rule that claims it is the rule that
+ * owns the application bundle. Live it must not be answered with the HTML document: the
+ * single-page-app fallback used to cover every path, and a document served under a `.js` URL with
+ * the asset rule's `immutable` policy would outlive every later deploy in that browser.
+ */
+export const APP_ASSET_CANARY_PATH = '/assets/app-canary-00000000.js'
+/** Quoted in the guard message, so the message cannot outlive the pattern it describes. */
+const GLOBAL_SOURCE_EXAMPLE = '/((?!assets/).*)'
 export const WASM_CONTENT_TYPE = 'application/wasm'
 export const REQUEST_TIMEOUT_MS = 10_000
 export const MAX_RETRIES = 2
@@ -112,7 +122,7 @@ export function extractGlobalHeaders(vercelConfig) {
     return {
       ok: false,
       error:
-        'No global headers block was found in the Vercel configuration; expected source "/(.*)" or "/((?!assets/engines/).*)".',
+        `No global headers block was found in the Vercel configuration; expected source "/(.*)" or "${GLOBAL_SOURCE_EXAMPLE}".`,
     }
   }
 
@@ -163,9 +173,8 @@ function groupRegExp(body) {
 }
 
 /**
- * Whether one `source` pattern is the catch-all rule. `/((?!assets/engines/).*)` is the
- * same catch-all with the engine directory carved out, so it must be treated as global for
- * everything else.
+ * Whether one `source` pattern is the catch-all rule. `/((?!assets/).*)` is the same catch-all
+ * with the hashed asset directory carved out, so it must be treated as global for everything else.
  */
 export function isGlobalSource(source) {
   if (GLOBAL_SOURCES.has(source)) return true
@@ -1032,13 +1041,14 @@ async function main() {
     return found.ok ? found.rule : null
   }
   const globalRule = rules.find((rule) => isGlobalSource(rule.source))
+  const appRule = ruleClaiming(APP_ASSET_CANARY_PATH)
   const engineRule = ruleClaiming(ENGINE_CANARY_PATH)
   const manifestRule = ruleClaiming(ENGINE_MANIFEST_PATH)
 
   if (!globalRule) {
     await reportGuard(
       'vercel.json',
-      'No global headers block was found in the Vercel configuration; expected source "/(.*)" or "/((?!assets/engines/).*)".',
+      `No global headers block was found in the Vercel configuration; expected source "/(.*)" or "${GLOBAL_SOURCE_EXAMPLE}".`,
     )
     process.exitCode = 1
     return
@@ -1058,17 +1068,19 @@ async function main() {
 
   // A caching promise the config stopped making would leave the live comparison with nothing to
   // assert, so the declaration is checked here rather than inferred from a passing response.
-  const noCachePolicy = [engineRule, manifestRule]
+  const noCachePolicy = [appRule, engineRule, manifestRule]
     .filter((rule) => rule !== null && !('cache-control' in rule.headers))
     .map((rule) => rule.source)
-  if (manifestRule === null || noCachePolicy.length > 0) {
+  if (manifestRule === null || appRule === null || noCachePolicy.length > 0) {
     await reportGuard(
       'vercel.json',
       manifestRule === null
         ? `No single rule claims ${ENGINE_MANIFEST_PATH}; the engine carve-out is malformed.`
-        : `vercel.json is missing required headers: ${noCachePolicy
-            .map((source) => `Cache-Control on ${source}`)
-            .join(', ')}`,
+        : appRule === null
+          ? `No single rule claims ${APP_ASSET_CANARY_PATH}; the hashed asset directory has no rule of its own, so its caching promise cannot be read from the configuration.`
+          : `vercel.json is missing required headers: ${noCachePolicy
+              .map((source) => `Cache-Control on ${source}`)
+              .join(', ')}`,
     )
     process.exitCode = 1
     return
@@ -1089,6 +1101,23 @@ async function main() {
     engineRule
       ? `${engineRule.source}: ${scope.reason}`
       : `no rule for ${ENGINE_PATH_PREFIX} in vercel.json`,
+  )
+
+  // The application bundle is ordinary same-origin script: it earns the long cache, not a looser
+  // policy. Comparing the two policies here means a future widening of the WebAssembly allowance
+  // is reported by the configuration, not inferred from a live response that happens to differ.
+  const appPolicy = String(appRule.headers['content-security-policy'] ?? '')
+  const documentPolicy = String(globalRule.headers['content-security-policy'] ?? '')
+  record(
+    'vercel.json app asset policy',
+    appPolicy !== '' && appPolicy === documentPolicy,
+    `${appRule.source}: ${
+      appPolicy === ''
+        ? 'no policy declared'
+        : appPolicy === documentPolicy
+          ? 'identical to the main document policy'
+          : 'differs from ' + globalRule.source
+    }`,
   )
 
   console.log('BugPilot live site check')
@@ -1234,17 +1263,75 @@ async function main() {
         elapsedMs: outcome.elapsedMs,
         location: outcome.response.headers.get('location'),
       })
+      // The headers are asserted against whichever rule claims the path, with the caching
+      // promise included when that rule makes one. Without this the asset rows only proved the
+      // file was served, and the immutable policy the asset rule exists to give it could go
+      // unserved in silence.
+      const assetPath = new URL(asset.url).pathname
+      const forAsset = expectedHeadersForPath(rules, assetPath)
+      const headerResults = forAsset.ok
+        ? compareRequiredHeaders(
+            forAsset.rule.headers,
+            Object.fromEntries(outcome.response.headers.entries()),
+            'cache-control' in forAsset.rule.headers
+              ? ASSET_REQUIRED_HEADERS
+              : REQUIRED_HEADERS,
+          )
+        : []
+      const failures = forAsset.ok
+        ? [...assetResult.failures, ...headerDetails(headerResults)]
+        : [...assetResult.failures, forAsset.error]
+      const matched = headerResults.filter((result) => result.pass).length
       record(
         label,
-        assetResult.pass,
+        failures.length === 0,
         `HTTP ${outcome.response.status}; ${outcome.response.headers.get(
           'content-type',
         ) ?? '(no content type)'}; ${outcome.elapsedMs} ms${
           outcome.attempts > 1 ? `; ${outcome.attempts} attempts` : ''
+        }${
+          forAsset.ok
+            ? `; ${matched}/${headerResults.length} headers match ${forAsset.rule.source}`
+            : `; no single rule for ${assetPath}`
         }`,
-        assetResult.failures,
+        failures,
       )
     }
+  }
+
+  // ---- the immutable promise's one precondition ---------------------------------
+  // A year is only safe for a name that always means the same bytes, and `/assets/` is hashed
+  // only for the files that exist. The single-page-app fallback used to answer every path with
+  // the document, and header rules are chosen by the request path, so a hashed name the current
+  // build no longer holds would have been served index.html *with the asset rule's immutable
+  // policy* — a piece of HTML pinned to a `.js` URL in that browser until the cache is cleared
+  // by hand. The canary is such a name, so its response is the fallback's behaviour, not a
+  // file's. Vercel's own 404 page is HTML too, so what is forbidden is specifically a 200.
+  const canary = await request(new URL(APP_ASSET_CANARY_PATH, base.baseUrl).href)
+  if (canary.error !== null) {
+    record(
+      'App asset fallback mask',
+      false,
+      `network error after ${canary.attempts} attempt(s): ${errorMessage(
+        canary.error,
+      )}; ${canary.elapsedMs} ms`,
+    )
+  } else {
+    const canaryStatus = canary.response.status
+    const canaryType = canary.response.headers.get('content-type') ?? ''
+    const servedAsDocument = canaryStatus === 200 && isHtmlContentType(canaryType)
+    record(
+      'App asset fallback mask',
+      !servedAsDocument,
+      `GET ${APP_ASSET_CANARY_PATH}: HTTP ${canaryStatus}; ${
+        canaryType || '(no content type)'
+      }${servedAsDocument ? '; the SPA fallback answered an asset URL with the document' : ''}`,
+      servedAsDocument
+        ? [
+            'an immutable asset path returned 200 with the app document, so a browser would cache HTML under a code URL for a year',
+          ]
+        : [],
+    )
   }
 
   // ---- engine files -------------------------------------------------------------

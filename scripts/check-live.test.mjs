@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  APP_ASSET_CANARY_PATH,
   ASSET_REQUIRED_HEADERS,
   CRASH_TITLE,
   DEFAULT_LIVE_URL,
@@ -47,7 +48,8 @@ import {
   truncateWorkflowMessage,
 } from './check-live.mjs'
 
-const MAIN_SOURCE = '/((?!assets/engines/).*)'
+const MAIN_SOURCE = '/((?!assets/).*)'
+const APP_SOURCE = '/assets/((?!engines/).*)'
 const ENGINE_SOURCE = '/assets/engines/((?!manifest.json).*)'
 const MANIFEST_SOURCE = '/assets/engines/manifest.json'
 const MAIN_CSP =
@@ -57,6 +59,9 @@ const ENGINE_CSP = MAIN_CSP.replace(
   "script-src 'self' 'wasm-unsafe-eval'",
 )
 const ENGINE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+// The same promise for the same reason: every name vite writes under `/assets/` is a hash of its
+// bytes, so a cached copy can never be the wrong copy.
+const APP_CACHE_CONTROL = ENGINE_CACHE_CONTROL
 const MANIFEST_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
 
 function headerList(extra = {}) {
@@ -70,11 +75,15 @@ function headerList(extra = {}) {
   ]
 }
 
-/** The three shipped rules, in the order they appear in vercel.json. */
+/** The four shipped rules, in the order they appear in vercel.json. */
 function headerRuleConfig() {
   return {
     headers: [
       { source: MAIN_SOURCE, headers: headerList() },
+      {
+        source: APP_SOURCE,
+        headers: headerList({ 'Cache-Control': APP_CACHE_CONTROL }),
+      },
       {
         source: ENGINE_SOURCE,
         headers: headerList({
@@ -176,8 +185,9 @@ describe('extractGlobalHeaders', () => {
     expect(result.error).toMatch(/global headers/i)
   })
 
-  it('accepts the engine-scoped global source', () => {
+  it('accepts the asset-scoped global source', () => {
     expect(isGlobalSource(MAIN_SOURCE)).toBe(true)
+    expect(isGlobalSource(APP_SOURCE)).toBe(false)
     expect(isGlobalSource(ENGINE_SOURCE)).toBe(false)
     expect(extractGlobalHeaders(headerRuleConfig()).headers['content-security-policy']).toBe(
       MAIN_CSP,
@@ -188,7 +198,11 @@ describe('extractGlobalHeaders', () => {
 describe('header rule selection', () => {
   it('understands only the source shapes BugPilot ships', () => {
     expect(matchesSource(MAIN_SOURCE, '/analyze')).toBe('yes')
+    expect(matchesSource(MAIN_SOURCE, '/assets/x.js')).toBe('no')
     expect(matchesSource(MAIN_SOURCE, '/assets/engines/x.wasm')).toBe('no')
+    expect(matchesSource(APP_SOURCE, '/assets/x.js')).toBe('yes')
+    expect(matchesSource(APP_SOURCE, '/assets/engines/x.wasm')).toBe('no')
+    expect(matchesSource(APP_SOURCE, '/analyze')).toBe('no')
     expect(matchesSource(ENGINE_SOURCE, '/assets/engines/x.wasm')).toBe('yes')
     expect(matchesSource(ENGINE_SOURCE, '/assets/x.js')).toBe('no')
     // The carve-out has to bite. If the guarded group were read as a plain prefix the manifest
@@ -214,7 +228,9 @@ describe('header rule selection', () => {
     const routing = [
       ['/', MAIN_SOURCE],
       ['/analyze', MAIN_SOURCE],
-      ['/assets/index-abc123.js', MAIN_SOURCE],
+      ['/favicon.svg', MAIN_SOURCE],
+      ['/assets/index-abc123.js', APP_SOURCE],
+      ['/assets/AnalyzePage-jYtTiDat.js', APP_SOURCE],
       ['/assets/engines/web-tree-sitter-CJcQnmR7.wasm', ENGINE_SOURCE],
       ['/assets/engines/engineClient-B3En7ltx.js', ENGINE_SOURCE],
       [ENGINE_MANIFEST_PATH, MANIFEST_SOURCE],
@@ -226,6 +242,9 @@ describe('header rule selection', () => {
       expect(result.rule.source, path).toBe(source)
     }
 
+    const app = expectedHeadersForPath(rules, '/assets/index-abc123.js')
+    expect(app.headers['content-security-policy']).toBe(MAIN_CSP)
+    expect(app.headers['cache-control']).toBe(APP_CACHE_CONTROL)
     const engine = expectedHeadersForPath(rules, '/assets/engines/a.wasm')
     expect(engine.headers['content-security-policy']).toBe(ENGINE_CSP)
     expect(engine.headers['cache-control']).toBe(ENGINE_CACHE_CONTROL)
@@ -253,6 +272,42 @@ describe('header rule selection', () => {
     expect(expectedHeadersForPath(rules, ENGINE_CANARY_PATH).rule.source).toBe(
       ENGINE_SOURCE,
     )
+  })
+
+  it('finds the app rule by the canary the live check itself uses', () => {
+    const { rules } = extractHeaderRules(headerRuleConfig())
+    // `main()` resolves the app rule from this one constant, so if the canary were claimed twice,
+    // or not at all, the caching promise would be read from the wrong rule or from none.
+    const result = expectedHeadersForPath(rules, APP_ASSET_CANARY_PATH)
+    expect(result.ok).toBe(true)
+    expect(result.rule.source).toBe(APP_SOURCE)
+    expect(result.headers['cache-control']).toBe(APP_CACHE_CONTROL)
+  })
+
+  it('leaves no request outside the four rules', () => {
+    const { rules } = extractHeaderRules(headerRuleConfig())
+    // A gap in the partition is a response with no security headers at all, and the seams are
+    // where a partition leaks: the bare directory names, a name that only resembles the
+    // exclusion, and the paths each carve-out hands back to another rule.
+    const paths = [
+      '/',
+      '/index.html',
+      '/favicon.svg',
+      '/assets',
+      '/assets/',
+      '/assets/index-abc123.js',
+      '/assetsengines-x.js',
+      '/assets/engines',
+      '/assets/engines/',
+      ENGINE_MANIFEST_PATH,
+      '/assets/engines/manifesto-A1b2C3d4.wasm',
+      '/assets/engines/sub/manifest.json',
+    ]
+
+    for (const path of paths) {
+      const result = expectedHeadersForPath(rules, path)
+      expect(result.ok, path).toBe(true)
+    }
   })
 
   it('reports a path covered by two rules as a failure instead of picking one', () => {
@@ -429,19 +484,30 @@ describe('engine manifest and probes', () => {
     expect(engineTargetResponse({ elapsedMs: SLOW_REQUEST_MS + 1 }).pass).toBe(false)
   })
 
-  it('reads the three real rules from vercel.json and keeps them apart', () => {
+  it('reads the four real rules from vercel.json and keeps them apart', () => {
     const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
     const { rules } = extractHeaderRules(config)
     const ruleFor = (source) => rules.find((rule) => rule.source === source)
 
     expect(rules.map((rule) => rule.source)).toEqual([
       MAIN_SOURCE,
+      APP_SOURCE,
       ENGINE_SOURCE,
       MANIFEST_SOURCE,
     ])
     expect(expectedHeadersForPath(rules, '/analyze').headers['content-security-policy']).toBe(
       MAIN_CSP,
     )
+    // The whole header set of the app rule is pinned, not just its policy: this is the promise
+    // that takes the entry bundle and every lazily-imported chunk off the revalidation path.
+    expect(expectedHeadersForPath(rules, APP_ASSET_CANARY_PATH).headers).toEqual({
+      'content-security-policy': MAIN_CSP,
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+      'cache-control': APP_CACHE_CONTROL,
+    })
     expect(expectedHeadersForPath(rules, ENGINE_CANARY_PATH).headers).toEqual(
       ruleFor(ENGINE_SOURCE).headers,
     )
@@ -460,6 +526,23 @@ describe('engine manifest and probes', () => {
       policiesDifferOnlyInScriptSrc(ruleFor(MAIN_SOURCE).headers, ruleFor(ENGINE_SOURCE).headers)
         .pass,
     ).toBe(true)
+  })
+
+  it('keeps the single-page-app fallback off the directory it would let the browser cache wrongly', () => {
+    const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
+    const fallback = config.rewrites ?? []
+
+    expect(fallback.map((rewrite) => rewrite.source)).toEqual([MAIN_SOURCE])
+    expect(fallback[0].destination).toBe('/index.html')
+    // The fallback must still reach every client-side route, or the rewrite stops being a
+    // single-page-app fallback. `/assets/` must stay out of it, or a hashed name the current
+    // build no longer holds would be answered with the document under an immutable policy.
+    for (const route of ['/', '/bugs', '/bugs/new', '/assistant', '/analyze']) {
+      expect(matchesSource(fallback[0].source, route), route).toBe('yes')
+    }
+    for (const asset of ['/assets/index-abc123.js', '/assets/engines/a.wasm']) {
+      expect(matchesSource(fallback[0].source, asset), asset).toBe('no')
+    }
   })
 })
 

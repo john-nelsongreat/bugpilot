@@ -15,15 +15,24 @@ interface HeaderRule {
 
 const config = JSON.parse(
   readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'),
-) as { headers?: HeaderRule[] }
+) as {
+  headers?: HeaderRule[]
+  rewrites?: { source: string; destination: string }[]
+}
 
 const rules = config.headers ?? []
+const rewrites = config.rewrites ?? []
 
-const MAIN_SOURCE = '/((?!assets/engines/).*)'
+// `/assets/` is the directory whose every file name is a hash of its bytes, so it is carved out
+// of the catch-all twice: once for the hashed app output, once again for the engine subtree,
+// which loosens `script-src` and revalidates only its manifest.
+const MAIN_SOURCE = '/((?!assets/).*)'
+const APP_SOURCE = '/assets/((?!engines/).*)'
 const ENGINE_SOURCE = '/assets/engines/((?!manifest.json).*)'
 const MANIFEST_SOURCE = '/assets/engines/manifest.json'
 
 const mainRule = rules.find((rule) => rule.source === MAIN_SOURCE)
+const appRule = rules.find((rule) => rule.source === APP_SOURCE)
 const engineRule = rules.find((rule) => rule.source === ENGINE_SOURCE)
 const manifestRule = rules.find((rule) => rule.source === MANIFEST_SOURCE)
 
@@ -35,11 +44,11 @@ const MAIN_CSP =
 const ENGINE_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
-// The build names every engine file with its content hash, so a name always maps to the same
-// bytes and may be cached forever. The manifest is the only mutable pointer in that directory:
-// it is what tells the browser which hashed names are current, so caching it would pin every
+// The build names every file under `/assets/` with its content hash, so a name always maps to the
+// same bytes and may be cached forever. The engine manifest is the only mutable pointer in that
+// tree: it is what tells the browser which hashed names are current, so caching it would pin every
 // user to the previous generation of grammars.
-const ENGINE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 const MANIFEST_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
 
 const OTHER_HEADERS: Header[] = [
@@ -84,18 +93,38 @@ function rulesFor(path: string): HeaderRule[] {
 }
 
 describe('vercel.json header rules', () => {
-  it('has one main rule, one engine rule and one engine-manifest rule', () => {
+  it('has one main rule, one hashed-asset rule, one engine rule and one engine-manifest rule', () => {
     expect(rules.map((rule) => rule.source)).toEqual([
       MAIN_SOURCE,
+      APP_SOURCE,
       ENGINE_SOURCE,
       MANIFEST_SOURCE,
     ])
     expect(mainRule).toBeDefined()
+    expect(appRule).toBeDefined()
     expect(engineRule).toBeDefined()
     expect(manifestRule).toBeDefined()
   })
 
-  it('applies the unchanged main-document policy to everything outside the engine directory', () => {
+  it('keeps the single-page-app fallback away from the hashed asset directory', () => {
+    // The fallback answers any path with /index.html, and a header rule is chosen by the request
+    // path, so a request for a hashed name the current build no longer contains would be served
+    // the document *with the asset rule's headers*. Caching that for a year would pin a piece of
+    // HTML to a `.js` URL in that browser forever, which no reload can undo. Leaving `/assets/`
+    // out of the fallback makes such a request a plain 404, and is the precondition for the
+    // immutable promise the next test asserts.
+    expect(rewrites.map((rewrite) => rewrite.source)).toEqual([
+      '/((?!assets/).*)',
+    ])
+    expect(rewrites[0]?.destination).toBe('/index.html')
+    expect(matcher('/((?!assets/).*)').test('/assets/index-abc123.js')).toBe(false)
+    expect(matcher('/((?!assets/).*)').test('/assets/engines/manifest.json')).toBe(false)
+    for (const route of ['/', '/index.html', '/bugs', '/analyze', '/favicon.svg']) {
+      expect(matcher(rewrites[0]?.source ?? '').test(route)).toBe(true)
+    }
+  })
+
+  it('applies the unchanged main-document policy to everything outside the hashed asset directory', () => {
     expect(cspOf(mainRule)).toBe(MAIN_CSP)
 
     const policy = cspOf(mainRule) as string
@@ -105,8 +134,17 @@ describe('vercel.json header rules', () => {
     expect(directiveSources(policy, 'object-src')).toEqual(["'none'"])
     expect(directiveSources(policy, 'base-uri')).toEqual(["'self'"])
     expect(directiveSources(policy, 'frame-ancestors')).toEqual(["'none'"])
-    // Keeps this phase provably additive: only the engine directory gains a cache policy.
+    // What is left outside `/assets/` is the `public/` copy-through: `favicon.svg` and the
+    // licence texts, whose names do not change when their bytes do. Making them immutable would
+    // serve last week's logo forever, so this rule makes no caching promise and leaves Vercel's
+    // revalidating default in place.
     expect(headerOf(mainRule, 'Cache-Control')).toBeUndefined()
+  })
+
+  it('caches every hashed app asset forever and keeps the WebAssembly allowance off it', () => {
+    expect(cspOf(appRule)).toBe(MAIN_CSP)
+    expect(cspOf(appRule)).not.toContain("'wasm-unsafe-eval'")
+    expect(headerOf(appRule, 'Cache-Control')).toBe(IMMUTABLE_CACHE_CONTROL)
   })
 
   it('applies the WebAssembly policy to the engine directory', () => {
@@ -121,7 +159,7 @@ describe('vercel.json header rules', () => {
     expect(policy.replace(/script-src[^;]+;/, '')).toBe(
       MAIN_CSP.replace(/script-src[^;]+;/, ''),
     )
-    expect(headerOf(engineRule, 'Cache-Control')).toBe(ENGINE_CACHE_CONTROL)
+    expect(headerOf(engineRule, 'Cache-Control')).toBe(IMMUTABLE_CACHE_CONTROL)
   })
 
   it('caches the manifest for nothing and keeps the WebAssembly allowance off it', () => {
@@ -134,7 +172,10 @@ describe('vercel.json header rules', () => {
   })
 
   it('repeats the four other security headers on every rule', () => {
-    for (const rule of [mainRule, engineRule, manifestRule]) {
+    // Over the rules that exist, not over a hand-written list of them: the list is pinned by the
+    // first test, and a fifth rule added later must carry the headers too.
+    expect(rules).toHaveLength(4)
+    for (const rule of rules) {
       for (const expected of OTHER_HEADERS) {
         const values = (rule?.headers ?? []).filter(
           (header) => header.key === expected.key,
@@ -170,10 +211,18 @@ describe('vercel.json header rules', () => {
       '/index.html',
       '/bugs',
       '/analyze',
+      '/favicon.svg',
+      '/licenses/MIT.txt',
+    ]
+    // `AnalyzePage-jYtTiDat.js` is a real lazily-imported route chunk on the deployed site, which
+    // is the traffic this rule is about: it is fetched after the entry bundle, from a name the
+    // build cannot produce twice.
+    const appPaths = [
       '/assets/index-abc123.js',
       '/assets/index-abc123.css',
+      '/assets/AnalyzePage-jYtTiDat.js',
       '/assets/plain-worker-abc123.js',
-      '/favicon.svg',
+      '/assets/intercentury-sans-9a8b7c6d.woff2',
     ]
     const enginePaths = [
       '/assets/engines/engineClient-B3En7ltx.js',
@@ -185,20 +234,45 @@ describe('vercel.json header rules', () => {
     ]
     const manifestPaths = ['/assets/engines/manifest.json']
 
-    for (const path of mainPaths) {
+    for (const path of [...mainPaths, ...appPaths, ...enginePaths, ...manifestPaths]) {
       const matched = rulesFor(path)
-      expect(matched.map((rule) => rule.source)).toEqual([MAIN_SOURCE])
       expect(matched.filter((r) => cspOf(r) !== undefined)).toHaveLength(1)
+    }
+    for (const path of mainPaths) {
+      expect(rulesFor(path).map((rule) => rule.source)).toEqual([MAIN_SOURCE])
+    }
+    for (const path of appPaths) {
+      expect(rulesFor(path).map((rule) => rule.source)).toEqual([APP_SOURCE])
     }
     for (const path of enginePaths) {
-      const matched = rulesFor(path)
-      expect(matched.map((rule) => rule.source)).toEqual([ENGINE_SOURCE])
-      expect(matched.filter((r) => cspOf(r) !== undefined)).toHaveLength(1)
+      expect(rulesFor(path).map((rule) => rule.source)).toEqual([ENGINE_SOURCE])
     }
     for (const path of manifestPaths) {
-      const matched = rulesFor(path)
-      expect(matched.map((rule) => rule.source)).toEqual([MANIFEST_SOURCE])
-      expect(matched.filter((r) => cspOf(r) !== undefined)).toHaveLength(1)
+      expect(rulesFor(path).map((rule) => rule.source)).toEqual([MANIFEST_SOURCE])
+    }
+  })
+
+  it('leaves no request outside the four rules', () => {
+    // The four sources are a partition, and a gap in it would be a response with no security
+    // headers at all. The seams are where a partition leaks: the bare directory names, a name
+    // that only *resembles* the exclusion, and the paths the manifest rule carves back out.
+    const paths = [
+      '/',
+      '/index.html',
+      '/favicon.svg',
+      '/assets',
+      '/assets/',
+      '/assets/index-abc123.js',
+      '/assetsengines-x.js',
+      '/assets/engines',
+      '/assets/engines/',
+      '/assets/engines/manifest.json',
+      '/assets/engines/manifesto-A1b2C3d4.wasm',
+      '/assets/engines/sub/manifest.json',
+      '/assets/engines/deep/nested/engine-00000000.wasm',
+    ]
+    for (const path of paths) {
+      expect(rulesFor(path).length).toBe(1)
     }
   })
 

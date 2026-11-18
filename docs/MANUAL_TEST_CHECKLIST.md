@@ -2105,14 +2105,16 @@ Set the browser zoom to 200% (or emulate a 720 × 450 CSS px viewport at a devic
 
 These checks apply to the deployed Vercel site. The headers are defined in `vercel.json`; neither `npm run dev` nor `npm run preview` (including section 15) reads that file, so a local preview will not show them. **Until the commit that changed the policy has been deployed and this section has been run, do not assume the live site sends it.** To check the policy before deploying, serve `dist/` from a temporary Node server that reads `vercel.json` and applies its rules literally; that proves the policy fits the build, not that the host is sending it.
 
-### Two policies, one path each
+### Four rules, one path each
 
-`vercel.json` now has two header rules, distinguished only by their `source`:
+`vercel.json` has four header rules, distinguished by their `source` and by two `Cache-Control` values:
 
-- `/((?!assets/engines/).*)` — every path **except** the engine folder. `script-src 'self'`, no WebAssembly allowance, so the main document cannot compile one.
-- `/assets/engines/(.*)` — the engine scripts, worker entry and `.wasm` files only. Identical apart from `script-src 'self' 'wasm-unsafe-eval'`.
+- `/((?!assets/).*)` — every path **except** the hashed asset directory: the document and its deep links, `/favicon.svg`, `/licenses/…`. `script-src 'self'`, no WebAssembly allowance, so the main document cannot compile one. It sends no `Cache-Control`, so those names keep revalidating — correct, because an unhashed name can point at new bytes.
+- `/assets/((?!engines/).*)` — every hashed app file: the entry and lazily-loaded route chunks, the stylesheet, the self-hosted fonts. The document's policy, plus `Cache-Control: public, max-age=31536000, immutable`.
+- `/assets/engines/((?!manifest.json).*)` — the engine scripts, worker entry and `.wasm` files only. Identical apart from `script-src 'self' 'wasm-unsafe-eval'`, and it carries the same `immutable` policy.
+- `/assets/engines/manifest.json` — the one mutable pointer in that directory, so it is deliberately *not* cached: the document policy plus `Cache-Control: public, max-age=0, must-revalidate`.
 
-Both rules carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and `Permissions-Policy`. Browsers intersect repeated `Content-Security-Policy` headers, so a path that matched both rules would lose WebAssembly entirely; **no path may be claimed by two rules**, and `scripts/check-live.mjs` fails if one is.
+All four carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and `Permissions-Policy`. Browsers intersect repeated `Content-Security-Policy` headers, so a path that matched two rules would lose WebAssembly entirely; **no path may be claimed by two rules**, and `scripts/check-live.mjs` fails if one is.
 
 ### Header response
 
@@ -2136,14 +2138,28 @@ Both rules carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-
   (Invoke-WebRequest -Uri https://bugpilot-lac.vercel.app/assets/engines/manifest.json -Method Head -UseBasicParsing).Headers
   ```
 
-  - Expected: `Content-Security-Policy` for this path differs from the app routes in exactly one place — `script-src 'self' 'wasm-unsafe-eval'` — and the other four headers match them.
   - Expected: the `.wasm` response carries `Content-Type: application/wasm` and `X-Content-Type-Options: nosniff`.
-  - Expected: `manifest.json` returns JSON listing every engine file with `path`, `kind`, `language`, `rawBytes` and `gzipBytes`, and every `path` in it starts with `/assets/engines/` (or `assets/engines/`).
-- [ ] Confirm the two rules do not overlap. Expected: the app-route response above contains **no** second `Content-Security-Policy` header, and the engine response contains exactly one. Two intersected policies on one path is a finding: the deep pass silently loses `'wasm-unsafe-eval'`.
-- [ ] Compare both policies with the blocks in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src` anywhere, no `'unsafe-eval'` anywhere, and `'wasm-unsafe-eval'` on the engine paths only. `connect-src`, `object-src`, `base-uri`, `form-action` and `frame-ancestors` are identical in both. Whitespace after semicolons is not significant.
+  - Expected: an engine script and a `.wasm` file differ from the app routes in exactly one place — `script-src 'self' 'wasm-unsafe-eval'` — their other four headers match them, and both carry `Cache-Control: public, max-age=31536000, immutable`.
+  - Expected: `manifest.json` is the exception — it carries the **document** policy with no `'wasm-unsafe-eval'` and `Cache-Control: public, max-age=0, must-revalidate`, because it is the file that has to change when the grammars do. It returns JSON listing every engine file with `path`, `kind`, `language`, `rawBytes` and `gzipBytes`, and every `path` in it starts with `/assets/engines/` (or `assets/engines/`).
+- [ ] Take one **app** asset from the build and request its own URL (list `dist/assets/`, then ask the live site for the hashed entry script and the stylesheet):
+
+  ```powershell
+  (Invoke-WebRequest -Uri https://bugpilot-lac.vercel.app/assets/index-<from-your-build>.js -Method Head -UseBasicParsing).Headers
+  ```
+
+  - Expected: `Content-Security-Policy` is character-for-character the one the routes send — **no** `'wasm-unsafe-eval'`, since a hashed app chunk is ordinary same-origin script — and `Cache-Control` is `public, max-age=31536000, immutable`.
+- [ ] Ask the live site for a hashed name this build cannot contain, and confirm the single-page-app fallback leaves `/assets/` alone:
+
+  ```powershell
+  Invoke-WebRequest -Uri https://bugpilot-lac.vercel.app/assets/app-canary-00000000.js -Method Head -UseBasicParsing
+  ```
+
+  - Expected: the request **fails with a 404** (PowerShell raises it as an error record; read `Exception.Response.StatusCode`). A Vercel 404 page is HTML, so that is fine — a **200** is not. If it answers 200 with a document, treat it as blocking: header rules are chosen by request path, so that document arrives with `immutable` and a browser that ever requests a stale chunk name keeps HTML under a `.js` URL for a year, past every later deploy, until the visitor clears their cache by hand. `node scripts/check-live.mjs` records this as **App asset fallback mask**.
+- [ ] Confirm the four rules do not overlap. Expected: the app-route response above contains **no** second `Content-Security-Policy` header, and the engine response contains exactly one. Two intersected policies on one path is a finding: the deep pass silently loses `'wasm-unsafe-eval'`.
+- [ ] Compare all four policies with the blocks in **README → Deployment → Content Security Policy**. Expected: no `'unsafe-inline'` in `script-src` anywhere, no `'unsafe-eval'` anywhere, and `'wasm-unsafe-eval'` on the engine paths only. `connect-src`, `object-src`, `base-uri`, `form-action` and `frame-ancestors` are identical in all four. Whitespace after semicolons is not significant.
 - [ ] If the header is missing or the engine policy lacks `'wasm-unsafe-eval'`, first confirm the deployment is actually the commit that changed `vercel.json`, and that Vercel marks it **Ready** as the current production deployment. Wait for the deployment to settle, hard-reload, and repeat. Do not conclude that the header works from the local preview or from the source file alone.
-- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: that one test file passes with no failures. It asserts both policy strings and both `source` patterns character-for-character, plus that no unsafe source appears — this checks the committed configuration, not the live response.
-- [ ] Run `node scripts/check-live.mjs` (optionally `LIVE_URL=http://127.0.0.1:<port> node scripts/check-live.mjs` against the temporary header server). Expected: the **Engine manifest** and **Engine headers** checks pass, every engine asset is same-origin with the engine policy, and the script exits `0`.
+- [ ] Locally, run `npm test -- src/csp.test.ts`. Expected: that one test file passes with no failures. It asserts the four policy strings, the four `source` patterns and the two `Cache-Control` values character-for-character, that no unsafe source appears, that the four patterns claim mutually exclusive and jointly exhaustive paths at the `/assets` and `/assets/engines` seams, and that the single-page-app fallback covers `/((?!assets/).*)` and nothing wider — this checks the committed configuration, not the live response.
+- [ ] Run `node scripts/check-live.mjs` (optionally `LIVE_URL=http://127.0.0.1:<port> node scripts/check-live.mjs` against the temporary header server). Expected: the **vercel.json policy split**, **vercel.json app asset policy**, **App asset fallback mask**, **Engine manifest**, **Engine rule coverage** and **Engine headers** checks pass, every engine asset is same-origin with the engine policy, each asset row names the rule its own path resolved to, and the script exits `0`.
 
 ### Browser console check on every page
 
