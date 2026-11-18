@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ENGINES_UNAVAILABLE_MESSAGE, MINIMAL_WASM, probeWebAssembly } from './featureProbe'
+import { ENGINES_UNAVAILABLE_MESSAGE, MINIMAL_WASM, hasWasmHeader, probeWebAssembly } from './featureProbe'
 
 /**
  * The degradation sentence is the whole of Part 0 for a user on a blocked browser, so both the
@@ -87,5 +87,29 @@ describe('WebAssembly feature probe', () => {
     )
     // A shorter report must not read as "no bugs found".
     expect(ENGINES_UNAVAILABLE_MESSAGE).toContain('basic checks still ran')
+  })
+})
+
+describe('hasWasmHeader', () => {
+  it('accepts the minimal module itself', () => {
+    expect(hasWasmHeader(MINIMAL_WASM)).toBe(true)
+  })
+
+  it('accepts a module with a section after the header', () => {
+    expect(hasWasmHeader(new Uint8Array([...MINIMAL_WASM, 0x01, 0x04]))).toBe(true)
+  })
+
+  it('refuses the application-shell bytes the SPA rewrite serves for a missing engine file', () => {
+    // First four bytes of the measured 696-byte deploy-skew response (2026-11-18): `<!do`.
+    const shell = new Uint8Array([0x3c, 0x21, 0x64, 0x6f])
+    expect(hasWasmHeader(shell)).toBe(false)
+  })
+
+  it('refuses a bare four-byte magic with no version header', () => {
+    expect(hasWasmHeader(new Uint8Array([0x00, 0x61, 0x73, 0x6d]))).toBe(false)
+  })
+
+  it('refuses the empty body a cancelled or empty response can produce', () => {
+    expect(hasWasmHeader(new Uint8Array())).toBe(false)
   })
 })

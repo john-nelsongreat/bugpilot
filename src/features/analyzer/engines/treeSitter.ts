@@ -1,4 +1,5 @@
 import { Language, Parser, Query } from 'web-tree-sitter'
+import { hasWasmHeader } from './featureProbe'
 import { GRAMMAR_URLS, TREE_SITTER_CORE_URL, type GrammarId } from './assets'
 
 export { Language, Parser, Query }
@@ -23,7 +24,7 @@ export class DownloadError extends Error {
  * range from 19 KiB to 5.3 MB, so the size has to be watched while reading: an oversized
  * asset must not be able to fill the worker heap before the limit applies.
  */
-export async function fetchCapped(
+async function fetchBytesCapped(
   url: string,
   maxBytes: number,
   outerSignal?: AbortSignal | null,
@@ -91,6 +92,33 @@ export async function fetchCapped(
   }
 }
 
+/**
+ * `fetchBytesCapped` for the two engine binary kinds (grammars and Ruff). A `200` whose body
+ * is not a WebAssembly module must be refused before it reaches `Language.load` or
+ * `initRuff`, which would otherwise report an opaque compile error. Measured against the live
+ * deployment on 2026-11-18: a stale client naming a grammar that no longer exists gets the
+ * application shell back — `200`, `text/html`, 696 bytes of `<!doctype html>` — because the
+ * SPA rewrite does not exclude the engine directory.
+ */
+export async function fetchWasmCapped(
+  url: string,
+  maxBytes: number,
+  outerSignal?: AbortSignal | null,
+): Promise<Uint8Array> {
+  const bytes = await fetchBytesCapped(url, maxBytes, outerSignal)
+  if (!hasWasmHeader(bytes)) {
+    const shown =
+      Array.from(bytes.slice(0, 4))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join(' ') || '(empty)'
+    throw new DownloadError(
+      'failed',
+      `${url} is not a WebAssembly module (starts ${shown}, not the wasm magic); the file may be missing from this deployment.`,
+    )
+  }
+  return bytes
+}
+
 let corePromise: Promise<void> | null = null
 
 /** One `Parser.init` per worker; later calls share the same promise. */
@@ -114,7 +142,7 @@ export function loadGrammar(
   const url = GRAMMAR_URLS[grammar]
   onDownloading?.(url)
   const promise = initTreeSitter()
-    .then(() => fetchCapped(url, maxBytes, signal))
+    .then(() => fetchWasmCapped(url, maxBytes, signal))
     .then((bytes) => Language.load(bytes))
     .catch((error: unknown) => {
       // A failed load must not stay cached: a later file of the same language may

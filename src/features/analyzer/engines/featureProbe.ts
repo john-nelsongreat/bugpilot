@@ -10,6 +10,19 @@ export type WebAssemblyProbe = EngineProbeResult
 export const MINIMAL_WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])
 
 /**
+ * True when the bytes begin with the WebAssembly header (magic plus version, exactly what
+ * `MINIMAL_WASM` encodes). Callers use it to refuse a `200` response whose body is not a
+ * module — a stale client can name a grammar that no longer exists, and the SPA rewrite
+ * answers that with the application shell, not an error status.
+ */
+export function hasWasmHeader(bytes: Uint8Array): boolean {
+  return (
+    bytes.byteLength >= MINIMAL_WASM.length &&
+    MINIMAL_WASM.every((byte, index) => byte === bytes[index])
+  )
+}
+
+/**
  * Shown whenever the WebAssembly probe fails. The sentence is deliberately explicit: the
  * basic checks still ran, and the user must not read a shorter report as "no bugs found".
  */
