@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { detectLanguage } from '../archive/classify'
 import type { ArchiveEntry, ArchiveReadResult, ArchiveSkippedEntry } from '../archive/guard'
+import { MAX_MANIFEST_SET_ASIDE } from '../archive/limits'
 import type { AnalyzerClient } from '../analysis/analyzerClient'
 import type { FileAnalysis } from '../analysis/engine'
 import { generatedSkipReason } from '../analysis/generated'
@@ -255,6 +256,31 @@ describe('the archive ignore manifest', () => {
     expect(capLine).toBe(
       `The archive's own ${IGNORE_MANIFEST_NAME} matched 201 file(s), but the cap allows 200 to be set aside, so 1 of them were analysed anyway.`,
     )
+  })
+
+  it('names which files the cap sets aside and which it analyses past it', async () => {
+    // The README's "the 201st match and any after it are analysed anyway" is a claim about *which* files.
+    // The case above pins 200/1 counts and the sentence; a selection that set the LAST 200 matches aside,
+    // or dropped the boundary file, would leave every one of those numbers and that sentence intact.
+    // The ordinal is well-defined because the read path never sorts entries: `guard.ts` sorts a local copy
+    // only to check for overlapping ranges, so entries reach here in the order the archive lists them.
+    const pages: ArchiveEntry[] = []
+    for (let index = 0; index < MAX_MANIFEST_SET_ASIDE + 2; index += 1) {
+      pages.push(entry(`src/p${index}.js`, `const x = ${index}\n`))
+    }
+    const { analyzer, result } = await runSession([manifestEntry('src/*.js\n'), ...pages])
+    const setAside = manifestSkips(result).map((item) => item.name)
+    expect(setAside).toEqual(pages.slice(0, MAX_MANIFEST_SET_ASIDE).map((item) => item.name))
+    // The boundary spelled without the constant, so an off-by-one cannot be hidden by it.
+    expect([setAside[0], setAside[MAX_MANIFEST_SET_ASIDE - 1]]).toEqual(['src/p0.js', 'src/p199.js'])
+    const analysedPastTheCap = analyzer.seen.filter((name) => name.startsWith('src/p'))
+    expect(analysedPastTheCap).toEqual(['src/p200.js', 'src/p201.js'])
+    // Kept past the cap means kept: the same name is never also reported as set aside, and it does get an
+    // analysed coverage row.
+    for (const name of analysedPastTheCap) {
+      expect(setAside).not.toContain(name)
+      expect(result.report?.coverage.find((item) => item.file === name)?.status).toBe('analysed')
+    }
   })
 
   it('bounds the matcher by pattern shape, so an exponential case never reaches it', () => {
