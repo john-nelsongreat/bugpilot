@@ -1,4 +1,5 @@
 import type { WorkerScope } from '../analysis/analyzerProtocol'
+import './assets'
 import { probeWebAssembly, type WebAssemblyProbe } from './featureProbe'
 import {
   DEFAULT_ENGINE_LIMITS,

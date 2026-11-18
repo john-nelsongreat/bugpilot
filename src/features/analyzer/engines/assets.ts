@@ -6,6 +6,11 @@
 import treeSitterCore from 'web-tree-sitter/web-tree-sitter.wasm?url'
 import ruffWasm from '@astral-sh/ruff-wasm-web/ruff_wasm_bg.wasm?url'
 
+import { configureEngineSources, type GrammarId } from './engineSources'
+
+/** The grammar-directory union lives in `engineSources.ts`; this file only registers the Vite URLs. */
+export type { GrammarId }
+
 import grammarBash from 'tree-sitter-wasm/bash/tree-sitter-bash.wasm?url'
 import grammarC from 'tree-sitter-wasm/c/tree-sitter-c.wasm?url'
 import grammarCSharp from 'tree-sitter-wasm/c_sharp/tree-sitter-c_sharp.wasm?url'
@@ -27,27 +32,6 @@ import grammarTerraform from 'tree-sitter-wasm/terraform/tree-sitter-terraform.w
 import grammarYaml from 'tree-sitter-wasm/yaml/tree-sitter-yaml.wasm?url'
 
 /** Grammar directory names inside the `tree-sitter-wasm` pack. */
-export type GrammarId =
-  | 'bash'
-  | 'c'
-  | 'c_sharp'
-  | 'cpp'
-  | 'css'
-  | 'go'
-  | 'html'
-  | 'java'
-  | 'kotlin'
-  | 'lua'
-  | 'php'
-  | 'python'
-  | 'r'
-  | 'ruby'
-  | 'rust'
-  | 'sql'
-  | 'swift'
-  | 'terraform'
-  | 'yaml'
-
 export const GRAMMAR_URLS: Record<GrammarId, string> = {
   bash: grammarBash,
   c: grammarC,
@@ -72,3 +56,6 @@ export const GRAMMAR_URLS: Record<GrammarId, string> = {
 
 export const TREE_SITTER_CORE_URL = treeSitterCore
 export const RUFF_WASM_URL = ruffWasm
+
+/** The one registration of the Vite-hashed asset locations for browser and vitest runs. */
+configureEngineSources({ grammarUrls: GRAMMAR_URLS, treeSitterCoreUrl: TREE_SITTER_CORE_URL, ruffWasmUrl: RUFF_WASM_URL })

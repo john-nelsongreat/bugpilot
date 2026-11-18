@@ -1,6 +1,6 @@
 import { Language, Parser, Query } from 'web-tree-sitter'
 import { hasWasmHeader } from './featureProbe'
-import { GRAMMAR_URLS, TREE_SITTER_CORE_URL, type GrammarId } from './assets'
+import { requireGrammarUrl, requireTreeSitterCoreUrl, type GrammarId } from './engineSources'
 
 export { Language, Parser, Query }
 export type { GrammarId }
@@ -123,7 +123,7 @@ let corePromise: Promise<void> | null = null
 
 /** One `Parser.init` per worker; later calls share the same promise. */
 export function initTreeSitter(): Promise<void> {
-  corePromise ??= Parser.init({ locateFile: () => TREE_SITTER_CORE_URL }).then(() => undefined)
+  corePromise ??= Parser.init({ locateFile: () => requireTreeSitterCoreUrl() }).then(() => undefined)
   return corePromise
 }
 
@@ -139,7 +139,7 @@ export function loadGrammar(
   const existing = grammarCache.get(grammar)
   if (existing) return existing
 
-  const url = GRAMMAR_URLS[grammar]
+  const url = requireGrammarUrl(grammar)
   onDownloading?.(url)
   const promise = initTreeSitter()
     .then(() => fetchWasmCapped(url, maxBytes, signal))
@@ -153,8 +153,4 @@ export function loadGrammar(
 
   grammarCache.set(grammar, promise)
   return promise
-}
-
-export function grammarUrls(): string[] {
-  return Object.values(GRAMMAR_URLS)
 }

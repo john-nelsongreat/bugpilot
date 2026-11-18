@@ -1302,6 +1302,20 @@ None of the following exists in the current app:
 - Authentication, multi-user use, or a database.
 - A committed Playwright or cross-browser end-to-end suite.
 
+## Headless CLI
+
+The deep analysis engines also run without a browser:
+
+```bash
+npm run analyze -- src/features/analyzer/cli/fixtures/sample.py --json
+```
+
+- The CLI takes one or more file paths (no directories, no globs) and an optional `--json` flag.
+- It loads the same WebAssembly engines the browser worker uses, fetched through the same byte-capped, header-checked download path, served for the duration of the run from the local `node_modules` over a loopback listener.
+- Language detection is the same classifier the archive readers use, so a file analysed here gets the same grammar the upload flow would give it.
+- Text output goes to stdout (one line per finding, then a summary); progress goes to stderr, so piping and redirection behave normally. `--json` prints the engine result document instead.
+- The exit code is `0` for every completed run — findings never change it — and `2` for a usage or file-reading failure.
+
 ## Manual test checklist
 
 Use [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) for a copy-paste, check-box pass through setup, first-run seeding, dashboard, bug CRUD, search/filter/sort, fix states, themes, the Debug Assistant, the saved-diagnosis save and remove flow, export and import, the joke footer, toast behavior, code analysis (mixed-folder and zip upload, hostile-archive refusals, filters, both report downloads, fix selection and defaults, unified and side-by-side review, clean patch/zip/changelog/report downloads, `git apply` round trip, guard-failure case, Clear, and DevTools privacy), the deep analysis engines (the size gate and its Cancel, a per-language mixed folder, the blocked-WebAssembly message, and the still-refused `WebAssembly.compile` in the page itself), keyboard navigation, the accessibility walkthrough (keyboard-only, 320 px reflow, 200% zoom, screen reader), responsive layouts, corrupted storage, the production preview, and the two security-header policies on app routes and on `assets/engines/`.

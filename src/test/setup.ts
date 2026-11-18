@@ -1,3 +1,6 @@
+// Registers the Vite-hashed engine asset URLs before any engine module reads them; the
+// engine chain no longer imports assets.ts itself, so the Node CLI can register its own.
+import '../features/analyzer/engines/assets'
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeEach, vi } from 'vitest'

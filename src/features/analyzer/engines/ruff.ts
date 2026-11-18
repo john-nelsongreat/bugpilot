@@ -3,7 +3,7 @@ import type { DiagnosticConfidence } from '../../../diagnostics/types'
 import type { Severity } from '../../bugs/types'
 import { lineEvidence, manualFix, quoteLine } from '../rules/context'
 import type { RuleFile } from '../rules/types'
-import { RUFF_WASM_URL } from './assets'
+import { requireRuffWasmUrl } from './engineSources'
 import { fetchWasmCapped } from './treeSitter'
 import type { EngineHit } from './protocol'
 import { redactCredentialInMessage, redactIfCredential } from './redact'
@@ -118,8 +118,8 @@ export function initRuffEngine(
   onDownloading?: (url: string) => void,
 ): Promise<void> {
   ruffPromise ??= (async () => {
-    onDownloading?.(RUFF_WASM_URL)
-    const bytes = await fetchWasmCapped(RUFF_WASM_URL, maxBytes, signal)
+    onDownloading?.(requireRuffWasmUrl())
+    const bytes = await fetchWasmCapped(requireRuffWasmUrl(), maxBytes, signal)
     await initRuff({ module_or_path: bytes })
   })().catch((error: unknown) => {
     ruffPromise = null
