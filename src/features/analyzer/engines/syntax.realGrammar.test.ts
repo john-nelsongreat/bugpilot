@@ -435,7 +435,7 @@ describe('syntax findings against the shipped grammars', () => {
       const result = scan(cssSample(), DIALECT_SHAPES[7][1])
       const note = result.notes.join(' ')
       expect(note).toContain('@source, @utility are not defined by the CSS standards track')
-      expect(note).toContain('Unbalanced braces, broken selectors and truncated files are still')
+      expect(note).toContain('A missing closer, a broken selector or a truncated block in this file is still')
       expect(note).toContain('BugPilot tolerates every unknown at-rule for the same reason, not only')
       expect(note).toContain('A standards-only CSS parser still rejects these lines')
     })
@@ -465,9 +465,10 @@ describe('syntax findings against the shipped grammars', () => {
       expect(result.notes.join(' ')).toContain('Treated as a CSS dialect')
     })
 
-    it('never tolerates a missing closer, even when the line opens with an unknown at-rule', () => {
+    it('reports a missing closer on a dialect line, which the tolerance does not excuse', () => {
       // `@theme {` with no closing brace is a real defect, and brace counting is something
-      // the grammar can see regardless of whether it knows the at-rule.
+      // the grammar can see regardless of whether it knows the at-rule. This is not a promise that a
+      // missing closer is always reported: the collapse two tests below is the shape where it is not.
       const result = scan(cssSample(), '@theme {\n  --color-a: red;\n')
       expect(result.hits).toHaveLength(1)
       expect(result.hits[0]?.ruleId).toBe('tree-sitter/missing-node')

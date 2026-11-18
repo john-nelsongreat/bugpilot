@@ -367,14 +367,16 @@ function cssDialectAtRule(
   return [...names]
 }
 
-function describeCssDialect(names: readonly string[]): string {
+export function describeCssDialect(names: readonly string[]): string {
   const one = names.length === 1
   return (
     `Treated as a CSS dialect, not a syntax error: ${names.join(', ')} ${one ? 'is' : 'are'} not defined by the ` +
     `CSS standards track, so the bundled CSS grammar has no rule there and no syntax finding is claimed on the ` +
     `${one ? 'line that opens' : 'lines that open'} with ${one ? 'it' : 'them'}. BugPilot tolerates every unknown ` +
-    'at-rule for the same reason, not only the ones a particular framework uses. Unbalanced braces, broken ' +
-    'selectors and truncated files are still reported, including in this file. A standards-only CSS parser still ' +
+    'at-rule for the same reason, not only the ones a particular framework uses. A missing closer, a broken ' +
+    'selector or a truncated block in this file is still reported, unless the grammar stops understanding the ' +
+    'file from its first line, in which case BugPilot claims no syntax finding at all and says so instead. ' +
+    'A standards-only CSS parser still ' +
     'rejects these lines, so a build step that is not dialect-aware will fail on them.'
   )
 }

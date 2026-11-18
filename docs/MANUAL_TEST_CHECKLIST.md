@@ -2165,7 +2165,7 @@ Both rules carry the same `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-
 
 ## 18. Dialects that are tolerated, and what that hides (AN-P1)
 
-The four fixtures used here live in `src/test/dialects/` and are pinned by `npm test -- src/features/analyzer/dialectFixtures.test.ts`, so a fixture that stops meaning what this section says fails the suite. Run the deep pass (**Run deep analysis** in the gate) unless an item says otherwise.
+The seven fixtures used here live in `src/test/dialects/` and are pinned by `npm test -- src/features/analyzer/dialectFixtures.test.ts`, so a fixture that stops meaning what this section says fails the suite. Run the deep pass (**Run deep analysis** in the gate) unless an item says otherwise.
 
 ### 18.1 JSON with comments, under a `.json` name
 
@@ -2203,7 +2203,7 @@ The four fixtures used here live in `src/test/dialects/` and are pinned by `npm 
 - [ ] Upload `src/test/dialects/tailwind-dialect.css` and run the deep pass.
   - Expected: **no** `tree-sitter` syntax finding on the file, even though it uses `@source`, `@source inline(…)`, `@custom-variant`, `@apply` and `@theme`.
   - Expected: its Notes carry the dialect sentence, which names the at-rules it set aside in alphabetical order and ends with exactly this:
-    `BugPilot tolerates every unknown at-rule for the same reason, not only the ones a particular framework uses. Unbalanced braces, broken selectors and truncated files are still reported, including in this file. A standards-only CSS parser still rejects these lines, so a build step that is not dialect-aware will fail on them.`
+    `BugPilot tolerates every unknown at-rule for the same reason, not only the ones a particular framework uses. A missing closer, a broken selector or a truncated block in this file is still reported, unless the grammar stops understanding the file from its first line, in which case BugPilot claims no syntax finding at all and says so instead. A standards-only CSS parser still rejects these lines, so a build step that is not dialect-aware will fail on them.`
   - Expected: the sentence begins `Treated as a CSS dialect, not a syntax error:` and contains both `@custom-variant` and `@source`.
 - [ ] Upload `src/test/dialects/tailwind-plus-bug.css` — a dialect line with a genuine mistake on the next line.
   - Expected: exactly **1** syntax finding, `Syntax error near "{" at line 2.`
@@ -2211,8 +2211,13 @@ The four fixtures used here live in `src/test/dialects/` and are pinned by `npm 
 - [ ] Upload `src/test/dialects/unclosed-brace.css`.
   - Expected: exactly **1** finding, a `tree-sitter/missing-node` row naming the missing `}`.
   - Expected: **no** dialect note. Nothing in this file opens with `@`, so no dialect excuse is available.
+- [ ] Upload `src/test/dialects/unclosed-nested.css` — two blocks opened, neither closed, nothing after them.
+  - Expected: **no** syntax finding of any kind. The only note is this sentence:
+    `The grammar stopped understanding this file almost immediately (one error region covers most of it). That is usually the grammar, not the code, so no syntax finding is claimed.`
+  - This is the exception the dialect sentence names. A missing closer is reported **unless** the grammar stops understanding the file from its first line, and the guard is a byte ratio: one error region that starts on line 1 and covers 70% or more of the bytes. `unclosed-brace.css` above and this file differ only in how much of the file the grammar lost.
+  - Failure mode to report: if this file produces a `tree-sitter` finding, the collapse guard has gone, and every "the grammar gave up" note the product prints has to be re-checked. If it produces a finding *and* the sentence above, the guard fires in one place and not the other.
 - [ ] Type `@theme {` into the paste box on its own line, then `--color-a: red;` on the next, and analyse with the deep pass.
-  - Expected: the unclosed block is **reported**. A missing `}`, `)` or `]` closer is never tolerated, even when the line opens with an unknown at-rule.
+  - Expected: the unclosed block is **reported**. The dialect tolerance never excuses a missing `}`, `)` or `]` on a line it could not parse; the shape it does not report is the whole-file collapse above, and this paste is not that shape.
 
 ### 18.4 Macro-heavy C — a limit, not a fix
 
@@ -2228,5 +2233,6 @@ The four fixtures used here live in `src/test/dialects/` and are pinned by `npm 
   ```bash
   npm test -- src/features/analyzer/dialectDocs.test.ts src/features/analyzer/dialectFixtures.test.ts
   ```
-  Expected: 7 + 7 tests pass, 0 fail. `dialectDocs.test.ts` reads `README.md` and asserts every dialect claim against the registry, the template extension list, the CSS standards set and the untrusted-grammar set; `dialectFixtures.test.ts` runs the fixtures in this section through the real grammars.
+  Expected: **2 files, 0 failed**. The number that matters is the file count: if the run reports one file, the path filter matched nothing and its green line proves nothing. `dialectDocs.test.ts` reads `README.md` and asserts every dialect claim against the registry, the template extension list, the CSS standards set and the untrusted-grammar set; `dialectFixtures.test.ts` runs the fixtures in this section through the real grammars.
   - To see it bite: delete the JSONC row from the README table in a scratch copy and re-run — the suite must fail, not pass on a stale sentence.
+  - To see the newer half bite: delete the clause `unless the grammar stops understanding the file from its first line` from the README dialect row and re-run, then put the old promise back in its place — the one that said a closer is reported whatever the shape of the file. The first deletion and that restore are both red: the guard pins the exception and rejects the absolute wording.

@@ -78,6 +78,7 @@ describe('the dialect fixtures mean what the checklist says', () => {
       'tailwind-dialect.css',
       'tailwind-plus-bug.css',
       'unclosed-brace.css',
+      'unclosed-nested.css',
       'home.ejs',
     ]) {
       expect(fixture(name).length, name).toBeGreaterThan(0)
@@ -115,9 +116,11 @@ describe('the dialect fixtures mean what the checklist says', () => {
       'Treated as a CSS dialect, not a syntax error: @custom-variant, @source are not defined by the ' +
         'CSS standards track, so the bundled CSS grammar has no rule there and no syntax finding is ' +
         'claimed on the lines that open with them. BugPilot tolerates every unknown at-rule for the same ' +
-        'reason, not only the ones a particular framework uses. Unbalanced braces, broken selectors and ' +
-        'truncated files are still reported, including in this file. A standards-only CSS parser still ' +
-        'rejects these lines, so a build step that is not dialect-aware will fail on them.',
+        'reason, not only the ones a particular framework uses. A missing closer, a broken selector or a ' +
+        'truncated block in this file is still reported, unless the grammar stops understanding the ' +
+        'file from its first line, in which case BugPilot claims no syntax finding at all and says so ' +
+        'instead. A standards-only CSS parser still rejects these lines, so a build step that is not ' +
+        'dialect-aware will fail on them.',
     )
   })
 
@@ -136,6 +139,23 @@ describe('the dialect fixtures mean what the checklist says', () => {
     expect(result.hits).toHaveLength(1)
     expect(result.hits[0]?.ruleId).toBe('tree-sitter/missing-node')
     expect(result.notes).toEqual([])
+  })
+
+  it('claims nothing when the grammar stops understanding the file from its first line', () => {
+    // The other side of the sentence `describeCssDialect` prints. `unclosed-brace.css` above proves a
+    // missing closer is reported; this fixture opens two blocks and leaves both to end of file, so the
+    // first error region starts on line 1 and covers more than 70% of the bytes, and the collapse guard
+    // in `syntax.ts` declines to claim a syntax finding at all. The pair is the whole claim: a tester
+    // who reads "a missing closer is reported" has to be told which file will contradict them.
+    // Measured 2026-11-18 through the shipped CLI over these exact bytes (35, CRLF like every fixture
+    // here — the guard is a byte ratio, so the line ending is part of the measurement).
+    const result = cssScan('unclosed-nested.css')
+    expect(result.hits).toEqual([])
+    expect(result.understood).toBe(false)
+    expect(result.notes).toEqual([
+      'The grammar stopped understanding this file almost immediately (one error region covers most of ' +
+        'it). That is usually the grammar, not the code, so no syntax finding is claimed.',
+    ])
   })
 
   it('classifies the EJS fixture as a template, so no syntax engine is claimed for it', () => {

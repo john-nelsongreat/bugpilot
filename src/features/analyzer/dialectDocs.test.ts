@@ -1,11 +1,11 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { jsonSyntaxRule } from './rules/json'
 import { LANGUAGE_LABELS } from './languages'
 import { TEMPLATE_EXTENSIONS } from './archive/classify'
-import { KNOWN_CSS_AT_RULES, UNTRUSTED_SYNTAX_GRAMMARS } from './engines/syntax'
+import { describeCssDialect, KNOWN_CSS_AT_RULES, UNTRUSTED_SYNTAX_GRAMMARS } from './engines/syntax'
 
 /**
  * The dialect layer added in AN-P1 is a set of things BugPilot deliberately does NOT report. That
@@ -33,6 +33,17 @@ function perLanguageTable(): string {
 function dialectSection(): string {
   return section('#### Dialects that are tolerated', '### Limits, applied before analysis')
 }
+
+/** The CSS row of the dialects table, as one string. */
+function cssDialectRow(): string {
+  const row = dialectSection()
+    .split('\n')
+    .find((line) => line.startsWith('| CSS dialect at-rules'))
+  if (!row) throw new Error('README.md has no `| CSS dialect at-rules` row in the dialects table')
+  return row
+}
+
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
 
 describe('the dialect layer cannot drift out of the README', () => {
   it('names every language the registry can detect in the per-language table', () => {
@@ -73,6 +84,48 @@ describe('the dialect layer cannot drift out of the README', () => {
     expect(section).toContain('unbalanced brace')
     expect(section).toContain('broken selector')
     expect(section).toContain('truncated')
+  })
+
+  it('states the one closer shape the css engine does NOT report, in every copy', () => {
+    // Measured 2026-11-18 with the shipped CLI over 18 css shapes. A missing closer is reported in
+    // every shape except one: when the grammar's first error region starts on line 1 AND covers at
+    // least 70% of the bytes, `scanSyntax` claims nothing at all (syntax.ts:453). Two blocks left
+    // open to end of file hit that guard; a single unclosed block never does, because the missing
+    // token is a zero-width node. So "a closer is never tolerated" is false, and the sentence a
+    // tester reads has to carry the exception. The clause below is written once, in the note the
+    // product prints and in both docs; `dialectFixtures.test.ts` pins the note byte-for-byte, so if
+    // the shipped string drifts away from this clause that test goes red and this one stays green
+    // only for the docs — which is the pair that has to fail together.
+    const clause = 'the grammar stops understanding the file from its first line'
+    const row = cssDialectRow()
+    expect(row, 'the README dialect row must name the collapse').toContain(clause)
+    expect(row).toContain('70%')
+    // The absolute wording is what this item exists to keep out.
+    expect(row).not.toMatch(/closer is never tolerated/)
+    const checklist = readFileSync(resolve(process.cwd(), 'docs/MANUAL_TEST_CHECKLIST.md'), 'utf8')
+    expect(checklist, 'the checklist must not promise a closer is always reported').not.toMatch(
+      /closer is never tolerated/,
+    )
+    expect(checklist, 'the checklist must state the collapse clause').toContain(clause)
+    expect(describeCssDialect(['theme']), 'the shipped note must state the collapse clause').toContain(clause)
+  })
+
+  it('names every fixture on disk in the checklist, and states the count it derives', () => {
+    // The checklist described "the four fixtures" of section 18 while the directory held six, and the
+    // sentence is the kind no reader re-counts. Three things have to agree now: the files in
+    // `src/test/dialects/`, the paths section 18 tells a human to upload, and the number in its prose.
+    const checklist = readFileSync(resolve(process.cwd(), 'docs/MANUAL_TEST_CHECKLIST.md'), 'utf8')
+    const from = checklist.indexOf('## 18. Dialects that are tolerated')
+    expect(from, 'the checklist has no dialects section').toBeGreaterThan(-1)
+    const after = checklist.slice(from)
+    const end = after.indexOf('\n## ')
+    const body = (end === -1 ? after : after.slice(0, end)).toLowerCase()
+    const named = [...body.matchAll(/src\/test\/dialects\/([^\s`]+)/g)].map((m) => m[1] as string).sort()
+    const onDisk = readdirSync(resolve(process.cwd(), 'src/test/dialects')).sort()
+    expect(named, 'the fixtures section 18 names and the fixtures on disk must be the same set').toEqual(onDisk)
+    const word = NUMBER_WORDS[onDisk.length]
+    expect(word, `${onDisk.length} fixtures: extend NUMBER_WORDS`).toBeDefined()
+    expect(body, `section 18 must state ${onDisk.length} fixtures, the number on disk`).toContain(`${word} fixture`)
   })
 
   it('keeps the CSS standards list about standards, not about frameworks', () => {
