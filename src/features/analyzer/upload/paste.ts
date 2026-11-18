@@ -16,13 +16,20 @@ export const MAX_PASTED_NAME_LENGTH = 80
 /** `auto` leaves the language to the same detector that reads a picked file's name and content. */
 export const PASTE_AUTO = 'auto'
 
-/** The names a paste can be given, so the language rules still have something to read. */
+/**
+ * The names a paste can be given, so the language rules still have something to read. This is a
+ * closed list: `pastedSource` reads a choice that is not here as Auto, so a language the docs or a
+ * test ask someone to paste has to appear on it. CSS is here because nothing sniffs CSS out of the
+ * text (`DETECTED_EXTENSIONS` has no CSS entry and `sniffContent` knows only XML, HTML and parseable
+ * JSON), so without a choice a pasted stylesheet is plain text and no syntax engine runs on it.
+ */
 export const PASTE_LANGUAGES: readonly { extension: string; label: string }[] = [
   { extension: PASTE_AUTO, label: 'Auto (detect from the name or the text)' },
   { extension: 'txt', label: 'Plain text' },
   { extension: 'py', label: 'Python' },
   { extension: 'js', label: 'JavaScript' },
   { extension: 'ts', label: 'TypeScript' },
+  { extension: 'css', label: 'CSS' },
   { extension: 'json', label: 'JSON' },
   { extension: 'yml', label: 'YAML' },
   { extension: 'sh', label: 'Shell script' },

@@ -2178,8 +2178,9 @@ The seven fixtures used here live in `src/test/dialects/` and are pinned by `npm
 - [ ] Upload `src/test/dialects/json-double-comma.json`.
   - Expected: exactly **1** High finding whose message starts `Invalid JSON:` and points at line 1. Two commas in a row is not one of the two accepted deviations, so the tolerance must not swallow it.
   - Expected: **no** JSONC note on this file.
-- [ ] Type `{"a": 1,,}` into the paste box (Snippet) and analyse.
-  - Expected: the same single finding. The name of a snippet is not `.json`, so a `.json`-named file is the only thing that can offer the dialect candidate.
+- [ ] Type `{"a": 1,,}` into the paste box (Snippet), set **Language of the pasted code** to `JSON`, and analyse.
+  - Expected: the same single finding. The choice rewrites the paste's virtual name to `snippet.json`, so here the name does offer the JSONC candidate exactly as it did for the uploaded file above, and the text declines it: two commas in a row is not one of the two accepted deviations.
+  - Expected: with the choice left on `Auto` this paste produces **no** finding. An extension-less name on Auto is saved as `snippet.txt`, and `bugpilot/syntax/json` is keyed to files the name called JSON. A paste is screened by the name the intake gives it, never by the text inside it.
 
 ### 18.2 Template markup
 
@@ -2216,8 +2217,9 @@ The seven fixtures used here live in `src/test/dialects/` and are pinned by `npm
     `The grammar stopped understanding this file almost immediately (one error region covers most of it). That is usually the grammar, not the code, so no syntax finding is claimed.`
   - This is the exception the dialect sentence names. A missing closer is reported **unless** the grammar stops understanding the file from its first line, and the guard is a byte ratio: one error region that starts on line 1 and covers 70% or more of the bytes. `unclosed-brace.css` above and this file differ only in how much of the file the grammar lost.
   - Failure mode to report: if this file produces a `tree-sitter` finding, the collapse guard has gone, and every "the grammar gave up" note the product prints has to be re-checked. If it produces a finding *and* the sentence above, the guard fires in one place and not the other.
-- [ ] Type `@theme {` into the paste box on its own line, then `--color-a: red;` on the next, and analyse with the deep pass.
+- [ ] Type `@theme {` into the paste box on its own line, then `--color-a: red;` on the next, set **Language of the pasted code** to `CSS`, and analyse with the deep pass.
   - Expected: the unclosed block is **reported**. The dialect tolerance never excuses a missing `}`, `)` or `]` on a line it could not parse; the shape it does not report is the whole-file collapse above, and this paste is not that shape.
+  - If it reports nothing, check the choice before believing the tolerance: a paste left on `Auto` is named `snippet.txt`, because nothing reads CSS out of pasted text, and plain text has no syntax engine at all. That is the intake declining to classify it, not the dialect layer setting the file aside.
 
 ### 18.4 Macro-heavy C — a limit, not a fix
 
