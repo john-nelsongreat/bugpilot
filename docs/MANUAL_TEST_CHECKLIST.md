@@ -1688,6 +1688,51 @@ The deep pass is a second run over the same upload. Keep DevTools open with the 
 - [ ] While the deep pass runs, upload nothing else and watch Storage.
   - Expected: `localStorage.getItem('bugpilot.bugs.v1')` is unchanged, no new key or IndexedDB database appears, and DevTools Network shows only requests to this origin — no request carries a file name or file contents.
 
+### Lua, R and Terraform (tier-1 grammars since LOOP2-L5)
+
+Lua, R and Terraform arrived in `c5190f3`. Before that commit every file below was labelled **Unrecognised file type** and carried by the pattern rules alone, so no section above exercises the new routing, the three new grammar rows, or the per-language comment lexers. Create a third scratch folder **outside this repository**, named `tier1-sample`. The six clean/broken pairs are copied verbatim from the sample table in `src/features/analyzer/engines/syntax.realGrammar.test.ts`, which the suite asserts in both directions; if a file behaves differently here than that test says, the gate and this page disagree and the gate is the one CI runs.
+
+| File | Contents | The unclosed call is on line |
+| --- | --- | --- |
+| `clean.lua` | `local x = 1` then `print(x)` | — |
+| `broken.lua` | `local function a(t)` / `  return t` / `end` / `local function b(text)` / `  return string.lower(text` / `end` | 5 |
+| `clean.R` | `x <- 1` then `print(x)` | — |
+| `broken.R` | `normalise <- function(text) {` / `  return(trimws(text))` / `}` / `report <- function(text) {` / `  return(tolower(text` / `}` | 5 |
+| `main.tf` | `variable "name" {` / `  type = string` / `}` | — |
+| `broken.tf` | the three lines of `main.tf`, then `locals {` / `  a = lower("x")` / `}` / `locals {` / `  b = lower("x"` / `}` | 8 |
+| `vars.tfvars` | `name = "demo"` | — |
+| `plan.tofu` | `variable "name" {` / `  type = string` / `}` | — |
+| `legacy.hcl` | the three lines of `main.tf` | — |
+| `notes.tf` | `# TODO: rotate this before publishing` then `api_key = "<24 mixed-case characters you make up on the spot>"` | — |
+
+`clean.R` keeps a capital `R` on purpose: `extensionOf()` lowercases before the lookup, so `summary.R` and `summary.r` must both reach the R grammar. `vars.tfvars` and `plan.tofu` exist to prove that two more spellings route to Terraform without dragging a second grammar along, and `legacy.hcl` exists to prove the opposite: the shipped grammar is the Terraform dialect, so a base-HCL name must **not** be claimed as Terraform.
+
+- [ ] Upload `tier1-sample` with **Choose a folder** and let the built-in pass finish. Do not press **Run deep analysis** yet.
+  - Expected labels in the coverage panel: **Lua** on `*.lua`, **R** on `clean.R` and `broken.R`, **Terraform** on `*.tf`, `*.tfvars` and `*.tofu`, and **Unrecognised file type** on `legacy.hcl`.
+  - Expected: `notes.tf` produces the Critical **Hard-coded credential assignment** (`bugpilot/secret/credential-assignment`) and the Low TODO marker, with the value redacted to its first two and last two characters. This is the promotion's silent-failure case: naming a language removes its files from `unknown`, and `rules/registry.test.ts` proves in the suite that `lua`, `r` and `terraform` still select at least the 17 rules `unknown` selects. Nobody has seen that hold in a browser.
+  - Expected: **no** `bugpilot/ast/…` finding on any file in this folder. `engines/registry.ts` sets `astRules: false` for all three, and README's language table lists Lua, R and Terraform under "Generic and secret rules only".
+- [ ] Read the **Deep analysis engines** panel before pressing anything.
+  - Expected: exactly three grammar rows that no other section produces — **Lua grammar**, **R grammar**, **Terraform grammar** — each with `… compressed` after its size.
+  - Expected: **one** row for Terraform even though four files reach it (`main.tf`, `broken.tf`, `vars.tfvars`, `plan.tofu`), and **no** row for `legacy.hcl`, because the plan is built from the languages actually present.
+- [ ] Press **Run deep analysis** and wait for the pass to end.
+  - Expected: **no** syntax finding on `clean.lua`, `clean.R`, `main.tf`, `vars.tfvars`, `plan.tofu`, `notes.tf` or `legacy.hcl`. A clean file that now reports a syntax error is the exact failure the clean-parse gate exists to prevent, and the honest response is to record the file and the message, not to relax the gate.
+  - Expected: exactly **one** High `tree-sitter/syntax-error` finding on each of `broken.lua`, `broken.R` and `broken.tf`. When the finding carries the second-location sentence — `The block that could not be closed opened at line N.` — `N` names the line in the table above. The line the grammar itself flags is not pinned here: this section claims the grammars notice the breakage, not where each one lands.
+- [ ] The comment lexer, which is the one behaviour of these three languages that nothing above reaches. Create `comment.lua`, `comment.R` and `comment.tf`, each with the unclosed call on line 2 and a delimiter that only *looks* like one on line 3:
+  ```lua
+  local function b(text)
+    return string.lower(text
+    -- TODO ( a note, never code
+  end
+  ```
+  `comment.R` uses `# TODO ( a note, never code` on line 3 with `  return(tolower(text` on line 2 and `}` on line 4. `comment.tf` is checked twice: once with `#` and once with `//` as the marker, since the Terraform lexer declares both.
+  - Expected: where a second location is reported, it names the call on line 2 and **never** the comment on line 3. A hint that points into a comment means the lexer for that grammar is not being honoured (`engines/syntax.ts` `LEXERS`) — a code defect, not a browser quirk.
+  - Measured off-browser on 2026-11-18 through `scanSyntax` with a synthetic error node: the same bytes give `opened at line 2` for `lua`, `r` and `terraform` (both markers) and `opened at line 3` when the lexer declares no line comment. That probe is what makes this item a test rather than a caption; the browser run is what closes the row, and no `.wasm` was involved in the probe.
+- [ ] Open the coverage panel (**What was and was not checked**) for these files.
+  - Expected on the Lua rows, word for word: "No interpreter, module, or data-flow analysis: only the tree-sitter Lua grammar reads this file." / "No AST rules are written for Lua yet: this language gets syntax coverage only." / "Engine findings are manual-only."
+  - Expected on the R rows: "No interpreter, package, or data-flow analysis: only the tree-sitter R grammar reads this file." — `package`, where Lua says `module` — / "No AST rules are written for R yet: this language gets syntax coverage only." / "Engine findings are manual-only." / "One unclosed delimiter in an R file can be reported as several findings, because the grammar resumes after the first failure and each restart can fail again." That caveat is about R files in general, not this sample: `syntax.realGrammar.test.ts` has "reports the broken file once, at a real position, for the grammars that see it", which asserts exactly one syntax hit for every grammar that sees it, R included. So one finding on `broken.R` is what the gate and this page both expect; more than one here is a discrepancy between them, and it is worth recording rather than waving through.
+  - Expected on the Terraform rows: "No provider schema, module resolution, or plan-time evaluation: the grammar reads one file at a time." / "No AST rules are written for Terraform yet: this language gets syntax coverage only." / "Engine findings are manual-only." / "HCL files (`*.hcl`) get pattern coverage only: the grammar shipped here is the Terraform dialect, not the base HCL grammar." The backticks around `*.hcl` are in the text the code stores, not Markdown added by this page. That sentence belongs to the `.tf` files; `legacy.hcl` itself carries the unrecognised-type reason instead, because no grammar is offered for it.
+  - Expected: no engine finding on any of these files has a fix checkbox, and `report.json` (snippet box unticked) names the same language labels and tiers the panel shows.
+
 ### Fix selection, defaults, and the diff review
 
 Upload the sample folder in a fresh state and wait for **Step 2 · Automatic fixes**.
