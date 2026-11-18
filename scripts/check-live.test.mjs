@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  ASSET_REQUIRED_HEADERS,
   CRASH_TITLE,
   DEFAULT_LIVE_URL,
+  ENGINE_CANARY_PATH,
   ENGINE_MANIFEST_PATH,
   GUARD_TITLE,
   MAX_RETRIES,
@@ -46,13 +48,16 @@ import {
 } from './check-live.mjs'
 
 const MAIN_SOURCE = '/((?!assets/engines/).*)'
-const ENGINE_SOURCE = '/assets/engines/(.*)'
+const ENGINE_SOURCE = '/assets/engines/((?!manifest.json).*)'
+const MANIFEST_SOURCE = '/assets/engines/manifest.json'
 const MAIN_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 const ENGINE_CSP = MAIN_CSP.replace(
   "script-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
 )
+const ENGINE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+const MANIFEST_CACHE_CONTROL = 'public, max-age=0, must-revalidate'
 
 function headerList(extra = {}) {
   return [
@@ -65,13 +70,21 @@ function headerList(extra = {}) {
   ]
 }
 
-function twoRuleConfig() {
+/** The three shipped rules, in the order they appear in vercel.json. */
+function headerRuleConfig() {
   return {
     headers: [
       { source: MAIN_SOURCE, headers: headerList() },
       {
         source: ENGINE_SOURCE,
-        headers: headerList({ 'Content-Security-Policy': ENGINE_CSP }),
+        headers: headerList({
+          'Content-Security-Policy': ENGINE_CSP,
+          'Cache-Control': ENGINE_CACHE_CONTROL,
+        }),
+      },
+      {
+        source: MANIFEST_SOURCE,
+        headers: headerList({ 'Cache-Control': MANIFEST_CACHE_CONTROL }),
       },
     ],
   }
@@ -87,23 +100,21 @@ const VALID_HTML = [
   '</html>',
 ].join('\n')
 
-function expectedHeaders() {
+function expectedHeaders(names = REQUIRED_HEADERS) {
   return Object.fromEntries(
-    REQUIRED_HEADERS.map((header) => [
+    names.map((header) => [
       header.toLowerCase(),
       `expected value for ${header}`,
     ]),
   )
 }
 
-function actualHeaders({ omit = [], override = {} } = {}) {
+function actualHeaders({ names = REQUIRED_HEADERS, omit = [], override = {} } = {}) {
   return Object.fromEntries(
-    REQUIRED_HEADERS.filter((header) => !omit.includes(header)).map(
-      (header) => [
-        header.toUpperCase(),
-        override[header] ?? `expected value for ${header}`,
-      ],
-    ),
+    names.filter((header) => !omit.includes(header)).map((header) => [
+      header.toUpperCase(),
+      override[header] ?? `expected value for ${header}`,
+    ]),
   )
 }
 
@@ -168,7 +179,7 @@ describe('extractGlobalHeaders', () => {
   it('accepts the engine-scoped global source', () => {
     expect(isGlobalSource(MAIN_SOURCE)).toBe(true)
     expect(isGlobalSource(ENGINE_SOURCE)).toBe(false)
-    expect(extractGlobalHeaders(twoRuleConfig()).headers['content-security-policy']).toBe(
+    expect(extractGlobalHeaders(headerRuleConfig()).headers['content-security-policy']).toBe(
       MAIN_CSP,
     )
   })
@@ -180,26 +191,68 @@ describe('header rule selection', () => {
     expect(matchesSource(MAIN_SOURCE, '/assets/engines/x.wasm')).toBe('no')
     expect(matchesSource(ENGINE_SOURCE, '/assets/engines/x.wasm')).toBe('yes')
     expect(matchesSource(ENGINE_SOURCE, '/assets/x.js')).toBe('no')
+    // The carve-out has to bite. If the guarded group were read as a plain prefix the manifest
+    // would inherit the immutable policy, and a browser would never see a new grammar name.
+    expect(matchesSource(ENGINE_SOURCE, ENGINE_MANIFEST_PATH)).toBe('no')
+    expect(matchesSource(MANIFEST_SOURCE, ENGINE_MANIFEST_PATH)).toBe('yes')
+    expect(matchesSource(MANIFEST_SOURCE, '/assets/engines/x.wasm')).toBe('no')
+    expect(matchesSource(MANIFEST_SOURCE, '/analyze')).toBe('no')
     expect(matchesSource('/(.*)', '/anything')).toBe('yes')
     expect(matchesSource('/regex{2}/(.*)', '/assets/x.js')).toBe('unknown')
   })
 
-  it('resolves one rule per path so no response carries two policies', () => {
-    const { rules } = extractHeaderRules(twoRuleConfig())
+  it('refuses a guarded group it cannot compile instead of guessing', () => {
+    // `*` is not a valid expression on its own; reporting unknown keeps a malformed source from
+    // silently matching, or not matching, every engine file.
+    expect(matchesSource('/assets/engines/((?!*).*)', '/assets/engines/a.wasm')).toBe('unknown')
+  })
 
-    for (const path of ['/', '/analyze', '/assets/index-abc123.js', ENGINE_MANIFEST_PATH]) {
+  it('resolves one rule per path so no response carries two policies', () => {
+    const { rules } = extractHeaderRules(headerRuleConfig())
+    // Each path is paired with the one rule allowed to describe it; asserting the source rather
+    // than a count is what makes a double match, or a dropped file, fail here.
+    const routing = [
+      ['/', MAIN_SOURCE],
+      ['/analyze', MAIN_SOURCE],
+      ['/assets/index-abc123.js', MAIN_SOURCE],
+      ['/assets/engines/web-tree-sitter-CJcQnmR7.wasm', ENGINE_SOURCE],
+      ['/assets/engines/engineClient-B3En7ltx.js', ENGINE_SOURCE],
+      [ENGINE_MANIFEST_PATH, MANIFEST_SOURCE],
+    ]
+
+    for (const [path, source] of routing) {
       const result = expectedHeadersForPath(rules, path)
       expect(result.ok, path).toBe(true)
-      expect(result.matched ?? [result.rule.source]).toHaveLength(1)
+      expect(result.rule.source, path).toBe(source)
     }
-    expect(expectedHeadersForPath(rules, '/assets/engines/a.wasm').rule.source).toBe(
+
+    const engine = expectedHeadersForPath(rules, '/assets/engines/a.wasm')
+    expect(engine.headers['content-security-policy']).toBe(ENGINE_CSP)
+    expect(engine.headers['cache-control']).toBe(ENGINE_CACHE_CONTROL)
+    const manifest = expectedHeadersForPath(rules, ENGINE_MANIFEST_PATH)
+    expect(manifest.headers['content-security-policy']).toBe(MAIN_CSP)
+    expect(manifest.headers['cache-control']).toBe(MANIFEST_CACHE_CONTROL)
+  })
+
+  it('partitions the engine directory so no real file loses its policy', () => {
+    const { rules } = extractHeaderRules(headerRuleConfig())
+    // A name that merely starts with something close to the excluded one is what an unanchored
+    // carve-out can strand; every file the build can write must still be claimed exactly once.
+    const names = [
+      'manifest.json',
+      'engineWorkerEntry-aSAJpoUP.js',
+      'tree-sitter-c_sharp-6u-hrjw0.wasm',
+      'manifesto-A1b2C3d4.wasm',
+      'manifest',
+    ]
+
+    for (const name of names) {
+      const result = expectedHeadersForPath(rules, `/assets/engines/${name}`)
+      expect(result.ok, name).toBe(true)
+    }
+    expect(expectedHeadersForPath(rules, ENGINE_CANARY_PATH).rule.source).toBe(
       ENGINE_SOURCE,
     )
-    expect(
-      expectedHeadersForPath(rules, '/assets/engines/a.wasm').headers[
-        'content-security-policy'
-      ],
-    ).toBe(ENGINE_CSP)
   })
 
   it('reports a path covered by two rules as a failure instead of picking one', () => {
@@ -223,7 +276,7 @@ describe('header rule selection', () => {
   })
 
   it('requires the engine policy to differ only in script-src', () => {
-    const { rules } = extractHeaderRules(twoRuleConfig())
+    const { rules } = extractHeaderRules(headerRuleConfig())
     const main = rules.find((rule) => rule.source === MAIN_SOURCE)
     const engine = rules.find((rule) => rule.source === ENGINE_SOURCE)
 
@@ -303,16 +356,23 @@ describe('engine manifest and probes', () => {
       'strict-origin-when-cross-origin',
       'permissions-policy',
       'camera=(), microphone=(), geolocation=()',
+      ...(overrides.cacheControl === null
+        ? []
+        : ['cache-control', overrides.cacheControl ?? ENGINE_CACHE_CONTROL]),
       ...cspValues.flatMap((value) => ['content-security-policy', value]),
     ]
+    const engineRule = extractHeaderRules(headerRuleConfig()).rules.find(
+      (rule) => rule.source === ENGINE_SOURCE,
+    )
     const base = {
       target,
       status: 200,
       contentType: overrides.contentType ?? 'application/wasm',
       cspValues,
       headerResults: compareRequiredHeaders(
-        extractHeaderRules(twoRuleConfig()).rules[1].headers,
+        engineRule.headers,
         rawHeadersToObject(rawHeaders),
+        ASSET_REQUIRED_HEADERS,
       ),
       elapsedMs: 120,
       method: 'HEAD',
@@ -324,6 +384,23 @@ describe('engine manifest and probes', () => {
     const result = engineTargetResponse()
     expect(result.pass).toBe(true)
     expect(result.observed).toContain('grammar/go')
+  })
+
+  it('fails an engine module the platform served revalidating instead of immutable', () => {
+    // The whole point of the immutable rule is that a hashed grammar is never re-fetched, so a
+    // response that quietly falls back to the platform default has to be caught here.
+    const result = engineTargetResponse({
+      cacheControl: MANIFEST_CACHE_CONTROL,
+    })
+    expect(result.pass).toBe(false)
+    expect(result.failures.join(' ')).toMatch(/Cache-Control: different value/)
+  })
+
+  it('fails an engine module served with no cache policy at all', () => {
+    const result = engineTargetResponse({ cacheControl: null })
+
+    expect(result.pass).toBe(false)
+    expect(result.failures.join(' ')).toMatch(/Cache-Control: missing from the response/)
   })
 
   it('fails a response that carries two policies', () => {
@@ -352,20 +429,37 @@ describe('engine manifest and probes', () => {
     expect(engineTargetResponse({ elapsedMs: SLOW_REQUEST_MS + 1 }).pass).toBe(false)
   })
 
-  it('reads the two real rules from vercel.json and keeps them apart', () => {
+  it('reads the three real rules from vercel.json and keeps them apart', () => {
     const config = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
     const { rules } = extractHeaderRules(config)
+    const ruleFor = (source) => rules.find((rule) => rule.source === source)
 
-    expect(rules.map((rule) => rule.source)).toEqual([MAIN_SOURCE, ENGINE_SOURCE])
+    expect(rules.map((rule) => rule.source)).toEqual([
+      MAIN_SOURCE,
+      ENGINE_SOURCE,
+      MANIFEST_SOURCE,
+    ])
     expect(expectedHeadersForPath(rules, '/analyze').headers['content-security-policy']).toBe(
       MAIN_CSP,
     )
+    expect(expectedHeadersForPath(rules, ENGINE_CANARY_PATH).headers).toEqual(
+      ruleFor(ENGINE_SOURCE).headers,
+    )
+    // The manifest is the only mutable file in that directory, so its whole header set is
+    // pinned here: the cache policy that makes a new grammar generation reachable, plus the
+    // security headers it keeps even though it no longer shares the main rule.
+    expect(expectedHeadersForPath(rules, ENGINE_MANIFEST_PATH).headers).toEqual({
+      'content-security-policy': MAIN_CSP,
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+      'cache-control': MANIFEST_CACHE_CONTROL,
+    })
     expect(
-      expectedHeadersForPath(rules, '/assets/engines/engineWorkerEntry-x.js').headers[
-        'content-security-policy'
-      ],
-    ).toBe(ENGINE_CSP)
-    expect(policiesDifferOnlyInScriptSrc(rules[0].headers, rules[1].headers).pass).toBe(true)
+      policiesDifferOnlyInScriptSrc(ruleFor(MAIN_SOURCE).headers, ruleFor(ENGINE_SOURCE).headers)
+        .pass,
+    ).toBe(true)
   })
 })
 
@@ -378,6 +472,34 @@ describe('header comparison', () => {
 
     expect(results).toHaveLength(REQUIRED_HEADERS.length)
     expect(results.every((result) => result.pass)).toBe(true)
+  })
+
+  it('compares the cache policy only where a rule promises one', () => {
+    const results = compareRequiredHeaders(
+      expectedHeaders(ASSET_REQUIRED_HEADERS),
+      actualHeaders({ names: ASSET_REQUIRED_HEADERS }),
+      ASSET_REQUIRED_HEADERS,
+    )
+    const withoutCache = compareRequiredHeaders(
+      expectedHeaders(ASSET_REQUIRED_HEADERS),
+      actualHeaders(),
+      ASSET_REQUIRED_HEADERS,
+    )
+
+    expect(results).toHaveLength(ASSET_REQUIRED_HEADERS.length)
+    expect(ASSET_REQUIRED_HEADERS.length).toBe(REQUIRED_HEADERS.length + 1)
+    expect(results.every((result) => result.pass)).toBe(true)
+    expect(
+      withoutCache.find((result) => result.header === 'Cache-Control').pass,
+    ).toBe(false)
+    // The site-wide list must stay the short one, or a route would be failed for a header its
+    // own rule never declared.
+    expect(
+      compareRequiredHeaders(
+        expectedHeaders(ASSET_REQUIRED_HEADERS),
+        actualHeaders(),
+      ).every((result) => result.pass),
+    ).toBe(true)
   })
 
   it('treats header names case-insensitively', () => {

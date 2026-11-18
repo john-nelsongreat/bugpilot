@@ -24,6 +24,23 @@ export const REQUIRED_HEADERS = Object.freeze([
 /** Scripts and WebAssembly that define a worker need their own policy; see vercel.json. */
 export const ENGINE_PATH_PREFIX = '/assets/engines/'
 export const ENGINE_MANIFEST_PATH = '/assets/engines/manifest.json'
+/**
+ * The engine files and the manifest are the two rules that also make a caching promise, so a
+ * response for them has to carry `Cache-Control` too: the immutable directive is what keeps a
+ * content-hashed grammar out of the revalidation path, and the manifest's `must-revalidate` is
+ * what lets a new grammar generation reach a browser at all.
+ */
+export const ASSET_REQUIRED_HEADERS = Object.freeze([
+  ...REQUIRED_HEADERS,
+  'Cache-Control',
+])
+/**
+ * A name no build can produce. It is inside the engine directory but is not the manifest, so
+ * the rule that claims it is by definition the rule that owns the engine files — which keeps
+ * the engine rule findable without depending on the order of vercel.json or on the text of a
+ * pattern that also matches the manifest.
+ */
+export const ENGINE_CANARY_PATH = '/assets/engines/engine-canary-00000000.wasm'
 export const WASM_CONTENT_TYPE = 'application/wasm'
 export const REQUEST_TIMEOUT_MS = 10_000
 export const MAX_RETRIES = 2
@@ -127,9 +144,23 @@ export function extractHeaderRules(vercelConfig) {
 
 const GLOBAL_SOURCES = new Set(['/(.*)', '/:path*'])
 const GUARDED_GLOBAL_SOURCE = /^\/\(\(\?!([^)]*?)\)\.\*\)$/
+// `/assets/engines/((?!manifest.json).*)`: a literal prefix whose group excludes one name, so
+// the rule owns the directory except for the path the lookahead rejects.
+const GUARDED_SCOPED_SOURCE = /^\/([^()*+?{}:]*?)\(\(\?!([^)]*?)\)\.\*\)$/
 // A literal prefix only: quantifiers, parameters and nested groups are path-to-regexp
 // features this check does not implement, so a source using them is reported as unknown.
 const SCOPED_PREFIX_SOURCE = /^\/([^()*+?{}:]*?)\(.*\)$/
+// `/assets/engines/manifest.json`: an exact path with no group in it.
+const LITERAL_SOURCE = /^\/[^()*+?{}:]+$/
+
+/** Compile one path-to-regexp group body as the anchored expression Vercel would use. */
+function groupRegExp(body) {
+  try {
+    return new RegExp(`^(?:${body})`)
+  } catch {
+    return null
+  }
+}
 
 /**
  * Whether one `source` pattern is the catch-all rule. `/((?!assets/engines/).*)` is the
@@ -145,15 +176,28 @@ export function isGlobalSource(source) {
 /**
  * Does one rule cover one pathname? Returns `'yes'`, `'no'` or `'unknown'` — an unrecognised
  * pattern shape is reported instead of guessed at, because guessing here would let the check
- * pass or fail for the wrong reason. Only the three shapes BugPilot ships are understood.
+ * pass or fail for the wrong reason. Only the four shapes BugPilot ships are understood.
  */
 export function matchesSource(source, pathname) {
   const path = pathname.startsWith('/') ? pathname : `/${pathname}`
   const guarded = GUARDED_GLOBAL_SOURCE.exec(source)
   if (guarded) return path.startsWith(`/${guarded[1]}`) ? 'no' : 'yes'
   if (GLOBAL_SOURCES.has(source)) return 'yes'
+  // Deliberately before the plain prefix shape: that one also accepts a guarded group, and
+  // reading it as a prefix would give the manifest the immutable engine cache policy.
+  const guardedScoped = GUARDED_SCOPED_SOURCE.exec(source)
+  if (guardedScoped) {
+    const [, prefix, exclusion] = guardedScoped
+    if (!path.startsWith(`/${prefix}`)) return 'no'
+    const group = groupRegExp(exclusion)
+    if (group === null) return 'unknown'
+    // The group is `((?!EXCLUSION).*)`, so the rule covers the rest exactly when EXCLUSION
+    // does not match it.
+    return group.test(path.slice(prefix.length + 1)) ? 'no' : 'yes'
+  }
   const scoped = SCOPED_PREFIX_SOURCE.exec(source)
   if (scoped) return path.startsWith(`/${scoped[1]}`) ? 'yes' : 'no'
+  if (LITERAL_SOURCE.test(source)) return path === source ? 'yes' : 'no'
   return 'unknown'
 }
 
@@ -329,11 +373,20 @@ export function rawHeadersToObject(rawHeaders) {
   return object
 }
 
-export function compareRequiredHeaders(expected, actual) {
+/**
+ * Compare the response against what vercel.json says that path should carry. `headers` is the
+ * list to assert, not a fixed one: the engine rules promise a caching policy the rest of the
+ * site does not, and asserting the site-wide five there would pass a response that ignored it.
+ */
+export function compareRequiredHeaders(
+  expected,
+  actual,
+  headers = REQUIRED_HEADERS,
+) {
   const expectedMap = normalizeHeaderMap(expected)
   const actualMap = normalizeHeaderMap(actual)
 
-  return REQUIRED_HEADERS.map((header) => {
+  return headers.map((header) => {
     const key = header.toLowerCase()
     const expectedValue = expectedMap[key]
     const actualValue = actualMap[key] ?? null
@@ -972,10 +1025,15 @@ async function main() {
     return
   }
   const rules = rulesResult.rules
+  // Which rule owns a path is asked, not guessed: the engine rule used to be found by the text
+  // of its source, which the manifest rule now shares.
+  const ruleClaiming = (path) => {
+    const found = expectedHeadersForPath(rules, path)
+    return found.ok ? found.rule : null
+  }
   const globalRule = rules.find((rule) => isGlobalSource(rule.source))
-  const engineRule = rules.find((rule) =>
-    rule.source.includes(ENGINE_PATH_PREFIX.trimStart('/')),
-  )
+  const engineRule = ruleClaiming(ENGINE_CANARY_PATH)
+  const manifestRule = ruleClaiming(ENGINE_MANIFEST_PATH)
 
   if (!globalRule) {
     await reportGuard(
@@ -993,6 +1051,24 @@ async function main() {
     await reportGuard(
       'vercel.json',
       `vercel.json is missing required headers: ${missingHeaders.join(', ')}`,
+    )
+    process.exitCode = 1
+    return
+  }
+
+  // A caching promise the config stopped making would leave the live comparison with nothing to
+  // assert, so the declaration is checked here rather than inferred from a passing response.
+  const noCachePolicy = [engineRule, manifestRule]
+    .filter((rule) => rule !== null && !('cache-control' in rule.headers))
+    .map((rule) => rule.source)
+  if (manifestRule === null || noCachePolicy.length > 0) {
+    await reportGuard(
+      'vercel.json',
+      manifestRule === null
+        ? `No single rule claims ${ENGINE_MANIFEST_PATH}; the engine carve-out is malformed.`
+        : `vercel.json is missing required headers: ${noCachePolicy
+            .map((source) => `Cache-Control on ${source}`)
+            .join(', ')}`,
     )
     process.exitCode = 1
     return
@@ -1077,7 +1153,7 @@ async function main() {
     record(
       `Headers ${route}`,
       headersPass,
-      `${matched}/${REQUIRED_HEADERS.length} match ${forPath.rule.source}`,
+      `${matched}/${headerResults.length} match ${forPath.rule.source}`,
       headerDetails(headerResults),
     )
 
@@ -1199,25 +1275,38 @@ async function main() {
       const manifestHeaders = Object.fromEntries(
         manifestOutcome.response.headers.entries(),
       )
-      const manifestForPath = expectedHeadersForPath(rules, ENGINE_MANIFEST_PATH)
-      const manifestHeaderResults = manifestForPath.ok
-        ? compareRequiredHeaders(manifestForPath.headers, manifestHeaders)
-        : []
+      const manifestHeaderResults = compareRequiredHeaders(
+        manifestRule.headers,
+        manifestHeaders,
+        ASSET_REQUIRED_HEADERS,
+      )
       record(
         'Engine manifest',
         parsed.files.length > 0 &&
           manifestHeaderResults.every((result) => result.pass),
         `schema ${parsed.schemaVersion}; ${parsed.files.length} file(s); ${
-          manifestForPath.ok
-            ? `${manifestHeaderResults.filter((result) => result.pass).length}/${
-                REQUIRED_HEADERS.length
-              } headers match ${manifestForPath.rule.source}`
-            : manifestForPath.error
-        }`,
+          manifestHeaderResults.filter((result) => result.pass).length
+        }/${manifestHeaderResults.length} headers match ${manifestRule.source}`,
         [
           ...(parsed.files.length === 0 ? ['manifest lists no files'] : []),
           ...headerDetails(manifestHeaderResults),
         ],
+      )
+
+      // The deployed manifest is the only complete list of what the build put in that
+      // directory, so it is also the only way to see whether the engine carve-out dropped a
+      // file that really exists and left it with no policy header at all.
+      const uncovered = parsed.files
+        .map((entry) => entry.path)
+        .filter((path) => ruleClaiming(path) !== engineRule)
+      record(
+        'Engine rule coverage',
+        uncovered.length === 0,
+        uncovered.length === 0
+          ? `${parsed.files.length} manifest file(s), each claimed by exactly the engine rule`
+          : `${uncovered.length} file(s) not claimed by ${engineRule?.source ?? 'an engine rule'}: ${uncovered
+              .slice(0, 5)
+              .join(', ')}`,
       )
 
       if (!engineRule) {
@@ -1241,8 +1330,9 @@ async function main() {
             contentType: headerValues(probe.rawHeaders, 'content-type')[0] ?? null,
             cspValues: policies,
             headerResults: compareRequiredHeaders(
-              engineRule.headers,
+              ruleClaiming(target.path)?.headers ?? {},
               rawHeadersToObject(probe.rawHeaders),
+              ASSET_REQUIRED_HEADERS,
             ),
             elapsedMs: probe.elapsedMs,
             method: probe.method,
