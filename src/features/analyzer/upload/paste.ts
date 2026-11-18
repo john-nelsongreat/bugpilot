@@ -78,8 +78,10 @@ function virtualName(virtualName: string, extension: string, text: string): stri
 }
 
 /**
- * The paste becomes one source whose `read` returns the bytes already held in this tab. The byte
- * count is UTF-8, not `text.length`, because that is what the reader's ceilings are written in.
+ * The paste becomes one source whose `read` encodes again on every call: a transferred buffer is
+ * moved out of this tab, so handing out one shared instance would leave the next pass posting a
+ * detached buffer. The byte count is UTF-8, not `text.length`, because that is what the reader's
+ * ceilings are written in.
  * With Auto, the chosen name travels unchanged and the normal detector decides the language; with
  * an explicit language, the name is given that extension so the chosen rules really run.
  */
@@ -102,7 +104,7 @@ export function pastedSource(text: string, extension: string, virtualNameInput =
     source: {
       path: `pasted/${virtualName(virtualNameInput, chosen, text)}`,
       size: bytes.length,
-      read: async () => bytes,
+      read: async () => new TextEncoder().encode(text),
     },
   }
 }
