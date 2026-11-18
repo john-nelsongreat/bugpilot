@@ -25,6 +25,30 @@ const ALLOWED_SPDX = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause
 const SHIPPED_ASSETS = Object.keys(GRAMMAR_URLS).sort().map((id) => `tree-sitter-${id}`)
 
 /**
+ * The docs spell some of these counts as words, so a claim may be written either way. The word list is
+ * deliberately wider than the current values: a neighbour written by mistake must be read as a number and
+ * compared, so the red says "must state 18" rather than "the sentence is missing".
+ */
+const NUMBER_WORDS: Record<string, number> = {
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  'twenty-one': 21,
+}
+
+/** Non-capturing so a claim can put its own single group around exactly the number it checks. */
+const TOKEN = `(?:\\d+|${Object.keys(NUMBER_WORDS).join('|')})`
+
+function asNumber(token: string, where: string): number {
+  if (/^\d+$/.test(token)) return Number(token)
+  const word = NUMBER_WORDS[token.toLowerCase()]
+  if (word === undefined) throw new Error(`${where}: "${token}" is neither digits nor a known number word.`)
+  return word
+}
+
+/**
  * The rows of the grammar table, as `asset -> SPDX`. Scoped to the section so the package table above
  * it, whose first column also starts with a `tree-sitter-` name, cannot be read as a grammar.
  */
@@ -48,6 +72,8 @@ function grammarRows(): Map<string, string> {
 
 describe('the grammar licence table cannot drift out of the bundle', () => {
   const rows = grammarRows()
+  const mitCount = [...rows.values()].filter((spdx) => spdx === 'MIT').length
+  const apacheAssets = [...rows].filter(([, spdx]) => spdx === 'Apache-2.0').map(([asset]) => asset)
 
   it('has exactly one row per grammar the build publishes', () => {
     expect([...rows.keys()].sort()).toEqual(SHIPPED_ASSETS)
@@ -64,6 +90,57 @@ describe('the grammar licence table cannot drift out of the bundle', () => {
       'tree-sitter-terraform',
     ])
     expect(rows.get('tree-sitter-terraform')).toBe('Apache-2.0')
+  })
+
+  it('derives the MIT/Apache split from the table in every sentence that states it', () => {
+    // `rows` is the doc's own table, and the test above proves it equals `GRAMMAR_URLS`, so a grammar
+    // entering or leaving the build changes these expectations without anyone editing a number here.
+    // What this proves is prose-vs-table consistency; the licence *text* of each upstream `LICENSE`
+    // was read by hand and is re-fetchable from the `How to re-verify` commands, not by this gate.
+    expect(mitCount + apacheAssets.length, 'every grammar row is MIT or Apache-2.0').toBe(rows.size)
+    expect(apacheAssets, 'the non-MIT grammars the prose names').toEqual(['tree-sitter-terraform'])
+
+    const claims: readonly { label: string; source: string; expected: number }[] = [
+      { label: 'the allowed-set sentence', source: `so all (${TOKEN}) are\\s+shippable`, expected: rows.size },
+      {
+        label: 'the MIT-text census',
+        source: `(${TOKEN}) of the ${TOKEN} \`LICENSE\` files are MIT text`,
+        expected: mitCount,
+      },
+      {
+        label: 'the licence-file total behind that census',
+        source: `of the (${TOKEN}) \`LICENSE\` files are MIT text`,
+        expected: rows.size,
+      },
+      {
+        label: 'the forbidden-string sweep',
+        source: `string appears in any of the (${TOKEN}) \`LICENSE\` files`,
+        expected: rows.size,
+      },
+      {
+        label: 'the grammar count the attribution covers',
+        source: `carries for the (${TOKEN}) MIT\\s+grammars`,
+        expected: mitCount,
+      },
+      {
+        label: 'the set that count is taken from',
+        source: `MIT\\s+grammars of that (${TOKEN})`,
+        expected: rows.size,
+      },
+    ]
+
+    for (const claim of claims) {
+      const matches = [...LICENCES.matchAll(new RegExp(claim.source, 'gi'))]
+      expect(
+        matches.length,
+        `docs/ENGINE-LICENCES.md: "${claim.label}" should appear exactly once, found ${matches.length}. ` +
+          `If the wording moved, update the anchor; if a new copy of the claim was written, check its number.`,
+      ).toBe(1)
+      expect(
+        asNumber(String(matches[0]?.[1]), claim.label),
+        `docs/ENGINE-LICENCES.md: ${claim.label} must state ${claim.expected}, the number the table derives`,
+      ).toBe(claim.expected)
+    }
   })
 
   it('ships the Apache-2.0 text the redistribution owes, byte for byte', () => {

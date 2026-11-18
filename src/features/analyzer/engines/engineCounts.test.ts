@@ -313,6 +313,15 @@ const CLAIMS: readonly DocClaim[] = [
     occurrences: 1,
     expected: WASM_COUNT,
   },
+  {
+    // The attribution bullet names the larger set too, so the 18-grammar scope and the 21-binary
+    // scope cannot be quietly conflated by a future edit to either sentence.
+    label: 'the binary set the attribution is NOT for',
+    doc: 'docs/ENGINE-LICENCES.md',
+    pattern: /for the whole (\d+)-binary set/,
+    occurrences: 1,
+    expected: WASM_COUNT,
+  },
 ]
 
 /**
@@ -336,7 +345,7 @@ describe('engine counts stated in the docs', () => {
     expect(ENGINE_IDS).toEqual(['tree-sitter', 'ruff'])
     expect(AST_PATTERN_COUNT).toBe(5)
     expect(RUFF_SELECTED_RULES).toHaveLength(21)
-    expect(CLAIMS.length).toBe(30)
+    expect(CLAIMS.length).toBe(31)
   })
 
   it('states the same number in every sentence that carries an engine count', () => {

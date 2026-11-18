@@ -96,8 +96,10 @@ binaries as part of a static build, so:
   pydocstyle, Pyflakes, Pyright, pyupgrade, RustPython) are covered by the notices inside
   their own published tarballs.
 - The 19 grammars have **no** notice inside the pack — the pack ships one root `LICENSE` for
-  its own glue only. This document is the attribution BugPilot carries for the eighteen MIT ones,
-  with the repository and `LICENSE` URL of each one named above.
+  its own glue only. This document is the attribution BugPilot carries for the eighteen MIT
+  grammars of that 19, each named above with its repository and `LICENSE` URL. It is not the
+  attribution for the whole 21-binary set: `web-tree-sitter` and `ruff_wasm_bg.wasm` are covered
+  inside their own tarballs (bullet above) and `tree-sitter-terraform` is Apache-2.0 (bullets below).
 - Apache-2.0 §4 asks for the licence text to accompany the redistributed work, not merely a notice,
   so `tree-sitter-terraform` ships its own copy at
   `public/licenses/Apache-2.0-tree-sitter-hcl.txt`: the pinned commit's `LICENSE`, byte for byte
