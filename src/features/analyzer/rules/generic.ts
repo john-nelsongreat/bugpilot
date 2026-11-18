@@ -30,8 +30,16 @@ const LANGUAGES_WITH_INDENTATION_SEMANTICS: readonly SourceLanguage[] = [
   'css',
 ]
 
+/**
+ * Lua, R and Terraform are named languages with a grammar since LOOP2-L5, so they no longer arrive
+ * through `unknown`. They are listed here rather than in `LANGUAGES_WITH_INDENTATION_SEMANTICS`
+ * because that set's name claims indentation carries meaning, which is false for all three.
+ */
 const ALL_TEXT_LANGUAGES_WITH_FALLBACKS: readonly SourceLanguage[] = [
   ...LANGUAGES_WITH_INDENTATION_SEMANTICS,
+  'lua',
+  'r',
+  'terraform',
   'markdown',
   'template',
   'text',

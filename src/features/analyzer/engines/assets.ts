@@ -15,12 +15,15 @@ import grammarGo from 'tree-sitter-wasm/go/tree-sitter-go.wasm?url'
 import grammarHtml from 'tree-sitter-wasm/html/tree-sitter-html.wasm?url'
 import grammarJava from 'tree-sitter-wasm/java/tree-sitter-java.wasm?url'
 import grammarKotlin from 'tree-sitter-wasm/kotlin/tree-sitter-kotlin.wasm?url'
+import grammarLua from 'tree-sitter-wasm/lua/tree-sitter-lua.wasm?url'
 import grammarPhp from 'tree-sitter-wasm/php/tree-sitter-php.wasm?url'
 import grammarPython from 'tree-sitter-wasm/python/tree-sitter-python.wasm?url'
+import grammarR from 'tree-sitter-wasm/r/tree-sitter-r.wasm?url'
 import grammarRuby from 'tree-sitter-wasm/ruby/tree-sitter-ruby.wasm?url'
 import grammarRust from 'tree-sitter-wasm/rust/tree-sitter-rust.wasm?url'
 import grammarSql from 'tree-sitter-wasm/sql/tree-sitter-sql.wasm?url'
 import grammarSwift from 'tree-sitter-wasm/swift/tree-sitter-swift.wasm?url'
+import grammarTerraform from 'tree-sitter-wasm/terraform/tree-sitter-terraform.wasm?url'
 import grammarYaml from 'tree-sitter-wasm/yaml/tree-sitter-yaml.wasm?url'
 
 /** Grammar directory names inside the `tree-sitter-wasm` pack. */
@@ -34,12 +37,15 @@ export type GrammarId =
   | 'html'
   | 'java'
   | 'kotlin'
+  | 'lua'
   | 'php'
   | 'python'
+  | 'r'
   | 'ruby'
   | 'rust'
   | 'sql'
   | 'swift'
+  | 'terraform'
   | 'yaml'
 
 export const GRAMMAR_URLS: Record<GrammarId, string> = {
@@ -52,12 +58,15 @@ export const GRAMMAR_URLS: Record<GrammarId, string> = {
   html: grammarHtml,
   java: grammarJava,
   kotlin: grammarKotlin,
+  lua: grammarLua,
   php: grammarPhp,
   python: grammarPython,
+  r: grammarR,
   ruby: grammarRuby,
   rust: grammarRust,
   sql: grammarSql,
   swift: grammarSwift,
+  terraform: grammarTerraform,
   yaml: grammarYaml,
 }
 

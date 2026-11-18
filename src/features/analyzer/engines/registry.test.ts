@@ -25,6 +25,9 @@ const PROMISED_LANGUAGES = [
   'yaml',
   'kotlin',
   'swift',
+  'lua',
+  'r',
+  'terraform',
 ] as const
 
 describe('engine language registry', () => {
@@ -189,7 +192,7 @@ describe('engine language registry', () => {
       const patternTier = tierAvailability(profile.language).find((tier) => tier.tier === 'pattern')
       expect(patternTier?.reason, profile.language).not.toContain('AST rules')
     }
-    expect(noRuleCount).toBe(8)
+    expect(noRuleCount).toBe(11)
   })
 
   it('turns the syntax tier off for the untrusted grammars and keeps it on elsewhere', () => {

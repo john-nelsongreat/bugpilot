@@ -97,6 +97,27 @@ const SAMPLES: readonly Sample[] = [
   { grammar: 'yaml', name: 's.yml', language: 'yaml', valid: 'name: demo\nversion: 1\n', broken: 'name: demo\n  bad: [1,\n' },
   { grammar: 'kotlin', name: 'S.kt', language: 'kotlin', valid: 'fun main() {\n}\n', broken: 'fun main( {\n}\n' },
   { grammar: 'swift', name: 's.swift', language: 'swift', valid: 'func f() {\n}\n', broken: 'func f( {\n}\n' },
+  {
+    grammar: 'lua',
+    name: 's.lua',
+    language: 'lua',
+    valid: 'local x = 1\nprint(x)\n',
+    broken: 'local function a(t)\n  return t\nend\nlocal function b(text)\n  return string.lower(text\nend\n',
+  },
+  {
+    grammar: 'r',
+    name: 's.R',
+    language: 'r',
+    valid: 'x <- 1\nprint(x)\n',
+    broken: 'normalise <- function(text) {\n  return(trimws(text))\n}\nreport <- function(text) {\n  return(tolower(text\n}\n',
+  },
+  {
+    grammar: 'terraform',
+    name: 's.tf',
+    language: 'terraform',
+    valid: 'variable "name" {\n  type = string\n}\n',
+    broken: 'variable "name" {\n  type = string\n}\nlocals {\n  a = lower("x")\n}\nlocals {\n  b = lower("x"\n}\n',
+  },
 ]
 
 /**
@@ -117,6 +138,9 @@ const SEES_SYNTAX_ERRORS: readonly GrammarId[] = [
   'bash',
   'kotlin',
   'swift',
+  'lua',
+  'r',
+  'terraform',
 ]
 
 const languages = new Map<GrammarId, Language>()
@@ -180,7 +204,7 @@ describe('syntax findings against the shipped grammars', () => {
 
   it('ships every grammar the sample table needs', () => {
     expect(languages.size).toBe(SAMPLES.length)
-    expect(SEES_SYNTAX_ERRORS.length).toBe(12)
+    expect(SEES_SYNTAX_ERRORS.length).toBe(15)
   })
 
   it('finds no syntax error in a clean file of any shipped language', () => {

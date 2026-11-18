@@ -116,6 +116,22 @@ const CLAIMS: readonly DocClaim[] = [
     occurrences: 1,
     expected: GRAMMAR_COUNT,
   },
+  {
+    // Two more sentences that carry the grammar count and were never in this table: LOOP2-L5 found
+    // them stale-by-construction, since nothing failed when a grammar was added.
+    label: 'the limit-list language coverage',
+    doc: 'README.md',
+    pattern: /(\d+) further languages can be parsed/,
+    occurrences: 1,
+    expected: GRAMMAR_COUNT,
+  },
+  {
+    label: 'the deliberate non-goal',
+    doc: 'README.md',
+    pattern: /the (\d+) opt-in tree-sitter grammars/,
+    occurrences: 1,
+    expected: GRAMMAR_COUNT,
+  },
 
   // The per-language and per-engine tables.
   {
@@ -221,7 +237,7 @@ const CLAIMS: readonly DocClaim[] = [
   {
     label: 'the shipped binary count',
     doc: 'README.md',
-    pattern: /All (\d+) shipped `\.wasm` binaries/,
+    pattern: /All (\d+) shipped\s+`\.wasm`\s+binaries/,
     occurrences: 1,
     expected: WASM_COUNT,
   },
@@ -251,7 +267,7 @@ const CLAIMS: readonly DocClaim[] = [
   {
     label: 'the licence census',
     doc: 'docs/ENGINE-LICENCES.md',
-    pattern: /All (\d+) shipped `\.wasm` binaries/,
+    pattern: /All (\d+) shipped\s+`\.wasm`\s+binaries/,
     occurrences: 1,
     expected: WASM_COUNT,
   },
@@ -313,14 +329,14 @@ const CLAIMS: readonly DocClaim[] = [
 
 describe('engine counts stated in the docs', () => {
   it('derives a sane set of numbers from the registry and the build', () => {
-    expect(GRAMMAR_COUNT).toBe(16)
-    expect(WASM_COUNT).toBe(18)
+    expect(GRAMMAR_COUNT).toBe(19)
+    expect(WASM_COUNT).toBe(21)
     expect(engineChunkCount()).toBe(2)
-    expect(TOTAL_ASSET_COUNT).toBe(20)
+    expect(TOTAL_ASSET_COUNT).toBe(23)
     expect(ENGINE_IDS).toEqual(['tree-sitter', 'ruff'])
     expect(AST_PATTERN_COUNT).toBe(5)
     expect(RUFF_SELECTED_RULES).toHaveLength(21)
-    expect(CLAIMS.length).toBe(28)
+    expect(CLAIMS.length).toBe(30)
   })
 
   it('states the same number in every sentence that carries an engine count', () => {

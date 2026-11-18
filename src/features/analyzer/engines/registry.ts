@@ -45,6 +45,9 @@ export const LANGUAGE_ENGINES: Partial<Record<SourceLanguage, LanguageEngines>> 
   yaml: { language: 'yaml', grammar: 'yaml', engines: ['tree-sitter'], astRules: false, syntaxClaims: false },
   html: { language: 'html', grammar: 'html', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
   css: { language: 'css', grammar: 'css', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  lua: { language: 'lua', grammar: 'lua', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  r: { language: 'r', grammar: 'r', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
+  terraform: { language: 'terraform', grammar: 'terraform', engines: ['tree-sitter'], astRules: false, syntaxClaims: true },
 }
 
 export function enginesFor(language: SourceLanguage): LanguageEngines | null {

@@ -27,6 +27,9 @@ export const LANGUAGE_LABELS: Record<SourceLanguage, string> = {
   xml: 'XML',
   html: 'HTML',
   css: 'CSS',
+  lua: 'Lua',
+  r: 'R',
+  terraform: 'Terraform',
   template: 'Template markup',
   markdown: 'Markdown',
   text: 'Plain text',
@@ -220,6 +223,23 @@ const ENGINE_NOT_CHECKED: Record<string, string[]> = {
     'No property, value, or browser-compatibility checks.',
     'Only what the grammar reports as unparseable is claimed.',
   ],
+  lua: [
+    'No interpreter, module, or data-flow analysis: only the tree-sitter Lua grammar reads this file.',
+    'No AST rules are written for Lua yet: this language gets syntax coverage only.',
+    'Engine findings are manual-only.',
+  ],
+  r: [
+    'No interpreter, package, or data-flow analysis: only the tree-sitter R grammar reads this file.',
+    'No AST rules are written for R yet: this language gets syntax coverage only.',
+    'One unclosed delimiter in an R file can be reported as several findings, because the grammar resumes after the first failure and each restart can fail again.',
+    'Engine findings are manual-only.',
+  ],
+  terraform: [
+    'No provider schema, module resolution, or plan-time evaluation: the grammar reads one file at a time.',
+    'No AST rules are written for Terraform yet: this language gets syntax coverage only.',
+    'HCL files (`*.hcl`) get pattern coverage only: the grammar shipped here is the Terraform dialect, not the base HCL grammar.',
+    'Engine findings are manual-only.',
+  ],
 }
 
 /**
@@ -326,6 +346,18 @@ const BASE_NOT_CHECKED: Record<SourceLanguage, string[]> = {
   ],
   css: [
     'No CSS parsing, property, or compatibility checks.',
+    'Only generic text patterns and credential shapes were checked.',
+  ],
+  lua: [
+    'No Lua syntax, interpreter, or data-flow checks.',
+    'Only generic text patterns and credential shapes were checked.',
+  ],
+  r: [
+    'No R syntax, interpreter, or package checks.',
+    'Only generic text patterns and credential shapes were checked.',
+  ],
+  terraform: [
+    'No Terraform syntax, provider schema, or plan-time checks.',
     'Only generic text patterns and credential shapes were checked.',
   ],
   template: [

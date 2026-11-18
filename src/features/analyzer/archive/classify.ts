@@ -23,6 +23,9 @@ export type SourceLanguage =
   | 'xml'
   | 'html'
   | 'css'
+  | 'lua'
+  | 'r'
+  | 'terraform'
   | 'template'
   | 'markdown'
   | 'text'
@@ -74,6 +77,11 @@ const BY_EXTENSION: Record<string, SourceLanguage> = {
   html: 'html',
   vue: 'html',
   css: 'css',
+  lua: 'lua',
+  r: 'r',
+  tf: 'terraform',
+  tfvars: 'terraform',
+  tofu: 'terraform',
   scss: 'css',
   less: 'css',
   ejs: 'template',

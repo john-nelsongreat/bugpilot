@@ -139,7 +139,13 @@ const CSS_STYLE: LexerConfig = {
   ],
 }
 
-const LEXERS: Partial<Record<GrammarId, LexerConfig>> = {
+/**
+ * One lexer per shipped grammar. `findUnclosedOpener` falls back to `QUOTED_STYLE`, which declares no
+ * line comment at all — safe for a grammar BugPilot does not ship, wrong for one it does, because a
+ * delimiter inside a comment would then be counted as an unclosed opener.
+ * `grammarWiring.test.ts` asserts this set covers every `GrammarId`.
+ */
+export const LEXERS: Partial<Record<GrammarId, LexerConfig>> = {
   c: C_STYLE,
   cpp: C_STYLE,
   c_sharp: C_STYLE,
@@ -172,6 +178,9 @@ const LEXERS: Partial<Record<GrammarId, LexerConfig>> = {
   sql: { lineComments: ['--'], blockComments: [{ start: '/*', end: '*/' }], strings: [{ quote: "'" }] },
   yaml: { lineComments: ['#'], blockComments: [], strings: [{ quote: '"' }, { quote: "'" }] },
   html: { lineComments: [], blockComments: [{ start: '<!--', end: '-->' }], strings: [{ quote: '"', escape: '\\' }, { quote: "'", escape: '\\' }] },
+  lua: { lineComments: ['--'], blockComments: [{ start: '--[[', end: ']]' }], strings: [{ quote: '"', escape: '\\' }, { quote: "'", escape: '\\' }] },
+  r: { lineComments: ['#'], blockComments: [], strings: [{ quote: '"', escape: '\\' }, { quote: "'", escape: '\\' }] },
+  terraform: { lineComments: ['#', '//'], blockComments: [{ start: '/*', end: '*/' }], strings: [{ quote: '"', escape: '\\' }, { quote: "'", escape: '\\' }] },
 }
 
 const OPENING_DELIMITERS = new Set(['(', '{', '['])

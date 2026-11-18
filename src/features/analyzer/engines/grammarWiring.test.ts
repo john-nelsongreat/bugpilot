@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { GRAMMAR_URLS } from './assets'
+import { LEXERS } from './syntax'
 
 /**
  * The real-grammar suites load `node_modules/tree-sitter-wasm/out/<grammar>/...` straight off disk, so
@@ -58,7 +59,7 @@ describe('grammar wiring from assets.ts to the engine manifest', () => {
     const imports = staticImports(ASSETS_SOURCE)
 
     expect([...bindings.keys()].sort()).toEqual(GRAMMAR_IDS)
-    expect(GRAMMAR_IDS).toHaveLength(16)
+    expect(GRAMMAR_IDS).toHaveLength(19)
 
     const specifiers = new Set<string>()
     for (const id of GRAMMAR_IDS) {
@@ -113,5 +114,18 @@ describe('grammar wiring from assets.ts to the engine manifest', () => {
     const pattern = grammarNamePattern(CONFIG_SOURCE)
     const languages = GRAMMAR_IDS.map((id) => pattern.exec(`tree-sitter-${id}-A1b2C3d4.wasm`)?.[1])
     expect(new Set(languages).size, 'two grammars collapse to the same manifest language').toBe(GRAMMAR_IDS.length)
+  })
+
+  it('gives every shipped grammar a lexer, so none rides the comment-blind default', () => {
+    // `findUnclosedOpener` reads `LEXERS[grammar] ?? QUOTED_STYLE`, and `QUOTED_STYLE` declares no
+    // line comment. For Lua, R and Terraform that is not a harmless default: a `(` inside `--` or `#`
+    // would be counted as an unclosed opener, so both the "opened at line N" hint and the whole-file
+    // balance probe that decides whether a region is a grammar leak or a real unfinished block would
+    // be driven by text the grammar never saw. LOOP2-L5 is the first slice that could have hit it.
+    for (const id of GRAMMAR_IDS) {
+      expect(LEXERS[id as keyof typeof LEXERS], `syntax.ts: ${id} has no LEXERS entry and falls back to QUOTED_STYLE`).toBeDefined()
+    }
+    // Two-sided: a lexer left behind for a grammar that no longer ships is a lie of the same shape.
+    expect(Object.keys(LEXERS).sort()).toEqual([...GRAMMAR_IDS].sort())
   })
 })

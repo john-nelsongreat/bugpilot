@@ -50,6 +50,9 @@ const GRAMMAR_LANGUAGE: Record<GrammarId, SourceLanguage> = {
   sql: 'sql',
   swift: 'swift',
   yaml: 'yaml',
+  lua: 'lua',
+  r: 'r',
+  terraform: 'terraform',
 }
 
 const FILE_NAME: Partial<Record<GrammarId, string>> = {
