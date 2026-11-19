@@ -1067,7 +1067,8 @@ export function AnalyzePage({
               </li>
               <li>
                 Pasted code is capped at {formatBytes(MAX_PASTED_BYTES)} of UTF-8 and is treated as
-                one file named <code>pasted/snippet.txt</code>.
+                one file named <code>pasted/snippet</code>, whose extension follows the language you
+                pick (Auto detects one, falling back to <code>.txt</code>).
               </li>
               <li>
                 The analysed text stays in this tab for the fix review while it fits{' '}

@@ -254,7 +254,7 @@ describe('the archive ignore manifest', () => {
     expect(result.report?.session).toMatchObject({ analysedCount: 2, skippedCount: 200, fileCount: 202 })
     const capLine = (result.report?.limitations ?? []).find((line) => line.includes(IGNORE_MANIFEST_NAME))
     expect(capLine).toBe(
-      `The archive's own ${IGNORE_MANIFEST_NAME} matched 201 file(s), but the cap allows 200 to be set aside, so 1 of them were analysed anyway.`,
+      `The archive's own ${IGNORE_MANIFEST_NAME} matched 201 file(s), but the cap allows 200 to be set aside, so 1 of them was analysed anyway.`,
     )
   })
 

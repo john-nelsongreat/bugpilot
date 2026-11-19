@@ -222,4 +222,13 @@ describe('Analyze page paste-code tab', () => {
 
     unmount()
   })
+
+  it('says the paste name follows the language choice, not a fixed .txt', () => {
+    const analyze = vi.fn<AnalyzeFunction>(async () => completed('a = 1\n'))
+    render(<AnalyzePage analyze={analyze} downloadReportFile={vi.fn()} />)
+
+    expect(screen.getByText(/whose extension follows the language you pick/)).toBeTruthy()
+    expect(screen.queryByText('pasted/snippet.txt')).toBeNull()
+    expect(screen.getByText('pasted/snippet')).toBeTruthy()
+  })
 })

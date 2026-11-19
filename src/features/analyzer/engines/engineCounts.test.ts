@@ -74,7 +74,14 @@ const WORD_NUMBERS: Record<string, number> = {
 
 function asNumber(token: string, where: string): number {
   if (/^\d[\d,]*$/.test(token)) return Number(token.replaceAll(',', ''))
-  const word = WORD_NUMBERS[token.toLowerCase()]
+  const lower = token.toLowerCase()
+  if (lower.includes('-')) {
+    const halves = lower.split('-')
+    const values = halves.map((part) => WORD_NUMBERS[part])
+    if (halves.length === 2 && values[0] !== undefined && values[1] !== undefined) return values[0] + values[1]
+    throw new Error(`${where}: "${token}" is not a sum of two known number words.`)
+  }
+  const word = WORD_NUMBERS[lower]
   if (word === undefined) throw new Error(`${where}: "${token}" is neither digits nor a known number word.`)
   return word
 }
@@ -322,6 +329,41 @@ const CLAIMS: readonly DocClaim[] = [
     occurrences: 1,
     expected: WASM_COUNT,
   },
+  {
+    label: 'the hashed-shaped response enumeration',
+    doc: 'README.md',
+    pattern: /enumerated \*\*(\d+) hashed-shaped 200 responses\*\*/,
+    occurrences: 1,
+    expected: 35,
+  },
+  {
+    label: 'the real build outputs among the responses',
+    doc: 'README.md',
+    pattern: /\*\*(\d+) real build outputs plus one/,
+    occurrences: 1,
+    expected: 34,
+  },
+  {
+    label: 'the responses already immutable (phantom included)',
+    doc: 'README.md',
+    pattern: /(Twenty-four) were already immutable/,
+    occurrences: 1,
+    expected: 24,
+  },
+  {
+    label: 'the responses that revalidated',
+    doc: 'README.md',
+    pattern: /other \*\*(eleven) revalidated/,
+    occurrences: 1,
+    expected: 11,
+  },
+  {
+    label: 'the revalidated bytes',
+    doc: 'README.md',
+    pattern: /visit: ([\d,]+) bytes of build output/,
+    occurrences: 1,
+    expected: 4589033,
+  },
 ]
 
 /**
@@ -345,7 +387,7 @@ describe('engine counts stated in the docs', () => {
     expect(ENGINE_IDS).toEqual(['tree-sitter', 'ruff'])
     expect(AST_PATTERN_COUNT).toBe(5)
     expect(RUFF_SELECTED_RULES).toHaveLength(21)
-    expect(CLAIMS.length).toBe(31)
+    expect(CLAIMS.length).toBe(36)
   })
 
   it('states the same number in every sentence that carries an engine count', () => {
@@ -398,5 +440,11 @@ describe('engine counts stated in the docs', () => {
     expect(readDoc('README.md'), 'README.md: the tree-sitter role cell must not state a query count').not.toMatch(
       new RegExp(`(?:${anyCount}) saved-pattern queries`, 'i'),
     )
+  })
+
+  it('no longer calls the enumerated responses hashed files', () => {
+    const readme = readDoc('README.md')
+    expect(readme).not.toMatch(/\*\*35 hashed files\*\*/)
+    expect(readme).toMatch(/a string inside the worker\s+bundle, discussed below/)
   })
 })

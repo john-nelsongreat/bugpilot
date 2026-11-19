@@ -582,7 +582,7 @@ export async function analyzeUpload(
     ...(resumedWithoutProgress ? [RESUME_NO_PROGRESS_MESSAGE] : []),
     ...(overCap.length > 0
       ? [
-          `The archive's own ${IGNORE_MANIFEST_NAME} matched ${manifestSetAside + overCap.length} file(s), but the cap allows ${manifestSetAside} to be set aside, so ${overCap.length} of them were analysed anyway.`,
+          `The archive's own ${IGNORE_MANIFEST_NAME} matched ${manifestSetAside + overCap.length} file(s), but the cap allows ${manifestSetAside} to be set aside, so ${overCap.length} of them ${overCap.length === 1 ? 'was' : 'were'} analysed anyway.`,
         ]
       : []),
   ]

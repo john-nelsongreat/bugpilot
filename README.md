@@ -210,9 +210,12 @@ All four rules send the same four other headers: `X-Content-Type-Options: nosnif
 Vite names every file it writes under `assets/` with a hash of its bytes, so a name can never
 point at different content twice: a browser that keeps an old copy is not stale, it is correct.
 That is worth a year of `immutable`. On the deployment measured on 2026-11-18 an audit-side probe
-enumerated **35 hashed files** under `/assets/`. Twenty-four were already immutable — the engine
-scripts and `.wasm` modules, from the previous phase — and the other **eleven revalidated on every
-visit: 4,589,033 bytes of build output**, the entry bundle and stylesheet, the TypeScript worker,
+enumerated **35 hashed-shaped 200 responses** under `/assets/` — **34 real build outputs plus one
+name that is not a file**, `/assets/engines/web-tree-sitter.wasm`, a string inside the worker
+bundle, discussed below. Twenty-four were already immutable — the engine scripts and `.wasm`
+modules from the previous phase, the phantom among them, because an engine path received the
+engine rule — and the other **eleven revalidated on every visit: 4,589,033 bytes of build output**,
+the entry bundle and stylesheet, the TypeScript worker,
 and the lazily-imported route and panel chunks. Those figures are decompressed response bodies for
 the names the probe could read out of the shipped bundles, so they are a floor on the population and
 not a census of it: a chunk no harvester can name is a chunk the probe never requested.
