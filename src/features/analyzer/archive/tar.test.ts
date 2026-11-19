@@ -468,3 +468,29 @@ describe('readTar: the generated-file override', () => {
     expect(result.skipped.map((entry) => [entry.name, entry.code])).toEqual([['.git/config', 'ignored_folder']])
   })
 })
+
+describe('readTar: dot segments canonicalize away (LOOP2 #121)', () => {
+  it('drops the ./ prefix tar czf . adds', async () => {
+    const archive = buildTar([
+      { name: './.bugpilotignore', content: '# c\nsrc/app.js\n' },
+      { name: './src/app.js', content: 'export const a = 1\n' },
+      { name: 'src/plain.js', content: 'const b = 2\n' },
+    ])
+    const result = await readTar(archive)
+
+    const names = result.entries.map((entry) => entry.name)
+    expect(names.filter((name) => name.startsWith('./'))).toEqual([])
+    expect(names).toContain('.bugpilotignore')
+    expect(names).toContain('src/app.js')
+  })
+})
+
+describe('readTar: a leading dot segment never hides a traversal', () => {
+  it('refuses ./../escape.txt as path traversal', async () => {
+    const archive = buildTar([{ name: './../escape.txt', content: 'x\n' }])
+    const result = await readTar(archive)
+
+    expect(result.refusal?.code).toBe('path_traversal')
+    expect(result.entries).toEqual([])
+  })
+})

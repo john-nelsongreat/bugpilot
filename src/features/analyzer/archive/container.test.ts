@@ -5,6 +5,7 @@ import { readContainer } from './container'
 import { DEFAULT_ARCHIVE_LIMITS } from './limits'
 import { buildZip } from '../../../test/zipFixtures'
 import { buildTar } from '../../../test/tarFixtures'
+import { IGNORE_MANIFEST_NAME, matchIgnoreManifest, parseIgnoreManifest } from '../suppression/manifest'
 
 const zipOf = (name: string, body: string): Uint8Array => buildZip([{ name, content: body }])
 
@@ -217,5 +218,65 @@ describe('readContainer: what is never opened', () => {
     // it is the one that hands over a file.
     expect(phases).toContain('walk')
     expect(entries).toEqual([1])
+  })
+})
+
+describe('readContainer: dot segments canonicalize away (LOOP2 #121)', () => {
+  it('drops the ./ prefix tar and zip add when run on a folder', async () => {
+    const bytes = buildZip([
+      { name: './.bugpilotignore', content: '# c\nsrc/app.js\n' },
+      { name: './src/app.js', content: 'export const a = 1\n' },
+      { name: 'src/plain.js', content: 'const b = 2\n' },
+    ])
+    const result = await readContainer(bytes, 'project.zip')
+
+    const names = result.entries.map((entry) => entry.name)
+    expect(names.filter((name) => name.startsWith('./'))).toEqual([])
+    expect(names).toContain('.bugpilotignore')
+    expect(names).toContain('src/app.js')
+  })
+})
+
+describe('readContainer: a leading dot segment never hides a traversal', () => {
+  it('refuses ./../escape.txt as path traversal', async () => {
+    const bytes = buildZip([{ name: './../escape.txt', content: 'x\n' }])
+    const result = await readContainer(bytes, 'project.zip')
+
+    expect(result.refusal?.code).toBe('path_traversal')
+    expect(result.entries).toEqual([])
+  })
+})
+
+describe('readContainer: the ignore manifest still matches through dot-prefixed names', () => {
+  it('lets an unanchored name pattern match the ./-prefixed victim', async () => {
+    const bytes = buildZip([{ name: './src/app.js', content: 'export const a = 1\n' }])
+    const result = await readContainer(bytes, 'project.zip')
+    const manifest = parseIgnoreManifest('app.js\n')
+
+    expect(result.entries).toHaveLength(1)
+    expect(matchIgnoreManifest(result.entries[0].name, manifest).ignored).toBe(true)
+  })
+
+  it('lets a folder-only pattern match ./src/app.js', async () => {
+    const bytes = buildZip([{ name: './src/app.js', content: 'export const a = 1\n' }])
+    const result = await readContainer(bytes, 'project.zip')
+    const manifest = parseIgnoreManifest('src/\n')
+
+    expect(result.entries[0].name.endsWith('src/app.js')).toBe(true)
+    expect(matchIgnoreManifest(result.entries[0].name, manifest).ignored).toBe(true)
+  })
+
+  it('matches a root-anchored pattern for a plain, non dot-prefixed pair', async () => {
+    const bytes = buildZip([
+      { name: '.bugpilotignore', content: 'src/app.js\n' },
+      { name: 'src/app.js', content: 'export const a = 1\n' },
+    ])
+    const result = await readContainer(bytes, 'project.zip')
+    const manifestEntry = result.entries.find((entry) => entry.name === IGNORE_MANIFEST_NAME)
+    const manifest = parseIgnoreManifest(manifestEntry?.text ?? null)
+
+    expect(manifestEntry).toBeDefined()
+    expect(manifest.ruleCount).toBe(1)
+    expect(matchIgnoreManifest('src/app.js', manifest)).toEqual({ ignored: true, pattern: 'src/app.js' })
   })
 })

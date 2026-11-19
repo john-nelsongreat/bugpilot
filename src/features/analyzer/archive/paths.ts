@@ -17,12 +17,19 @@ export function relativePathRefusal(name: string): ArchiveRefusalCode | null {
 /**
  * The ZIP APPNOTE and ustar say entry names use "/" separators, but Windows writers — PowerShell
  * Compress-Archive above all — emit "\". No archive format gives "\" meaning inside a name, so it
- * is normalized the same way Explorer and 7-Zip extract: as a separator. The rules above then run
- * on the normalized name, so a `..\` escape still refuses as traversal. Loose files keep the
- * strict rule: a dropped file really named with a backslash stays refused.
+ * is normalized the same way Explorer and 7-Zip extract: as a separator, and a leading "./" is
+ * folded away too because `tar czf .` and `zip -r .` store every entry under it: the manifest root
+ * lookup and root-anchored ignore patterns key off the exact name, so a "./" would leave a
+ * "./.bugpilotignore" unable to match the root and a "./src" unable to match a root-anchored
+ * "src/". Refusal runs on the normalized name, so a `..\` or `..` escape survives this fold and
+ * still refuses as traversal, and a name made only of "." segments is kept verbatim rather than
+ * collapsed to empty. Loose files keep the strict rule: a dropped file really named with a
+ * backslash stays refused.
  */
 export function normalizeEntryName(name: string): string {
-  return name.replace(/\\/g, '/')
+  const slashed = name.replace(/\\/g, '/')
+  const collapsed = slashed.split('/').filter((segment) => segment !== '.').join('/')
+  return collapsed.length === 0 ? slashed : collapsed
 }
 
 /**
