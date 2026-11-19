@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { Language, Parser } from 'web-tree-sitter'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { SourceLanguage } from '../archive/classify'
+import { NOT_CHECKED_BY_LANGUAGE } from '../languages'
 import { makeRuleFile } from '../rules/context'
 import type { GrammarId } from './assets'
 import { collectErrorRegions, scanSyntax, UNTRUSTED_SYNTAX_GRAMMARS, type SyntaxNode } from './syntax'
@@ -336,6 +337,141 @@ describe('syntax findings against the shipped grammars', () => {
     expect(result.understood).toBe(false)
     expect(result.errorRegions).toBeGreaterThan(0)
     expect(result.notes.join(' ')).toContain('recorded as missing coverage instead of as a bug')
+  })
+
+  /**
+   * #118, measured against the shipped grammar: the NOT_CHECKED_BY_LANGUAGE justification
+   * ("in the spike it reported errors in valid files") is still true of the shipped grammar
+   * today — every valid PL/pgSQL shape below reports constructs it cannot match, so the
+   * untrusted valve is what keeps them from being called bugs. The counts and start lines are
+   * pinned to the shipped @derekstride/tree-sitter-sql wasm, so a grammar upgrade that finally
+   * parses PL/pgSQL reddens here and forces the prose to be reworded.
+   */
+  describe('SQL dialect rejection', () => {
+    const sqlSample = (): Sample => {
+      const sample = SAMPLES.find((one) => one.grammar === 'sql')
+      if (!sample) throw new Error('sql sample missing')
+      return sample
+    }
+
+    const PLPGSQL_VALID: readonly [string, string][] = [
+      [
+        'function with FOR..LOOP',
+        [
+          'CREATE FUNCTION top_users(limit_count integer)',
+          'RETURNS TABLE (user_id integer, score numeric) AS $fn$',
+          'DECLARE',
+          '    row_record RECORD;',
+          'BEGIN',
+          "    RAISE NOTICE 'scanning % rows', limit_count;",
+          '    FOR row_record IN',
+          '        SELECT id, score FROM users ORDER BY score DESC LIMIT limit_count',
+          '    LOOP',
+          '        user_id := row_record.id;',
+          '        score := row_record.score;',
+          '        RETURN NEXT;',
+          '    END LOOP;',
+          '    IF NOT FOUND THEN',
+          "        RAISE EXCEPTION 'no rows';",
+          '    END IF;',
+          'EXCEPTION',
+          '    WHEN others THEN',
+          "        RAISE WARNING 'failed: %', SQLERRM;",
+          'END;',
+          '$fn$ LANGUAGE plpgsql;',
+        ].join('\n'),
+      ],
+      [
+        'DO block with WHILE',
+        [
+          'DO $do$',
+          'DECLARE',
+          '    counter integer := 0;',
+          'BEGIN',
+          '    WHILE counter < 10 LOOP',
+          '        counter := counter + 1;',
+          '        PERFORM pg_sleep(0.01);',
+          '    END LOOP;',
+          "    INSERT INTO audit_log (note) VALUES ($note$it's done $do$ nested$note$);",
+          'END;',
+          '$do$;',
+        ].join('\n'),
+      ],
+      [
+        'trigger function',
+        [
+          'CREATE FUNCTION touch_updated_at()',
+          'RETURNS trigger AS $trig$',
+          'BEGIN',
+          '    NEW.updated_at := now();',
+          '    GET DIAGNOSTICS row_count = ROW_COUNT;',
+          "    IF TG_OP = 'DELETE' THEN",
+          '        RETURN OLD;',
+          '    END IF;',
+          "    EXECUTE format('UPDATE %I SET touched = true', TG_TABLE_NAME);",
+          '    RETURN COALESCE(NEW, NULLIF(NEW, OLD));',
+          'END;',
+          '$trig$ LANGUAGE plpgsql;',
+          '',
+          'CREATE TRIGGER touch_users',
+          'BEFORE UPDATE ON users',
+          'FOR EACH ROW EXECUTE FUNCTION touch_updated_at();',
+        ].join('\n'),
+      ],
+    ]
+
+    const CONTROL = [
+      'SELECT id, name FROM users WHERE id = 1;',
+      "INSERT INTO users (id, name) VALUES (2, 'n');",
+      "UPDATE users SET name = 'm' WHERE id = 2;",
+      'DELETE FROM users WHERE id = 3;',
+      'CREATE TABLE t (',
+      '  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),',
+      '  created_at timestamptz NOT NULL DEFAULT now()',
+      ');',
+    ].join('\n')
+
+    it('still parses plain SQL so the rejections below are dialect-specific', () => {
+      const result = scan(sqlSample(), CONTROL)
+      expect(result.hits).toEqual([])
+      expect(result.understood).toBe(true)
+      expect(result.errorRegions).toBe(0)
+    })
+
+    /**
+     * Regions and first-error lines measured against the shipped wasm with the headless CLI
+     * (`npm run analyze --silent -- <files> --json`) over both CRLF and LF copies of the same
+     * fixtures — identical counts both ways, so EOL plays no part. The CLI fixtures carry two
+     * leading comment lines the in-test snippets drop, so each CLI start line shifts up by 2
+     * (fixture RAISE NOTICE line 8 = snippet line 6, same construct). Pinned exactly: a grammar
+     * upgrade that starts parsing PL/pgSQL turns these to `parsed` and reddens the prose gate.
+     */
+    const EXPECTED: Record<string, string> = {
+      'function with FOR..LOOP':
+        'The sql grammar reported 3 construct(s) it could not match, starting at line 6. BugPilot knows this grammar rejects valid files of this language, so that is recorded as missing coverage instead of as a bug.',
+      'DO block with WHILE':
+        'The sql grammar reported 4 construct(s) it could not match, starting at line 1. BugPilot knows this grammar rejects valid files of this language, so that is recorded as missing coverage instead of as a bug.',
+      'trigger function':
+        'The sql grammar reported 2 construct(s) it could not match, starting at line 4. BugPilot knows this grammar rejects valid files of this language, so that is recorded as missing coverage instead of as a bug.',
+    }
+
+    it('reports each valid PL/pgSQL shape as constructs the grammar cannot match', () => {
+      for (const [name, code] of PLPGSQL_VALID) {
+        const result = scan(sqlSample(), code)
+        expect(result.hits, name).toEqual([])
+        expect(result.understood, name).toBe(false)
+        expect(result.notes, name).toEqual([EXPECTED[name]])
+      }
+    })
+
+    it('pins the justification prose the rejections above back', () => {
+      expect(UNTRUSTED_SYNTAX_GRAMMARS.has('sql')).toBe(true)
+      expect(NOT_CHECKED_BY_LANGUAGE.sql[0]).toContain('not trusted for syntax claims')
+      expect(NOT_CHECKED_BY_LANGUAGE.sql[0]).toContain('reported errors in valid files')
+      expect(NOT_CHECKED_BY_LANGUAGE.sql[0]).toContain('missing coverage instead of as a bug')
+      expect(NOT_CHECKED_BY_LANGUAGE.yaml[0]).toContain('not trusted for syntax claims')
+      expect(NOT_CHECKED_BY_LANGUAGE.yaml[0]).toContain('reported errors in valid files')
+    })
   })
 
   /**
