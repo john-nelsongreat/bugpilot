@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import * as ts from 'typescript'
 
 // Only engineWorkerEntry and engineClient may land in assets/engines/, because that directory is
 // served under `script-src 'self' 'wasm-unsafe-eval'` while the rest of the app stays under
@@ -182,6 +183,10 @@ function skipInterpolation(code: string, startIndex: number): number {
       i = skipTemplate(code, i)
       continue
     }
+    if (ch === '/' && regexStartsHere(code, i)) {
+      i = skipRegex(code, i)
+      continue
+    }
     if (ch === "'" || ch === '"') {
       i = readStringLiteral(code, i).end
       continue
@@ -189,6 +194,54 @@ function skipInterpolation(code: string, startIndex: number): number {
     i++
   }
   return code.length
+}
+
+// A regex literal is not a string, but it is opaque to the pairing pass: /['"]/ holds two quote
+// characters that are not delimiters, and reading them as openers makes the next real opener the
+// closer of a bogus literal, which swallows the specifier that follows on the SAME line.
+function skipRegex(code: string, startIndex: number): number {
+  let i = startIndex + 1
+  while (i < code.length) {
+    const ch = code[i]
+    if (ch === '\n') return i
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '[') {
+      i++
+      while (i < code.length && code[i] !== ']') {
+        if (code[i] === '\\') i++
+        i++
+      }
+      i++
+      continue
+    }
+    if (ch === '/') {
+      i++
+      while (i < code.length && /[gimsuyd]/.test(code[i])) i++
+      return i
+    }
+    i++
+  }
+  return code.length
+}
+
+const REGEX_OK_AFTER = new Set(['=', '(', ',', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'])
+const REGEX_OK_WORDS = ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'do', 'else', 'case', 'yield', 'await']
+
+function regexStartsHere(code: string, index: number): boolean {
+  if (code[index + 1] === '/' || code[index + 1] === '*') return false // comment, handled by the caller
+  if (code[index + 1] === '=') return false // /= assignment
+  let j = index - 1
+  while (j >= 0 && /\s/.test(code[j])) j--
+  if (j < 0) return true
+  if (REGEX_OK_AFTER.has(code[j])) return true
+  if (code[j] === ')') return false // if (x) /re/ is legal but vanishingly rare; division is the safe read
+  if (!/[\w$]/.test(code[j])) return false
+  let k = j
+  while (k >= 0 && /[\w$]/.test(code[k])) k--
+  return REGEX_OK_WORDS.includes(code.slice(k + 1, j + 1))
 }
 
 function specifiersIn(code: string): Found[] {
@@ -204,6 +257,10 @@ function specifiersIn(code: string): Found[] {
       i += 2
       while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) i++
       i += 2
+      continue
+    }
+    if (ch === '/' && regexStartsHere(code, i)) {
+      i = skipRegex(code, i)
       continue
     }
     if (ch === '`') {
@@ -327,6 +384,12 @@ const FORM_SAMPLES = [
 ].join('\n')
 
 describe('engine boundary', () => {
+  // A regex literal is opaque to a pairing pass that has never heard of regexes: /["']/ holds two
+  // quote characters that are not delimiters. The desync is same-line only -- an unterminated literal
+  // resumes at its own newline -- so the fix is the 4-line branch placed in BOTH specifiersIn and
+  // skipInterpolation, deliberately AFTER the block-comment branch so comments still win. The last test
+  // is a containment latch against the TypeScript parser over the scanned population, not a fixture;
+  // 5 new tests bring the file from 10 to 15.
   it('keeps diagnostics free of any analyzer import', () => {
     const crossings = diagnosticsCrossings()
     expect(crossings.map(describeCrossing).sort()).toEqual([])
@@ -434,5 +497,129 @@ describe('engine boundary', () => {
     // list above proves this one does not.
     expect(mentions).toBeGreaterThan(LEGAL_TYPE_ONLY_IMPORTS.length)
     expect(analyzerCrossings().length).toBe(LEGAL_TYPE_ONLY_IMPORTS.length)
+  })
+
+  const triples = (code: string): string[] =>
+    crossingsFrom('features/analyzer/probe.ts', code, DIAGNOSTICS).map((crossing) => `${crossing.line}:${crossing.form}:${crossing.target}`)
+
+  // A regex literal is opaque to a pairing pass that has never heard of regexes. `/['"]/` holds two
+  // quote characters that are not delimiters, so the next real opener becomes that literal's closer,
+  // and the specifier behind it is swallowed as string content. The code still compiles, so nothing
+  // else in the toolchain notices, and a crossing hidden this way is invisible rather than red.
+  it('reads a crossing placed after a quote-bearing regex literal on the same line', () => {
+    const shapes = [
+      `const R = /['"]/; import { runRules } from '../../diagnostics/engine'`,
+      `const R = /['"]/; const mod = await import('../../diagnostics/engine')`,
+      `const R = /['"]/; export { DiagnosticEvidence } from '../../diagnostics/engine'`,
+      `const re = /^["']+$/.source; import type { DiagnosticEvidence } from '../../diagnostics/types'`,
+    ]
+    expect(shapes.map(triples)).toEqual([
+      ['1:import-value:diagnostics/engine'],
+      ['1:dynamic:diagnostics/engine'],
+      ['1:export-from:diagnostics/engine'],
+      ['1:import-type:diagnostics/types'],
+    ])
+  })
+
+  // The same pairing state is built a second time, inside a template interpolation, where
+  // readStringLiteral is called directly. A desync there does not stop at the end of the line the way
+  // an unterminated literal does: it runs to the end of the template, so the crossing can sit on a
+  // later line and still be swallowed. Repairing only the outer loop leaves this open.
+  it('reads a crossing that follows a quote-bearing regex inside a template interpolation', () => {
+    const shapes = [
+      "const label = `a ${/['\"]/y} b`\nimport { runRules } from '../../diagnostics/engine'",
+      "const label = `a ${`b ${/['\"]/y} c`} d`\nimport { runRules } from '../../diagnostics/engine'",
+    ]
+    expect(shapes.map(triples)).toEqual([
+      ['2:import-value:diagnostics/engine'],
+      ['2:import-value:diagnostics/engine'],
+    ])
+  })
+
+  // The repair has to tell a regex from a division, and the wrong answer there is worse than the bug:
+  // a division mistaken for a regex discards everything up to the next slash, which can eat the very
+  // specifier the guard exists to find. Each line here carries a slash that is NOT a regex, with a
+  // crossing placed after it.
+  it('keeps division, block comments and quoted slashes out of the regex path', () => {
+    const controls = [
+      ["const ratio = width / height; import { runRules } from '../../diagnostics/engine'", '1:import-value:diagnostics/engine'],
+      ["const n = (a + b) / 2; import { runRules } from '../../diagnostics/engine'", '1:import-value:diagnostics/engine'],
+      ["/* read a / b before importing */ import type { DiagnosticEvidence } from '../../diagnostics/types'", '1:import-type:diagnostics/types'],
+      ["const parts = 'a/b'.split('/'); import { runRules } from '../../diagnostics/engine'", '1:import-value:diagnostics/engine'],
+      ["import { runRules } from '../../diagnostics/engine'\nconst R = /['\"]/", '1:import-value:diagnostics/engine'],
+    ] as [string, string][]
+    for (const [code, expected] of controls) {
+      expect(triples(code)).toEqual([expected])
+    }
+  })
+
+  // Precision, not only recall: before the repair a regex body that spells an import was read as one,
+  // so the guard could report a crossing that no module graph contains. The literal inside the regex
+  // below is the shape that used to produce it (the backslashes are part of the regex, so String.raw
+  // is what keeps this fixture faithful).
+  it('does not read a specifier out of a regex body', () => {
+    expect(specifiersIn(String.raw`const R = /import from '..\/..\/diagnostics\/engine'/; const z = 1`)).toEqual([])
+    expect(specifiersIn(`const parts = 'a/b'.split('/')`)).toEqual([])
+    expect(specifiersIn(`const half = total / 2; const s = 'plain string'`)).toEqual([])
+  })
+
+  // The latch. The two shapes above are the blind spots this pass knows about; a third will arrive
+  // with the next regex someone writes. So instead of pinning only what the scanner currently gets
+  // wrong, compare it against an independent parser over the guard's own population: every module
+  // specifier the TypeScript compiler sees must also be a sighting. That converts any future
+  // blind-spot class -- JSX prose, a nested comment, whatever else -- into a red test instead of a
+  // silent gap.
+  //
+  // The comparison is one-way on purpose. A sighting the parser has and the scanner lacks is silent
+  // blindness, so it fails. A sighting the scanner invents can only produce a false alarm, and a
+  // false alarm is loud: ruff.ts has one today (the word `import` at the end of the comment above the
+  // 'F811' entry governs that literal), it resolves to no module in src, and so it never reaches a
+  // crossing assertion.
+  it('sees every module specifier the TypeScript parser sees in the scanned files', () => {
+    const missed: string[] = []
+    const unparseable: string[] = []
+    let parserSightings = 0
+    let filesScanned = 0
+    for (const file of sourceFiles) {
+      filesScanned++
+      const code = read(file)
+      const seen = specifiersIn(code).map((found) => found.spec)
+      const source = ts.createSourceFile(
+        file,
+        code,
+        ts.ScriptTarget.Latest,
+        true,
+        file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      )
+      const diagnostics = (source as unknown as { parseDiagnostics?: readonly unknown[] }).parseDiagnostics ?? []
+      if (diagnostics.length > 0) unparseable.push(file)
+      const parsed: string[] = []
+      const visit = (node: ts.Node): void => {
+        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+          parsed.push(node.moduleSpecifier.text)
+        }
+        if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
+          parsed.push(node.arguments[0].text)
+        }
+        ts.forEachChild(node, visit)
+      }
+      ts.forEachChild(source, visit)
+      parserSightings += parsed.length
+      const unexplained = [...parsed]
+      for (const spec of seen) {
+        const at = unexplained.indexOf(spec)
+        if (at !== -1) unexplained.splice(at, 1)
+      }
+      for (const spec of unexplained) missed.push(`${file} ${JSON.stringify(spec)}`)
+    }
+    // The population and the oracle's yield are both floored, or an instrument that reads nothing
+    // would satisfy containment by being empty. 580 is the parser-side sighting total measured on
+    // this tree; 23 is how many of the scanned files are .tsx, which is what makes the ScriptKind
+    // argument above load-bearing rather than decorative.
+    expect(filesScanned).toBe(sourceFiles.length)
+    expect(sourceFiles.filter((file) => file.endsWith('.tsx')).length).toBeGreaterThanOrEqual(23)
+    expect(parserSightings).toBeGreaterThanOrEqual(580)
+    expect(unparseable).toEqual([])
+    expect(missed).toEqual([])
   })
 })
