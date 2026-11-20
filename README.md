@@ -893,23 +893,25 @@ There is no measured heap-size ceiling: memory is bounded indirectly, by the 2 M
 
 #### Measured accuracy
 
-The deep pass was run over the spike's 53-file / 174-defect corpus (`analyzer-spike/s4`, read-only, nothing copied into this repository) with the shipped pipeline — the real rule worker, the real TypeScript worker, the real engine worker — under the spike's own matching definition. Numbers, with the spike's five-analyzer union for comparison:
+Re-measured 2026-11-20 on build `1ee0818`: the full shipped pipeline — the pattern pass and the deep engine pass, driven in-process with the shipped limits and the same rule sets and engine functions the app runs — over the spike's 53-file / 174-defect corpus (`analyzer-spike/s4`, read-only, nothing copied into this repository), scored under the spike's own matching definition (±5-line window, rule agreement outranks proximity) re-typed independently and certified to reproduce the spike's scorer on the preserved runner outputs. Numbers, with the spike's five preserved runner outputs scored under the same scorer for comparison:
 
-| Measure | BugPilot (this build) | Spike union (5 analyzers) |
+| Measure | BugPilot (this build) | Spike union (5 analyzers, same scorer) |
 | --- | --- | --- |
-| Seeded defects found | **34 / 174 = 19.5%** | 40 / 174 = 23% |
-| Found on the rule name alone (not line proximity) | 25 / 174 = 14.4% | — |
-| Precision over 57 findings | 70.2% (40 matched) | — |
-| False positives | 17, **all** of them `bugpilot/generic/todo-marker`, an intentional style finding | the spike flagged findings on clean files |
+| Seeded defects found | **44 / 174 = 25.3%** | 41 / 174 = 23.6% |
+| Found on the rule name alone (not line proximity) | 27 / 174 = 15.5% | — |
+| Precision over 59 findings | 88.1% (52 matched) | — |
+| False positives | 7: five `bugpilot/generic/todo-marker` and two `no-empty` findings on one line whose recorded defect sits more than 5 lines away (counted once per pass) | the spike flagged findings on clean files |
 | Findings on the 13 clean files | **0** | >0 |
-| Tier 1 (syntax) | 6 / 10 = 60% | — |
-| Tier 2 (lint) | 24 / 93 = 26% | — |
-| Tier 3 (type / data flow) | 4 / 71 = 6% | — |
-| Cold whole-corpus run | 17.75 s for 67 KiB, 15 `.wasm` reads, heap 27.0 → 32.8 MB | — |
+| Tier 1 (syntax) | 4 / 10 = 40% | — |
+| Tier 2 (lint) | 32 / 93 = 34% | — |
+| Tier 3 (type / data flow) | 8 / 71 = 11% | — |
+| Whole-corpus run (in-process Node harness, engines warm) | pattern pass 32 ms, deep pass 12.7 s; parse 38 parsed / 12 no-grammar / 3 grammar-did-not-understand | — |
 
-Per language (found / seeded, BugPilot vs spike union): Python 12/25 vs 18, PHP 4/8, JavaScript 3/12 vs 8, C 2/9, C# 2/10, Java 2/12, Ruby 2/11, Shell 2/12, TypeScript 2/16 vs 10, Go 1/10, HTML 1/10, YAML 1/9, C++ 0/9, Rust 0/9, SQL 0/12.
+21 of the 52 matched findings claimed their defect by proximity alone — 12 `todo-marker`, 3 `mixed-indentation`, 4 `no-empty`, 1 `no-unreachable`, 1 `hardcoded-sql-expression` — which is why the rule-name floor (27) is published beside the headline (44). The ±5-line semantics are the spike's own and were applied identically to the comparator, so the comparison is fair; the floor is its conservative reading.
 
-Why BugPilot scores below the spike union: the spike's extra hits came from ESLint (banned here by the app's own CSP), from `tsc` **program** modes (type and module errors, which BugPilot deliberately does not report), and from Biome (rejected in the spike). Rules were not tuned to the corpus; the only changes made while measuring were genuine defect fixes. What is still missed, by reason: 69 defects where an in-scope rule existed but did not fire, 58 needing type or data-flow analysis, 9 needing cross-file or runtime information, 3 where a grammar parsed the file and reported nothing, and 1 in SQL, where the grammar's verdict is deliberately not trusted.
+Per language (found / seeded, this build; union where the runners covered the language): Python 15/25 (19), TypeScript 1/16 (10), JavaScript 2/12 (8), HTML 2/10 (2), YAML 2/9 (1), Ruby 3/11 (1); C 1/9, C++ 3/9, C# 3/10, Go 2/10, Java 2/12, PHP 4/8, Rust 1/9, Shell 2/12, SQL 1/12 — the spike's runners covered none of those ten.
+
+Where the two arms land and why: the preserved runners cover six languages and lean on ESLint (banned here by the app's own CSP), `tsc` **program** modes (type and module errors, which BugPilot deliberately does not report) and Biome (rejected in the spike), which is where their JavaScript/TypeScript/Python advantage comes from; BugPilot's deep pass covers the other nine languages the runners never touched and finds defects in every one, which is where its overall lead comes from. Rules were not tuned to the corpus; the only changes made while measuring were genuine defect fixes. What is still missed, by tier: 6 of 10 syntax, 61 of 93 lint, 63 of 71 type / data-flow defects — 130 in total.
 
 Timings for synthetic mixed-language projects (same Node harness, engine grammars already warm): 1 MiB across 8 files ran in 3.81 s and produced 17 findings (heap 45.8 → 36.6 MB); 5 MiB across 40 files ran in 9.48 s, analysed 40/40 files, and produced 80 findings (heap 74.7 → 74.6 MB). A cold browser start additionally pays the network cost of the `.wasm` files in the table above; the harness pre-loaded the tree-sitter runtime from disk because Node has no CSP, so 15 of those reads were grammars and Ruff — in the browser the runtime is a 16th fetch.
 
@@ -1121,6 +1123,8 @@ Verdict against the criteria this slice was given:
 | every cap trip refuses or truncates with a plain-language message | **PASS** | refusals name the cap and the bytes; a budget stop says which budget and lists the files it did not reach; the page labels the run partial and offers Continue analysis. |
 
 The follow-up this evidence points at — **not done in this slice, and not claimed as fixed** — is to move report finalization (the sort, the merge union and the coverage build) and the export `JSON.stringify` off the page thread into a worker, the same boundary the readers and rules already use. A shared-`Intl.Collator` replacement for the sort comparator was tried and **rejected on measurement**: warm, V8's argument-less `localeCompare` is ~2.7× faster than a shared collator on a 60,000-finding sort (142 ms vs 385 ms) with an identical order, so the comparator is not the bottleneck. Those finalization and export costs, not a smaller byte budget, are what keep the rows above 100 ms. Because the main-thread criterion is not fully met and the residual is app code rather than an engine or harness artifact, this slice's conditional push gate is **not** satisfied; the work is committed locally and the gap is recorded here rather than papered over.
+
+**Re-baseline of that residual on a real archive (2026-11-20, build `1ee0818`).** Six interleaved repeats per arm of the pinned zod holdout archive (10.7 MiB, 685 analysed files, an identical 54-finding census on both arms), headless Chrome against served dists that were byte-checked against each build, medians with bands: the longest main-thread task is **1,305 ms median (1,160–1,431)** on the first pass and **1,344.5 ms (1,232–1,869)** on the deep pass, against **198.5 ms (168–234)** and **215 ms (179–448)** on build `cd2039a` measured the same way, same archive, same harness. The arms do not overlap on either metric, so the finalization residual grew roughly sixfold while the wall clock did not (first-pass medians 19.3 s vs 20.5 s). The 202–225 ms figure above therefore understates the current residual on this shape; which change in `cd2039a..1ee0818` grew the finalize/merge path is not attributed here — that attribution and the fix belong to the main-thread follow-up above, and until it lands this row is the honest current number.
 
 ### Partial reports
 
