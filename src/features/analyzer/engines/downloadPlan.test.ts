@@ -78,6 +78,45 @@ describe('engine manifest loading', () => {
       throw new Error('offline')
     }) as never)).toBeNull()
   })
+
+  it('retries after a fetch that throws, instead of caching the failure', async () => {
+    expect(await loadEngineManifest((async () => {
+      throw new Error('offline')
+    }) as never)).toBeNull()
+    const doFetch = fetchReturning(200, MANIFEST)
+    expect(await loadEngineManifest(doFetch as never)).toEqual(MANIFEST)
+    expect(doFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries after a not-ok response', async () => {
+    expect(await loadEngineManifest(fetchReturning(404, null) as never)).toBeNull()
+    const doFetch = fetchReturning(200, MANIFEST)
+    expect(await loadEngineManifest(doFetch as never)).toEqual(MANIFEST)
+    expect(doFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries after a malformed manifest body', async () => {
+    expect(await loadEngineManifest(fetchReturning(200, { files: 'nope' }) as never)).toBeNull()
+    const doFetch = fetchReturning(200, MANIFEST)
+    expect(await loadEngineManifest(doFetch as never)).toEqual(MANIFEST)
+    expect(doFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('still shares one read between callers while the first is in flight', async () => {
+    let resolveFetch: (value: unknown) => void = () => {}
+    const doFetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        }),
+    )
+    const first = loadEngineManifest(doFetch as never)
+    const second = loadEngineManifest(doFetch as never)
+    resolveFetch({ ok: true, status: 200, json: async () => MANIFEST })
+    expect(await first).toEqual(MANIFEST)
+    expect(await second).toEqual(MANIFEST)
+    expect(doFetch).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('engine download plan', () => {

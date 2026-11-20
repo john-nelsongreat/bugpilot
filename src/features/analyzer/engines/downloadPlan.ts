@@ -34,15 +34,24 @@ export function loadEngineManifest(fetchImpl?: FetchLike): Promise<EngineManifes
     const doFetch = fetchImpl ?? (fetch as unknown as FetchLike)
     try {
       const response = await doFetch(MANIFEST_URL, { cache: 'no-store' })
-      if (!response.ok) return null
+      if (!response.ok) {
+        // A failed read is never memoized: the next caller retries the manifest.
+        manifestPromise = null
+        return null
+      }
       const parsed = (await response.json()) as Partial<EngineManifest>
-      if (!parsed || !Array.isArray(parsed.files)) return null
+      if (!parsed || !Array.isArray(parsed.files)) {
+        manifestPromise = null
+        return null
+      }
       const files = parsed.files.filter(
         (entry): entry is EngineFileEntry =>
           !!entry && typeof entry.path === 'string' && typeof entry.rawBytes === 'number',
       )
       return { schemaVersion: parsed.schemaVersion ?? 1, files }
     } catch {
+      // Same rule as the not-ok and malformed paths above: retry next time.
+      manifestPromise = null
       return null
     }
   })()
