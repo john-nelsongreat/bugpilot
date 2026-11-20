@@ -301,22 +301,53 @@ describe('the archive ignore manifest', () => {
     expect(doubled.invalidCount).toBe(1)
     expect(matchIgnoreManifest('a/x.py', doubled).ignored).toBe(false)
 
-    const segments: string[] = []
-    for (let index = 0; index < 1000; index += 1) {
-      segments.push(`${'a'.repeat(40)}${index}`)
+    // Growth, not wall clock. The same parsed manifest is matched against a path of `SEGMENTS` segments and one of
+    // twice that, the two arms interleaved inside a single loop so a starved stretch lands on both of them and the
+    // ratio survives it. A linear scan doubles when the input doubles; `3` is the same boundary the diagnostics
+    // redos gate uses, and the exponential case this test exists for could not be built at all — the structural
+    // check above refuses it at parse time (`c1-regex-probe.cjs` measured one segment comparison of the mutated
+    // matcher at over 5,000 ms, which is the growth this refuses rather than a ceiling it has to guess).
+    const SEGMENTS = 8000
+    const ATTEMPTS = 5
+    const RATIO_FLOOR_MS = 1
+    const RATIO_MAX = 3
+    const pathOf = (segments: number) =>
+      Array.from({ length: segments }, (_, index) => `${'a'.repeat(40)}${index}`).join('/')
+    const shortPath = pathOf(SEGMENTS)
+    const longPath = pathOf(SEGMENTS * 2)
+    let shortMs = Number.POSITIVE_INFINITY
+    let longMs = Number.POSITIVE_INFINITY
+    for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+      const shortStarted = performance.now()
+      const shortMatch = matchIgnoreManifest(shortPath, manifest)
+      const shortElapsed = performance.now() - shortStarted
+      const longStarted = performance.now()
+      const longMatch = matchIgnoreManifest(longPath, manifest)
+      const longElapsed = performance.now() - longStarted
+      // A ratio is only worth having if both arms still return the verdict this path always returned.
+      expect(shortMatch.ignored).toBe(false)
+      expect(longMatch.ignored).toBe(false)
+      if (shortElapsed < shortMs) shortMs = shortElapsed
+      if (longElapsed < longMs) longMs = longElapsed
     }
-    const path = segments.join('/')
-    const started = Date.now()
-    const match = matchIgnoreManifest(path, manifest)
-    const elapsed = Date.now() - started
-    expect(match.ignored).toBe(false)
-    // Measured on this tree (log loop2l9-72a-m2-item13-probe-20261117T021631Z): the scan above takes
-    // 1 ms cold and 1 ms warm, at Date.now()'s 1 ms granularity. The brief asks for a ceiling at roughly
-    // 10x the measurement; 10 ms of a 1 ms reading is inside the clock's own resolution and would go red
-    // on a scheduler hiccup, so the ceiling is 200 ms — still two orders of magnitude above the
-    // measurement and, per control C1, more than three orders below the regex form this guards against
-    // (`c1-regex-probe.cjs` measured one segment comparison of the mutated matcher at over 5,000 ms).
-    expect(elapsed).toBeLessThan(200)
+    const ratio = longMs / shortMs
+    // `Date.now()` is what pinned the old reading at 1 ms cold and 1 ms warm, so the arms are timed with
+    // `performance.now()` and the input is sized until the short arm is a measurement rather than a clock tick.
+    console.log(
+      `manifest ratio gate: N=${SEGMENTS} segments, min of ${ATTEMPTS} interleaved attempts, ` +
+        `t(N)=${shortMs.toFixed(3)} ms t(2N)=${longMs.toFixed(3)} ms ratio=${ratio.toFixed(2)} ` +
+        `(floor ${RATIO_FLOOR_MS} ms on the N arm, ceiling ${RATIO_MAX})`,
+    )
+    expect(
+      shortMs,
+      `the N-arm measured ${shortMs.toFixed(3)} ms, under the ${RATIO_FLOOR_MS} ms a ratio needs to mean anything ` +
+        `— raise SEGMENTS to the smallest round number that clears it`,
+    ).toBeGreaterThanOrEqual(RATIO_FLOOR_MS)
+    expect(
+      ratio,
+      `matching a ${SEGMENTS * 2}-segment path cost ${ratio.toFixed(2)}x a ${SEGMENTS}-segment one, over the ` +
+        `${RATIO_MAX} the linear shape of this scan promises`,
+    ).toBeLessThanOrEqual(RATIO_MAX)
   })
 
   it('applies the manifest at every include-generated setting and still never reads .git', async () => {

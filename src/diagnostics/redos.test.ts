@@ -13,8 +13,11 @@ import { describe, expect, it } from 'vitest'
  *
  * The risk is not that one pattern, it is the next one. So this gate does not name the offender: it lifts every
  * regex literal out of the diagnostics domain, times each against adversarial input, and separately pins the
- * behaviour the fix must not lose. A pattern that goes quadratic here fails the budget by name and by file, and the
- * timing runs in node because jsdom would put the measurement inside the thing it is measuring.
+ * behaviour the fix must not lose. A pattern that goes quadratic here is refused by its own growth — one shape
+ * measured at `L` and again at `2L`, interleaved so a starved stretch lands on both arms — rather than by a
+ * wall-clock budget, which measures machine state as easily as it measures a pattern. The absolute timings are still
+ * printed beside the verdict, and the timing runs in node because jsdom would put the measurement inside the thing
+ * it is measuring.
  *
  * The domain is the three files whose patterns only ever see text that already passed the `MAX_ERROR_TEXT_LENGTH`
  * refusal, and whose rule tables match one trimmed line of it: `engine.ts` plus `rules/neutral.ts` and
@@ -44,8 +47,30 @@ const GATE_TARGETS: ReadonlyArray<{ readonly path: string; readonly literals: nu
 /** `engine.ts:16` sets this and `:307` refuses anything longer, so it is the real input ceiling. */
 const MAX_ERROR_TEXT_LENGTH = 20_000
 
-/** Worst min-of-3 time any lifted pattern may take on an adversarial payload. */
+/**
+ * Worst min-of-3 time any lifted pattern takes on an adversarial payload. Printed, never asserted: across the
+ * observations this line stays comparable with, the same code has measured 117 ms and 504 ms, so a verdict keyed to
+ * it decides on machine state. The growth ratio below is what decides.
+ */
 const BUDGET_MS = 500
+
+/**
+ * The matched pair the growth gate measures: `L` and `2L`, where `2L` is the shipped input ceiling. A longer arm
+ * would time a payload the engine refuses to receive, so this is the only legal pair.
+ */
+const LENGTH_HALF = MAX_ERROR_TEXT_LENGTH / 2
+
+/** Samples per arm, the min rather than the mean: a starved sample inflates the one arm it landed on and fakes growth. */
+const RATIO_ATTEMPTS = 5
+
+/** Below this on the `L` arm a pattern is timed at clock resolution rather than at signal, so its ratio is noise. */
+const RATIO_FLOOR_MS = 1
+
+/**
+ * Quadratic backtracking quadruples when the input doubles; a bounded window only doubles. 3 is the agreed boundary
+ * between the two, and the unbounded clone below is what proves the boundary still discriminates.
+ */
+const RATIO_MAX = 3
 
 interface LiftedLiteral {
   readonly token: string
@@ -122,6 +147,28 @@ for (const payload of PAYLOADS) {
 }
 
 /**
+ * The same three shapes as builders that take a length, so the growth ladder can measure a shape at `L` and at `2L`
+ * without a second copy of the construction. `PAYLOADS` above stays the `2L` instance the ms diagnostic reports on,
+ * and the two are pinned equal in the test rather than assumed equal here: a builder that drifted from the shipped
+ * payload would be timing a shape this gate has no history of.
+ */
+const SHAPES: ReadonlyArray<{ readonly name: string; readonly build: (length: number) => string }> = [
+  { name: 'unbroken letter run', build: (length) => '"' + 'A'.repeat(length - 2) + ' ' },
+  { name: 'path-shaped run with one dot', build: (length) => 'at ' + 'p'.repeat(length - 6) + '.js' },
+  { name: 'digit and colon run', build: (length) => 'x:'.repeat(length / 4) + ' ' + '9'.repeat(length / 2 - 2) + ':' },
+]
+
+// The ceiling holds for everything the ladder builds at either arm, not only for the three hand-written payloads.
+for (const shape of SHAPES) {
+  for (const length of [LENGTH_HALF, MAX_ERROR_TEXT_LENGTH]) {
+    const built = shape.build(length)
+    if (built.length > MAX_ERROR_TEXT_LENGTH) {
+      throw new Error(`ladder payload ${shape.name} at ${length} is ${built.length} chars — past MAX_ERROR_TEXT_LENGTH`)
+    }
+  }
+}
+
+/**
  * Same three payloads, same best-of-3 per payload, same worst across payloads as the version that handed back a bare
  * number — no measurement moved. It now also names which payload was worst, because an offender has to be reported
  * with the input that triggered it and a second timing loop would be a fork of this one.
@@ -143,6 +190,54 @@ function worstPayloadRun(regexp: RegExp): { readonly ms: number; readonly payloa
     }
   }
   return { ms: worst, payload: offender }
+}
+
+interface ShapeGrowth {
+  readonly shape: string
+  readonly shortMs: number
+  readonly longMs: number
+  readonly ratio: number
+  /** False when the `L` arm sits under `RATIO_FLOOR_MS` — the ratio is then a clock artefact, not a measurement. */
+  readonly eligible: boolean
+}
+
+/**
+ * One interleaved ladder for one pattern: `L` and `2L` alternate inside the same attempt loop, so a scheduler hiccup
+ * lands on both arms of the same shape and the ratio survives it. Timed arm-then-arm, a starved stretch inflates
+ * whichever arm happened to run inside it, which is the failure mode this gate was rewritten to remove. The min of
+ * each arm feeds the ratio, and the worst ratio across the three shapes is what a pattern is judged on.
+ */
+function growthLadder(regexp: RegExp): ShapeGrowth[] {
+  return SHAPES.map((shape) => {
+    const shortText = shape.build(LENGTH_HALF)
+    const longText = shape.build(MAX_ERROR_TEXT_LENGTH)
+    let shortMs = Number.POSITIVE_INFINITY
+    let longMs = Number.POSITIVE_INFINITY
+    for (let attempt = 0; attempt < RATIO_ATTEMPTS; attempt += 1) {
+      const shortStarted = performance.now()
+      regexp.test(shortText)
+      const shortElapsed = performance.now() - shortStarted
+      const longStarted = performance.now()
+      regexp.test(longText)
+      const longElapsed = performance.now() - longStarted
+      if (shortElapsed < shortMs) shortMs = shortElapsed
+      if (longElapsed < longMs) longMs = longElapsed
+    }
+    return {
+      shape: shape.name,
+      shortMs,
+      longMs,
+      ratio: longMs / shortMs,
+      eligible: shortMs >= RATIO_FLOOR_MS,
+    }
+  })
+}
+
+/** The steepest growth among the arms the clock can resolve, or nothing when no arm of this pattern clears the floor. */
+function worstEligibleGrowth(ladder: ShapeGrowth[]): ShapeGrowth | undefined {
+  return ladder
+    .filter((growth) => growth.eligible)
+    .sort((a, b) => b.ratio - a.ratio)[0]
 }
 
 /** The two lines of §1.1 that are written by hand, plus the three generated path lengths. */
@@ -215,14 +310,88 @@ describe('the diagnostics engine keeps its regexes inside a time budget', () => 
         .map((timing) => `${timing.file} ${timing.token} ${timing.ms.toFixed(1)} ms on ${timing.payload}`)
         .join(' | ')}`,
     )
-    const offenders = timings
-      .filter((timing) => timing.ms > BUDGET_MS)
-      .map((timing) => `${timing.file} ${timing.token} ${timing.ms.toFixed(1)} ms on ${timing.payload}`)
+    // The shapes the ms diagnostic reports on and the shapes the ladder times are pinned equal here: a builder that
+    // drifted from its payload would leave the growth verdict measuring a text this file has no history of, which is
+    // a green that means nothing.
+    expect(
+      SHAPES.map((shape, index) => shape.build(MAX_ERROR_TEXT_LENGTH) === PAYLOADS[index]?.text),
+      'a ladder shape builder no longer rebuilds the payload it was derived from',
+    ).toEqual([true, true, true])
+
+    const ladders = LITERALS.map((literal) => ({
+      file: literal.file,
+      token: literal.token,
+      growth: growthLadder(compile(literal)),
+    }))
+    const offenders: string[] = []
+    let asserted = 0
+    for (const entry of ladders) {
+      const worst = worstEligibleGrowth(entry.growth)
+      if (worst === undefined) continue
+      asserted += 1
+      if (worst.ratio <= RATIO_MAX) continue
+      offenders.push(
+        `${entry.file} ${entry.token} ratio ${worst.ratio.toFixed(2)} on ${worst.shape} ` +
+          `(t(${LENGTH_HALF})=${worst.shortMs.toFixed(1)} ms, t(${MAX_ERROR_TEXT_LENGTH})=${worst.longMs.toFixed(1)} ms)`,
+      )
+    }
+    console.log(
+      `redos gate: growth ladder ${RATIO_ATTEMPTS} interleaved attempts per arm at ${LENGTH_HALF} and ` +
+        `${MAX_ERROR_TEXT_LENGTH} characters — ${asserted} of ${ladders.length} lifted patterns ratio-asserted, ` +
+        `${ladders.length - asserted} under ${RATIO_FLOOR_MS} ms on the L arm and so not timed at signal`,
+    )
+    const frame = ladders.find((entry) => entry.token === JAVASCRIPT_FRAME?.token)
+    const frameLongestShortMs = Math.max(...(frame?.growth.map((growth) => growth.shortMs) ?? [0]))
+    // Anti-vacuity: the count above only means something if the pattern this gate exists for is inside it. If that
+    // literal fell below the floor the growth verdict would assert nothing and still read green, so it is a red.
+    expect(
+      worstEligibleGrowth(frame?.growth ?? []),
+      `the stack-frame literal ${String(JAVASCRIPT_FRAME?.token)} is not in the ratio-asserted set — its largest L ` +
+        `arm measured ${frameLongestShortMs.toFixed(2)} ms against the ${RATIO_FLOOR_MS} ms floor, so the growth ` +
+        `verdict would be deciding on nothing the gate was written for`,
+    ).toBeDefined()
     expect(
       offenders,
-      `${offenders.length} of ${timings.length} lifted patterns exceeded ${BUDGET_MS} ms on a ` +
-        `${MAX_ERROR_TEXT_LENGTH}-character payload (slowest ${slowest.file} ${slowest.token} ${slowest.ms.toFixed(1)} ms)`,
+      `${offenders.length} of ${asserted} ratio-asserted patterns grew more than ${RATIO_MAX}x when the input ` +
+        `doubled from ${LENGTH_HALF} to ${MAX_ERROR_TEXT_LENGTH} characters`,
     ).toEqual([])
+  })
+
+  it('rejects an unbounded clone of the pattern it was written for', () => {
+    const shippedSource = String(JAVASCRIPT_FRAME?.source)
+    // Two guards before and after the replace, so the control cannot decay into a no-op if the shipped token ever
+    // loses its bound: a replace that matched nothing would time a copy of the bounded pattern, and the assertion at
+    // the bottom of this test would then be read as proof the gate discriminates when it proves nothing.
+    expect(
+      (shippedSource.match(/\{1,300\}/g) ?? []).length,
+      'the clone is built by replacing the bound, so the shipped source has to carry exactly one {1,300} to replace',
+    ).toBe(1)
+    const cloneSource = shippedSource.replace('{1,300}', '+')
+    expect(cloneSource, 'the replace left the shipped source untouched, so the clone is not a clone').not.toBe(shippedSource)
+    expect(cloneSource).toContain('+')
+    expect(cloneSource).not.toContain('{1,300}')
+    const ladder = growthLadder(new RegExp(cloneSource, String(JAVASCRIPT_FRAME?.flags)))
+    console.log(
+      `redos gate: unbounded clone ${cloneSource} — ${ladder
+        .map(
+          (growth) =>
+            `${growth.shape}: t(L)=${growth.shortMs.toFixed(1)} ms t(2L)=${growth.longMs.toFixed(1)} ms ratio=${growth.ratio.toFixed(2)}`,
+        )
+        .join(' | ')}`,
+    )
+    const steepest = worstEligibleGrowth(ladder)
+    const longestShortMs = Math.max(...ladder.map((growth) => growth.shortMs))
+    expect(
+      steepest,
+      `the unbounded clone never measured ${RATIO_FLOOR_MS} ms on an L arm (largest ${longestShortMs.toFixed(2)} ms) ` +
+        '— a control too fast to time is how a linear pattern hides inside a gate that believes it is quadratic',
+    ).toBeDefined()
+    const cloneRatio = String(steepest?.ratio)
+    expect(
+      steepest?.ratio,
+      `the unbounded clone grew ${cloneRatio}x on doubled input, at or under the ${RATIO_MAX} the gate refuses — a ` +
+        'control the gate accepts means the gate is no longer a redos detector',
+    ).toBeGreaterThan(RATIO_MAX)
   })
 
   it('keeps the javascript stack-frame pattern matching every real shape it matched before', () => {
