@@ -86,7 +86,7 @@ describe('inline pragma waivers', () => {
     expect(out.summary).toBeNull()
   })
 
-  it('ignores a token that is not in a comment', () => {
+  it('ignores a token in a string whose id is glued to the closing quote', () => {
     const text = `const x = '${WAIVER_TOKEN} ${EMPTY_CATCH}'\ntry { run() } catch (e) {}\n`
     const out = applyInlineWaivers(
       [analysis('src/a.ts', [finding('src/a.ts', EMPTY_CATCH, 1)])],
