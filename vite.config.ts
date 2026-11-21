@@ -136,7 +136,7 @@ function engineManifestPlugin(outDir: string): Plugin {
  * `registryHygieneCensus` adjudicates what the victim recorded. The default sequencer puts
  * previously-failed files first and then longest-first, so one census red moves the census ahead of
  * its own inputs, where the only mark it can read is one an earlier run left behind (measured
- * 2026-11-17: census at line 47 of evidence/loop2l9/audit/audit-G4c-full-suite.log, its polluter at
+ * 2026-11-17: census at line 47 of ../handoff-audit/evidence/loop2l9/audit/audit-G4c-full-suite.log, its polluter at
  * 299). Pinning the trio's relative order makes the guard's premise enforced rather than usual.
  */
 const REGISTRY_ORDER = ['registryPolluter', 'registryVictim', 'registryHygieneCensus']
@@ -174,9 +174,17 @@ export default defineConfig({
     // machine; threads keep the same per-file isolation without process spawn.
     pool: 'threads',
     // Sharing one module registry across files is what makes the suite cheap. It is only safe
-    // while every file that mocks a production module re-imports it after vi.resetModules(), the
-    // pattern added to the six files listed in handoff-audit/evidence/m1g; a file that wants the
-    // real module can otherwise inherit an earlier file's mock.
+    // while every file that mocks a production module re-imports it after vi.resetModules(); a
+    // file that wants the real module can otherwise inherit an earlier file's mock. Neither half
+    // of that rule is counted here, because a number typed into a comment goes stale the next
+    // time a file changes: the mockers are the output of
+    // `grep -rl "vi.mock(" src --include=*.test.ts --include=*.test.tsx`, and the files still
+    // missing the pattern are that output through `xargs grep -L "vi.resetModules"`. The single
+    // deliberate exception is src/registryPolluter.test.ts: it exists to leak, and it stays
+    // harmless because RegistryOrderSequencer in this very file orders it ahead of
+    // src/registryVictim.test.ts, and because the afterAll reset in src/test/setup.ts clears the
+    // cached consumer. Section 3 of ../handoff-audit/evidence/m1g/m1g-report.md names the files this
+    // was first applied to and the command that reproduced them.
     isolate: false,
   },
 })

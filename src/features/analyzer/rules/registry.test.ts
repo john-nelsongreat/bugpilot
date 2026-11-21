@@ -55,16 +55,17 @@ describe('analyzer rule registry', () => {
    * Six of the 28 corpus families have no `SourceLanguage` member, so their files classify as
    * `unknown` or `text` and the campaign scores them only because the pattern rules declare that
    * fallback: measured recall is 0.125 for haskell and 0.158 for elixir, against 0.55 for Python.
-   * Measured 2026-11-17 over the 140 corpus files (`handoff-audit/evidence/l5-probe/probe7`), by
-   * running the shipped `detectLanguage`: `dart`, `dockerfile` (as `Foo.Dockerfile`, where the suffix
-   * is an extension and only a bare `Dockerfile` is a basename), `ex`, `hs`, `pl` and `ps1`. Nine
-   * families rode the fallback before LOOP2-L5 wired `lua`, `r` and `tf`, and their 0.167 (R) and
-   * 0.177 (Terraform) recall is why those three grammars were wired first — which is also why the
+   * Measured 2026-11-17 over the 140 corpus files
+   * (`../handoff-audit/evidence/l5-probe/probe7-20261117T210312Z.log`), by running the shipped
+   * `detectLanguage`: `dart`, `dockerfile` (as `Foo.Dockerfile`, where the suffix is an extension
+   * and only a bare `Dockerfile` is a basename), `ex`, `hs`, `pl` and `ps1`. Nine families rode
+   * the fallback before LOOP2-L5 wired `lua`, `r` and `tf`, and their 0.167 (R) and 0.177
+   * (Terraform) recall is why those three grammars were wired first — which is also why the
    * sample names below are no longer `src/r/summary.R` and `src/terraform/main.tf`: they now
-   * classify as named languages, and the test right after this one guards their new coverage instead.
-   * No other gate in the suite names the fallback members — `generic.docs.test.ts` derives README's
-   * Languages cell from the same constant, so a rule that quietly loses `unknown` would strip a
-   * family to zero coverage with every existing check green.
+   * classify as named languages, and the test right after this one guards their new coverage
+   * instead. No other gate in the suite names the fallback members — `generic.docs.test.ts`
+   * derives README's Languages cell from the same constant, so a rule that quietly loses
+   * `unknown` would strip a family to zero coverage with every existing check green.
    */
   it('pairs the unknown fallback with the text fallback in every rule that declares either', () => {
     const offenders = ANALYZER_RULES.filter(

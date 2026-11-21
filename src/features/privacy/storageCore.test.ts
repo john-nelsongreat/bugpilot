@@ -36,7 +36,7 @@ interface StoreSpy {
 
 // jsdom hands out `window.localStorage` as a Proxy: a spy defined on the instance is never reached
 // by the property lookup, so it records nothing while the write still lands
-// (evidence/loop2l9/worker/probe-storage-identity.cjs). The prototype spy does intercept, and
+// (../handoff-audit/evidence/loop2l9/worker/probe-storage-identity.cjs). The prototype spy does intercept, and
 // `window.localStorage === window.localStorage` holds, so `this` separates the two media.
 function spyStoragePrototype(): StoreSpy {
   const spy: StoreSpy = { localWrites: [], localRemoves: [], localClears: [], sessionWrites: [] }

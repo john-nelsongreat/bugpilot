@@ -171,7 +171,9 @@ for (const shape of SHAPES) {
 /**
  * Same three payloads, same best-of-3 per payload, same worst across payloads as the version that handed back a bare
  * number — no measurement moved. It now also names which payload was worst, because an offender has to be reported
- * with the input that triggered it and a second timing loop would be a fork of this one.
+ * with the input that triggered it and a second timing loop would be a fork of this one. Every call starts by clearing
+ * `lastIndex`, because a pattern carrying `g` resumes `test` where its previous match ended: an arm timed from there
+ * scanned the tail of somebody else's input, and its ms would be a function of what the last call matched.
  */
 function worstPayloadRun(regexp: RegExp): { readonly ms: number; readonly payload: string } {
   let worst = 0
@@ -180,6 +182,7 @@ function worstPayloadRun(regexp: RegExp): { readonly ms: number; readonly payloa
     let best = Number.POSITIVE_INFINITY
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const started = performance.now()
+      regexp.lastIndex = 0
       regexp.test(payload.text)
       const elapsed = performance.now() - started
       if (elapsed < best) best = elapsed
@@ -205,7 +208,10 @@ interface ShapeGrowth {
  * One interleaved ladder for one pattern: `L` and `2L` alternate inside the same attempt loop, so a scheduler hiccup
  * lands on both arms of the same shape and the ratio survives it. Timed arm-then-arm, a starved stretch inflates
  * whichever arm happened to run inside it, which is the failure mode this gate was rewritten to remove. The min of
- * each arm feeds the ratio, and the worst ratio across the three shapes is what a pattern is judged on.
+ * each arm feeds the ratio, and the worst ratio across the three shapes is what a pattern is judged on. `lastIndex` is
+ * cleared in front of every timed call so both arms of a shape start at the same offset: with `g` on a pattern the
+ * `2L` arm would otherwise run from wherever the `L` arm's match stopped, and the ratio would then be measuring a
+ * difference in start position instead of a difference in length.
  */
 function growthLadder(regexp: RegExp): ShapeGrowth[] {
   return SHAPES.map((shape) => {
@@ -215,9 +221,11 @@ function growthLadder(regexp: RegExp): ShapeGrowth[] {
     let longMs = Number.POSITIVE_INFINITY
     for (let attempt = 0; attempt < RATIO_ATTEMPTS; attempt += 1) {
       const shortStarted = performance.now()
+      regexp.lastIndex = 0
       regexp.test(shortText)
       const shortElapsed = performance.now() - shortStarted
       const longStarted = performance.now()
+      regexp.lastIndex = 0
       regexp.test(longText)
       const longElapsed = performance.now() - longStarted
       if (shortElapsed < shortMs) shortMs = shortElapsed
@@ -303,6 +311,12 @@ describe('the diagnostics engine keeps its regexes inside a time budget', () => 
     console.log(
       `redos gate: lifted ${timings.length} literals from ${census}, ` +
         `slowest ${slowest.file} ${slowest.token} at ${slowest.ms.toFixed(1)} ms (budget ${BUDGET_MS} ms)`,
+    )
+    const globalLiterals = LITERALS.filter((literal) => literal.flags.includes('g'))
+    const flaggedTokens = globalLiterals.map((literal) => `${literal.file} ${literal.token}`).join(', ') || 'none'
+    console.log(
+      `redos gate: ${globalLiterals.length} of ${LITERALS.length} lifted literals carry the g flag, so those scans ` +
+        `resume from lastIndex unless the helpers clear it — ${flaggedTokens}`,
     )
     console.log(
       `redos gate: five slowest — ${ranked
@@ -397,7 +411,10 @@ describe('the diagnostics engine keeps its regexes inside a time budget', () => 
   it('keeps the javascript stack-frame pattern matching every real shape it matched before', () => {
     expect(JAVASCRIPT_FRAME, `${ENGINE_SOURCE_PATH} no longer carries the javascript stack-frame pattern`).toBeDefined()
     const pattern = new RegExp(String(JAVASCRIPT_FRAME?.source), String(JAVASCRIPT_FRAME?.flags))
-    const missed = REAL_SHAPED_FRAMES.filter((frame) => !pattern.test(frame.text)).map((frame) => frame.name)
+    // Insurance rather than a fix: this literal's flags carry no `g` today, so `test` cannot resume anywhere, and an
+    // assertion about a state the tree cannot reach would be the vacuous-guard class. The reset costs nothing and is
+    // the reason a `g` appearing on the shipped token could not silently make the second frame start inside the first.
+    const missed = REAL_SHAPED_FRAMES.filter((frame) => !((pattern.lastIndex = 0), pattern.test(frame.text))).map((frame) => frame.name)
     expect(missed, 'the bounded pattern stopped matching these real frames').toEqual([])
     // Six, the number the brief pins: three written frames and the 260-, 600- and 3000-character paths.
     expect(REAL_SHAPED_FRAMES).toHaveLength(6)
@@ -415,5 +432,68 @@ describe('the diagnostics engine keeps its regexes inside a time budget', () => 
     ).toBe(ENGINE_SOURCE_PATH)
     expect(JAVASCRIPT_FRAME?.source, 'the javascript stack-frame pattern must carry a bounded run').toContain('{1,300}')
     expect(JAVASCRIPT_FRAME?.source).toMatch(/^\[\^\\s\(\)\]\{1,300\}/)
+  })
+
+  it('starts every scan the timing helpers run at index zero', () => {
+    // Derived at run time, never typed: this row has a subject only while some lifted literal actually carries `g`, and
+    // an empty set is made a red for the same reason the ratio row refuses to pass when its own pattern has left the
+    // asserted set — a guard that cannot be reached is not a guard.
+    const globalLiterals = LITERALS.filter((literal) => literal.flags.includes('g'))
+    const carrier = globalLiterals[0]
+    expect(
+      carrier,
+      'no lifted literal carries the g flag, so no scan can inherit a start position and the reset this row guards has ' +
+        'become unobservable — the literal went away or the lifter broke',
+    ).toBeDefined()
+
+    // A probe built from the lifted literal itself, not from a typed pattern, recording the offset each scan starts
+    // from. The push happens inside the override: what the previous scan left behind is not the offset the next one
+    // actually used, and reading it from outside would report drift in the arm that has none.
+    const instrument = () => {
+      const regexp = compile(carrier)
+      const starts: number[] = []
+      const scan = RegExp.prototype.test
+      regexp.test = (text: string) => {
+        starts.push(regexp.lastIndex)
+        return scan.call(regexp, text)
+      }
+      return { regexp, starts }
+    }
+    const drifted = (starts: readonly number[]) => starts.filter((start) => start !== 0)
+
+    // Drift control first, because the two rows under it are only worth anything if this instrument can fire at all:
+    // the same payloads through a loop that never resets have to show a non-zero start.
+    const drift = instrument()
+    for (const payload of PAYLOADS) drift.regexp.test(payload.text)
+    expect(drift.starts, 'the naive loop never called the probe').toHaveLength(PAYLOADS.length)
+    expect(
+      drifted(drift.starts),
+      `the no-reset loop recorded starts of ${drift.starts.join(', ')} — the instrument cannot see lastIndex residue, ` +
+        'so the helpers below would pass on a blind recorder rather than on a reset that works',
+    ).not.toHaveLength(0)
+
+    const payloadRun = instrument()
+    worstPayloadRun(payloadRun.regexp)
+    expect(payloadRun.starts.length, 'worstPayloadRun scanned fewer times than it has payloads').toBeGreaterThanOrEqual(
+      PAYLOADS.length,
+    )
+    expect(
+      drifted(payloadRun.starts),
+      `worstPayloadRun started ${drifted(payloadRun.starts).length} of ${payloadRun.starts.length} scans at ` +
+        `${drifted(payloadRun.starts).join(', ')} instead of 0 — an arm timed from a previous match scanned the tail of ` +
+        'another payload, so the ms it prints is not the cost of the payload it names',
+    ).toEqual([])
+
+    const ladderRun = instrument()
+    growthLadder(ladderRun.regexp)
+    expect(ladderRun.starts.length, 'growthLadder does not time both arms of every shape once per attempt').toBe(
+      SHAPES.length * RATIO_ATTEMPTS * 2,
+    )
+    expect(
+      drifted(ladderRun.starts),
+      `growthLadder started ${drifted(ladderRun.starts).length} of ${ladderRun.starts.length} arms at ` +
+        `${drifted(ladderRun.starts).join(', ')} — the arms of a shape then differ in where they began, which is the ` +
+        'one thing a growth ratio may not vary by, since the ratio is taken to be length alone',
+    ).toEqual([])
   })
 })

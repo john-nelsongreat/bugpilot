@@ -1,11 +1,12 @@
 /// <reference types="node" />
 // This file exists to be the thing that leaks. It hoists a mock of ./app/useWorkspace, the shape that made
 // AppLayout.announcement.test.tsx and AssistantPrefill.test.tsx fail under `isolate: false`. The mechanism is
-// measured, not assumed (evidence/m1i/v6probe-20261116T200552Z.log, both arms): a file that imports the MOCKED
-// SPECIFIER DIRECTLY gets the real module either way. What carries a mock forward is a production module that
-// was already evaluated while the mock was registered — its instance is cached in the shared registry, so every
-// later importer receives the binding that instance captured. That cached consumer is exactly what
-// src/test/setup.ts's afterAll reset has to clear, and src/test/registryConsumerFixture.ts is this guard's.
+// measured, not assumed (../handoff-audit/evidence/m1i/v6probe-20261116T200552Z.log, both arms): a file that
+// imports the MOCKED SPECIFIER DIRECTLY gets the real module either way. What carries a mock forward is a
+// production module that was already evaluated while the mock was registered — its instance is cached in the
+// shared registry, so every later importer receives the binding that instance captured. That cached consumer is
+// exactly what src/test/setup.ts's afterAll reset has to clear, and src/test/registryConsumerFixture.ts is this
+// guard's.
 //
 // This file has to run before src/registryVictim.test.ts, and RegistryOrderSequencer in vite.config.ts is
 // what makes that true. The older mechanism was size: with no cached result for a file, BaseSequencer.sort

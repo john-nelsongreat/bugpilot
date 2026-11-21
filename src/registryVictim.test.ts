@@ -3,8 +3,9 @@
 // evaluated under its mock, which is what a page test doing `import App from '../App'` actually does. If the
 // central afterAll reset in src/test/setup.ts stops working, the stub is what this file inherits — through the
 // cached consumer instance, never through a direct import of the mocked specifier. Measured: the leaf path
-// delivered the real module in both states (evidence/m1i-probe/probe.log arm 2), the consumer path delivered
-// the stub in one (evidence/m1i/v6probe-20261116T200552Z.log arm 2). Only the second can report the hazard.
+// delivered the real module in both states (../handoff-audit/evidence/m1i-probe/probe.log arm 2), the consumer
+// path delivered the stub in one (../handoff-audit/evidence/m1i/v6probe-20261116T200552Z.log arm 2). Only the
+// second can report the hazard.
 //
 // RegistryOrderSequencer in vite.config.ts runs this file after src/registryPolluter.test.ts so the hazard
 // is actually exercised; it stays smaller than the polluter because the byte assertion there is the
